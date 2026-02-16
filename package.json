@@ -1,0 +1,30 @@
+{
+    "name": "forkscout",
+    "version": "0.1.0",
+    "description": "Intelligent AI agent system with RAG and memory for task automation",
+    "private": true,
+    "workspaces": [
+        "packages/*"
+    ],
+    "scripts": {
+        "dev": "pnpm --parallel -r dev",
+        "build": "pnpm -r build",
+        "clean": "pnpm -r clean",
+        "lint": "pnpm -r lint",
+        "test": "pnpm -r test"
+    },
+    "keywords": [
+        "ai",
+        "agent",
+        "rag",
+        "automation",
+        "llm",
+        "memory"
+    ],
+    "author": "",
+    "license": "MIT",
+    "engines": {
+        "node": ">=18.0.0",
+        "pnpm": ">=8.0.0"
+    }
+}

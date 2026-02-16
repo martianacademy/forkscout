@@ -1,0 +1,32 @@
+{
+    "name": "@forkscout/agent",
+    "version": "0.1.0",
+    "description": "Forkscout agent engine with RAG and memory",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "scripts": {
+        "dev": "tsx watch --exclude '.forkscout/**' --exclude '**/*.bak' src/cli.ts",
+        "start": "tsx src/cli.ts",
+        "serve": "tsx src/serve.ts",
+        "watchdog": "./watchdog.sh",
+        "watchdog:dev": "./watchdog.sh --dev",
+        "build": "tsc",
+        "clean": "rm -rf dist",
+        "lint": "eslint src --ext .ts",
+        "test": "vitest"
+    },
+    "dependencies": {
+        "@ai-sdk/openai": "^3.0.29",
+        "@modelcontextprotocol/sdk": "^1.26.0",
+        "ai": "^6.0.86",
+        "dotenv": "^17.3.1",
+        "playwright": "^1.49.1",
+        "zod": "^3.23.8"
+    },
+    "devDependencies": {
+        "@types/node": "^22.0.0",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.2",
+        "vitest": "^2.1.8"
+    }
+}
