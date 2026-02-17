@@ -1,27 +1,19 @@
 /**
- * MCP Defaults — Built-in MCP servers and startup connection logic.
- *
- * Handles merging default servers with user config, connecting all servers,
- * and converting MCP tools to AI SDK tool() format.
+ * MCP startup connection — reads config-based defaults + mcp.json overrides,
+ * connects all servers, and converts their tools to AI SDK format.
  */
 
 import { tool } from 'ai';
 import { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './connector';
-
-/** Built-in MCP servers that are always available on startup */
-export const DEFAULT_MCP_SERVERS: Record<string, McpServerConfig> = {
-    'sequential-thinking': {
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
-    },
-    deepwiki: {
-        url: 'https://mcp.deepwiki.com/mcp',
-    },
-};
+import { getConfig, type McpServerEntry } from '../config';
 
 /**
  * Connect to all configured MCP servers and register their tools.
- * Merges built-in defaults with user configuration (user config takes precedence).
+ *
+ * Priority (highest wins):
+ *   1. Inline mcpConfig (passed programmatically)
+ *   2. mcp.json on disk
+ *   3. agent.mcpServers from forkscout.config.json (defaults)
  */
 export async function connectMcpServers(
     mcpConfig: McpConfig | undefined,
@@ -37,10 +29,11 @@ export async function connectMcpServers(
         config = await loadMcpConfig(mcpConfigPath);
     }
 
-    // Merge built-in defaults (user config takes precedence)
-    for (const [name, cfg] of Object.entries(DEFAULT_MCP_SERVERS)) {
-        if (!(name in config.servers)) {
-            config.servers[name] = cfg;
+    // Merge config-defined defaults (mcp.json / inline takes precedence)
+    const configDefaults: Record<string, McpServerEntry> = getConfig().agent.mcpServers || {};
+    for (const [name, entry] of Object.entries(configDefaults)) {
+        if (!(name in config.servers) && entry.enabled !== false) {
+            config.servers[name] = entry as McpServerConfig;
         }
     }
 

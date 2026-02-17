@@ -23,7 +23,19 @@
         "maxIterations": 10,
         "autoRegisterTools": true,
         "port": 3210,
-        "owner": "Suru"
+        "owner": "Suru",
+        "mcpServers": {
+            "sequential-thinking": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@modelcontextprotocol/server-sequential-thinking"
+                ]
+            },
+            "deepwiki": {
+                "url": "https://mcp.deepwiki.com/mcp"
+            }
+        }
     },
     "searxng": {
         "url": "http://localhost:8888"
