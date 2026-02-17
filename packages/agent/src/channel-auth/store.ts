@@ -15,54 +15,8 @@
 
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { resolve as resolvePath } from 'path';
-import { AGENT_ROOT } from './paths';
-
-// ── Types ────────────────────────────────────────────
-
-export type ChannelType = 'telegram' | 'whatsapp' | 'discord' | 'slack' | string;
-
-/** A single authorized user on an external channel */
-export interface ChannelGrant {
-    /** Channel type: telegram, whatsapp, discord, slack, etc. */
-    channel: ChannelType;
-    /** Unique user identifier on that channel (telegram ID, phone number, discord ID, etc.) */
-    userId: string;
-    /** Human-readable label (optional) */
-    label?: string;
-    /** Admin level: 'owner' = full unrestricted, 'admin' = full access, 'trusted' = extended but not full */
-    role: 'owner' | 'admin' | 'trusted';
-    /** Who granted this (should be the admin's name) */
-    grantedBy: string;
-    /** ISO timestamp when granted */
-    grantedAt: string;
-}
-
-/** A tracked channel session — every unique user on every channel gets one */
-export interface ChannelSession {
-    /** Channel type */
-    channel: ChannelType;
-    /** User identifier on that channel */
-    userId: string;
-    /** Display name / sender name */
-    displayName?: string;
-    /** Additional metadata from the bridge (chat ID, group name, etc.) */
-    metadata?: Record<string, string>;
-    /** Number of messages received */
-    messageCount: number;
-    /** First message timestamp */
-    firstSeen: string;
-    /** Last message timestamp */
-    lastSeen: string;
-    /** Current role */
-    role: 'guest' | 'owner' | 'admin' | 'trusted';
-}
-
-interface ChannelAuthData {
-    grants: ChannelGrant[];
-    version: number;
-}
-
-// ── Store ────────────────────────────────────────────
+import { AGENT_ROOT } from '../paths';
+import type { ChannelType, ChannelGrant, ChannelSession, ChannelAuthData } from './types';
 
 export class ChannelAuthStore {
     private grants: ChannelGrant[] = [];
@@ -83,7 +37,6 @@ export class ChannelAuthStore {
             this.grants = data.grants || [];
             console.log(`[ChannelAuth]: Loaded ${this.grants.length} grant(s)`);
         } catch {
-            // File doesn't exist yet — start fresh
             this.grants = [];
         }
     }
@@ -100,7 +53,6 @@ export class ChannelAuthStore {
 
     // ── Session tracking ──────────────────────────────
 
-    /** Build a unique key for a channel+user combo */
     private sessionKey(channel: string, userId: string): string {
         return `${channel.toLowerCase()}:${userId}`;
     }
@@ -109,7 +61,12 @@ export class ChannelAuthStore {
      * Track an incoming message from a channel user.
      * Called by the server on every request from an external channel.
      */
-    trackSession(channel: string, userId: string, displayName?: string, metadata?: Record<string, string>): ChannelSession {
+    trackSession(
+        channel: string,
+        userId: string,
+        displayName?: string,
+        metadata?: Record<string, string>,
+    ): ChannelSession {
         const key = this.sessionKey(channel, userId);
         const now = new Date().toISOString();
         const existing = this.sessions.get(key);
@@ -119,7 +76,6 @@ export class ChannelAuthStore {
             existing.lastSeen = now;
             if (displayName) existing.displayName = displayName;
             if (metadata) existing.metadata = { ...existing.metadata, ...metadata };
-            // Refresh role from grants
             existing.role = this.getRole(channel, userId);
             return existing;
         }
@@ -148,12 +104,12 @@ export class ChannelAuthStore {
     /** Check if a channel+userId combo has a grant */
     getGrant(channel: string, userId: string): ChannelGrant | undefined {
         return this.grants.find(
-            g => g.channel.toLowerCase() === channel.toLowerCase() && g.userId === userId
+            (g) => g.channel.toLowerCase() === channel.toLowerCase() && g.userId === userId,
         );
     }
 
     /** Get the effective role for a channel+userId */
-    getRole(channel: string, userId: string): 'guest' | 'admin' | 'trusted' | "owner" {
+    getRole(channel: string, userId: string): 'guest' | 'admin' | 'trusted' | 'owner' {
         const grant = this.getGrant(channel, userId);
         return grant?.role || 'guest';
     }
@@ -164,10 +120,7 @@ export class ChannelAuthStore {
         return role === 'admin' || role === 'owner';
     }
 
-    /**
-     * Grant a role to a channel user.
-     * Only callable by the admin (enforced at the tool level).
-     */
+    /** Grant a role to a channel user */
     async grantRole(
         channel: string,
         userId: string,
@@ -175,9 +128,8 @@ export class ChannelAuthStore {
         grantedBy: string,
         label?: string,
     ): Promise<ChannelGrant> {
-        // Remove existing grant for this user if any
         this.grants = this.grants.filter(
-            g => !(g.channel.toLowerCase() === channel.toLowerCase() && g.userId === userId)
+            (g) => !(g.channel.toLowerCase() === channel.toLowerCase() && g.userId === userId),
         );
 
         const grant: ChannelGrant = {
@@ -192,7 +144,6 @@ export class ChannelAuthStore {
         this.dirty = true;
         await this.flush();
 
-        // Update session if exists
         const key = this.sessionKey(channel, userId);
         const session = this.sessions.get(key);
         if (session) session.role = role;
@@ -201,20 +152,17 @@ export class ChannelAuthStore {
         return grant;
     }
 
-    /**
-     * Revoke a user's grant, demoting them back to guest.
-     */
+    /** Revoke a user's grant, demoting them back to guest */
     async revokeGrant(channel: string, userId: string): Promise<boolean> {
         const before = this.grants.length;
         this.grants = this.grants.filter(
-            g => !(g.channel.toLowerCase() === channel.toLowerCase() && g.userId === userId)
+            (g) => !(g.channel.toLowerCase() === channel.toLowerCase() && g.userId === userId),
         );
         const removed = this.grants.length < before;
         if (removed) {
             this.dirty = true;
             await this.flush();
 
-            // Update session
             const key = this.sessionKey(channel, userId);
             const session = this.sessions.get(key);
             if (session) session.role = 'guest';
