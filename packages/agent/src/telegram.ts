@@ -428,7 +428,7 @@ export class TelegramBridge {
 
         // Check admin grant
         const role = channelAuth.getRole('telegram', userId);
-        const isAdmin = role === 'admin';
+        const isAdmin = role === 'admin' || role === 'owner';
 
         // Track session
         channelAuth.trackSession('telegram', userId, displayName, metadata);

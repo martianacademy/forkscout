@@ -29,8 +29,8 @@ export interface ChannelGrant {
     userId: string;
     /** Human-readable label (optional) */
     label?: string;
-    /** Admin level: 'admin' = full access, 'trusted' = extended but not full */
-    role: 'admin' | 'trusted';
+    /** Admin level: 'owner' = full unrestricted, 'admin' = full access, 'trusted' = extended but not full */
+    role: 'owner' | 'admin' | 'trusted';
     /** Who granted this (should be the admin's name) */
     grantedBy: string;
     /** ISO timestamp when granted */
@@ -54,7 +54,7 @@ export interface ChannelSession {
     /** Last message timestamp */
     lastSeen: string;
     /** Current role */
-    role: 'guest' | 'admin' | 'trusted';
+    role: 'guest' | 'owner' | 'admin' | 'trusted';
 }
 
 interface ChannelAuthData {
@@ -153,14 +153,15 @@ export class ChannelAuthStore {
     }
 
     /** Get the effective role for a channel+userId */
-    getRole(channel: string, userId: string): 'guest' | 'admin' | 'trusted' {
+    getRole(channel: string, userId: string): 'guest' | 'admin' | 'trusted' | "owner" {
         const grant = this.getGrant(channel, userId);
         return grant?.role || 'guest';
     }
 
     /** Check if a channel+userId is admin */
     isAdmin(channel: string, userId: string): boolean {
-        return this.getRole(channel, userId) === 'admin';
+        const role = this.getRole(channel, userId);
+        return role === 'admin' || role === 'owner';
     }
 
     /**

@@ -65,9 +65,6 @@ COPY packages/agent ./packages/agent
 # Install Playwright Chromium browser
 RUN cd packages/agent && npx playwright install chromium
 
-# Runtime data volume (persists memory, knowledge graph, sessions, etc.)
-VOLUME /app/packages/agent/.forkscout
-
 # Default port
 EXPOSE 3210
 

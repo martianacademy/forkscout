@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { EventEmitter } from 'events';
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { dirname } from 'path';
 
 /**
  * A scheduled job definition
@@ -81,6 +83,18 @@ function parseIntervalSeconds(schedule: string): number {
 /**
  * Scheduler - manages background cron jobs that the agent can create and monitor
  */
+/**
+ * Serializable job definition (no timer handle) — used for disk persistence.
+ */
+export interface SerializedJob {
+    id: string;
+    name: string;
+    schedule: string;
+    command: string;
+    watchFor?: string;
+    active: boolean;
+}
+
 export class Scheduler extends EventEmitter {
     private jobs = new Map<string, CronJob>();
     private idCounter = 0;
@@ -88,14 +102,63 @@ export class Scheduler extends EventEmitter {
     private commandRunner: (command: string) => Promise<string>;
     /** Callback to evaluate urgency (injected from the agent) */
     private urgencyEvaluator: (jobName: string, watchFor: string | undefined, output: string) => Promise<UrgencyLevel>;
+    /** Path to persist jobs (e.g. .forkscout/scheduler-jobs.json) */
+    private persistPath?: string;
 
     constructor(
         commandRunner: (command: string) => Promise<string>,
         urgencyEvaluator: (jobName: string, watchFor: string | undefined, output: string) => Promise<UrgencyLevel>,
+        persistPath?: string,
     ) {
         super();
         this.commandRunner = commandRunner;
         this.urgencyEvaluator = urgencyEvaluator;
+        this.persistPath = persistPath;
+    }
+
+    /**
+     * Restore previously-persisted jobs from disk.
+     * Called once during startup after the scheduler is constructed.
+     */
+    async restoreJobs(): Promise<number> {
+        if (!this.persistPath) return 0;
+        try {
+            const raw = await readFile(this.persistPath, 'utf-8');
+            const saved: SerializedJob[] = JSON.parse(raw);
+            let restored = 0;
+            for (const j of saved) {
+                try {
+                    this.addJob(j.name, j.schedule, j.command, j.watchFor);
+                    if (!j.active) {
+                        // Restore paused state
+                        const latest = Array.from(this.jobs.values()).pop();
+                        if (latest) latest.active = false;
+                    }
+                    restored++;
+                } catch (err) {
+                    console.error(`⚠️ Failed to restore cron job "${j.name}": ${err instanceof Error ? err.message : String(err)}`);
+                }
+            }
+            if (restored > 0) console.log(`📂 Restored ${restored} cron job(s) from disk`);
+            return restored;
+        } catch {
+            // No saved jobs or parse error — that's fine
+            return 0;
+        }
+    }
+
+    /** Persist current job definitions to disk (fire-and-forget). */
+    private async persistJobs(): Promise<void> {
+        if (!this.persistPath) return;
+        const serialized: SerializedJob[] = Array.from(this.jobs.values()).map(({ id, name, schedule, command, watchFor, active }) => ({
+            id, name, schedule, command, watchFor, active,
+        }));
+        try {
+            await mkdir(dirname(this.persistPath), { recursive: true });
+            await writeFile(this.persistPath, JSON.stringify(serialized, null, 2), 'utf-8');
+        } catch (err) {
+            console.error(`⚠️ Failed to persist cron jobs: ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
 
     addJob(name: string, schedule: string, command: string, watchFor?: string): CronJob {
@@ -151,6 +214,7 @@ export class Scheduler extends EventEmitter {
 
         this.jobs.set(id, job);
         console.log(`📅 Cron job registered: "${name}" (${schedule}) — ${command}`);
+        this.persistJobs();
         return job;
     }
 
@@ -161,6 +225,7 @@ export class Scheduler extends EventEmitter {
         job.active = false;
         this.jobs.delete(id);
         console.log(`🗑️ Cron job removed: "${job.name}"`);
+        this.persistJobs();
         return true;
     }
 
@@ -169,6 +234,7 @@ export class Scheduler extends EventEmitter {
         if (!job) return false;
         job.active = false;
         console.log(`⏸️ Cron job paused: "${job.name}"`);
+        this.persistJobs();
         return true;
     }
 
@@ -177,6 +243,7 @@ export class Scheduler extends EventEmitter {
         if (!job) return false;
         job.active = true;
         console.log(`▶️ Cron job resumed: "${job.name}"`);
+        this.persistJobs();
         return true;
     }
 

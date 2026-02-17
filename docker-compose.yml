@@ -22,8 +22,15 @@ services:
       # Point SearXNG to the compose service
       - SEARXNG_URL=http://searxng:8080
     volumes:
-      # Persist agent memory, knowledge graph, sessions across restarts
-      - agent-data:/app/packages/agent/.forkscout
+      # Bind-mount the entire agent package so ALL agent changes persist:
+      #   - self-edited source code (tools the agent creates)
+      #   - .forkscout/ (memory, knowledge graph, cron jobs, auth, sessions)
+      #   - any other files the agent writes
+      - ./packages/agent:/app/packages/agent
+      # Anonymous volume keeps Linux-compiled node_modules from the image build,
+      # preventing macOS host node_modules from overriding them.
+      # To update deps after a Dockerfile change: docker compose up --build -V
+      - /app/packages/agent/node_modules
     depends_on:
       searxng:
         condition: service_healthy
@@ -47,5 +54,4 @@ services:
       retries: 3
 
 volumes:
-  agent-data:
   searxng-data:

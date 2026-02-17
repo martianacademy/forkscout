@@ -111,7 +111,8 @@ export class Agent {
 
         this.state = { running: false, iterations: 0 };
 
-        // Create scheduler with command runner and urgency evaluator
+        // Create scheduler with command runner, urgency evaluator, and disk persistence
+        const schedulerPersistPath = resolvePath(AGENT_ROOT, '.forkscout', 'scheduler-jobs.json');
         this.scheduler = new Scheduler(
             (command: string) => new Promise((resolve, reject) => {
                 exec(command, { timeout: 30_000, maxBuffer: 1024 * 1024, shell: '/bin/zsh' }, (error, stdout, stderr) => {
@@ -130,7 +131,13 @@ export class Agent {
                     const level = response.trim().toLowerCase();
                     return (level === 'urgent' || level === 'important') ? level as any : 'normal';
                 } catch { return 'normal'; }
-            }
+            },
+            schedulerPersistPath,
+        );
+
+        // Restore any previously-persisted cron jobs
+        this.scheduler.restoreJobs().catch(err =>
+            console.error(`⚠️ Scheduler restore failed: ${err instanceof Error ? err.message : String(err)}`),
         );
 
         // Listen for urgent alerts

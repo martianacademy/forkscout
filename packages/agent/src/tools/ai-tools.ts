@@ -339,6 +339,25 @@ export const safeSelfEdit = tool({
 
         await fs.rm(backupPath).catch(() => { });
         console.log(`\n✅ SELF-EDIT APPLIED: ${path} — ${reason}`);
+
+        // Log the edit to .forkscout/edit-log.json so the agent remembers its code changes
+        // across container restarts (even if the source files themselves are rebuilt).
+        try {
+            const editLogPath = resolvePath(AGENT_ROOT, '.forkscout', 'edit-log.json');
+            let log: Array<{ timestamp: string; path: string; reason: string; bytes: number; isNew: boolean }> = [];
+            try { log = JSON.parse(await fs.readFile(editLogPath, 'utf-8')); } catch { /* first entry */ }
+            log.push({
+                timestamp: new Date().toISOString(),
+                path,
+                reason,
+                bytes: content.length,
+                isNew: originalContent === null,
+            });
+            // Keep last 200 entries
+            if (log.length > 200) log = log.slice(-200);
+            await fs.writeFile(editLogPath, JSON.stringify(log, null, 2), 'utf-8');
+        } catch { /* non-critical, don't fail the edit */ }
+
         return `SUCCESS: File "${path}" edited (${content.length} bytes). Reason: ${reason}. TypeScript passed.`;
     },
 });
