@@ -34,8 +34,8 @@ export { loadConfig, getConfig, resolveApiKeyForProvider, resolveApiUrlForProvid
 export { BudgetTracker, type BudgetData, type BudgetLimits, type BudgetStatus, type SpendRecord } from './llm/budget';
 export { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './mcp/connector';
 export { SurvivalMonitor, type SurvivalStatus, type SurvivalConfig, type VitalSign, type ThreatEvent, type ThreatLevel } from './survival';
-export { ChannelAuthStore, type ChannelGrant, type ChannelSession, type ChannelType } from './channel-auth';
-export { TelegramBridge, type TelegramBridgeConfig } from './telegram';
+export { ChannelAuthStore, type ChannelGrant, type ChannelSession, type ChannelType } from './channels/auth';
+export { TelegramBridge, type TelegramBridgeConfig } from './channels/telegram';
 export { startServer, type ServerOptions } from './server';
 
 /**

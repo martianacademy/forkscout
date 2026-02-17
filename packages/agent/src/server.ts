@@ -15,8 +15,8 @@ import {
 import { generateTextWithRetry, streamTextWithRetry } from './llm/retry';
 import type { ModelTier } from './llm/router';
 import { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
-import type { ChannelAuthStore } from './channel-auth';
-import { TelegramBridge } from './telegram';
+import type { ChannelAuthStore } from './channels/auth';
+import { TelegramBridge } from './channels/telegram';
 import { getConfig } from './config';
 
 

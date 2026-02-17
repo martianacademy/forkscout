@@ -3,8 +3,8 @@
  */
 import { tool } from 'ai';
 import { z } from 'zod';
-import type { TelegramBridge } from '../telegram';
-import type { ChannelAuthStore } from '../channel-auth';
+import type { TelegramBridge } from '../channels/telegram';
+import type { ChannelAuthStore } from '../channels/auth';
 
 /**
  * Create tools that let the agent proactively send messages via Telegram.

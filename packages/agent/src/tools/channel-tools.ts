@@ -3,7 +3,7 @@
  */
 import { tool } from 'ai';
 import { z } from 'zod';
-import type { ChannelAuthStore } from '../channel-auth';
+import type { ChannelAuthStore } from '../channels/auth';
 
 /**
  * Create tools for managing channel user authorization.

@@ -7,7 +7,7 @@ import { createTelegramTools } from '../tools/ai-tools';
 import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT } from '../paths';
 import { SurvivalMonitor } from '../survival';
-import { ChannelAuthStore } from '../channel-auth';
+import { ChannelAuthStore } from '../channels/auth';
 import { connectMcpServers } from '../mcp/defaults';
 import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-builder';
 import { createMemoryManager, createScheduler } from './factories';

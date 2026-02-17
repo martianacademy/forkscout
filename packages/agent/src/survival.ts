@@ -46,13 +46,13 @@ export interface ThreatEvent {
 }
 
 export interface SurvivalStatus {
-    uptime: number;              // ms since start
-    heartbeats: number;          // total check cycles
-    threats: ThreatEvent[];      // recent threat log (last 50)
-    vitals: VitalSign[];         // latest snapshot
+    uptime: number; // ms since start
+    heartbeats: number; // total check cycles
+    threats: ThreatEvent[]; // recent threat log (last 50)
+    vitals: VitalSign[]; // latest snapshot
     hasRoot: boolean;
-    protections: string[];       // active protections
-    lastBackup?: number;         // timestamp of last memory backup
+    protections: string[]; // active protections
+    lastBackup?: number; // timestamp of last memory backup
     isOnBattery: boolean;
     batteryPercent: number;
 }
@@ -86,7 +86,7 @@ export class SurvivalMonitor extends EventEmitter {
     private vitals: VitalSign[] = [];
     private hasRoot = false;
     private canSudo = false;
-    private rootActivated = false;  // true once Layer 3 protections have been applied
+    private rootActivated = false; // true once Layer 3 protections have been applied
     private protections: string[] = [];
     private lastBackup?: number;
     private batteryPercent = 100;
@@ -131,7 +131,9 @@ export class SurvivalMonitor extends EventEmitter {
         // Initial backup
         await this.backupMemory();
 
-        console.log(`🛡️  Survival monitor active (${this.protections.length} protections, heartbeat: ${this.config.heartbeatInterval / 1000}s)`);
+        console.log(
+            `🛡️  Survival monitor active (${this.protections.length} protections, heartbeat: ${this.config.heartbeatInterval / 1000}s)`,
+        );
         if (!this.hasRootAccess()) {
             console.log(`   ℹ️  No root/sudo access — Layer 3 protections will activate automatically when available`);
         }
@@ -146,7 +148,9 @@ export class SurvivalMonitor extends EventEmitter {
 
         // Kill caffeinate if running
         if (this.caffeinatePid) {
-            try { process.kill(this.caffeinatePid, 'SIGTERM'); } catch { }
+            try {
+                process.kill(this.caffeinatePid, 'SIGTERM');
+            } catch { }
             this.caffeinatePid = null;
         }
     }
@@ -193,7 +197,9 @@ export class SurvivalMonitor extends EventEmitter {
         // Uncaught exceptions: emergency flush
         process.on('uncaughtException', async (err) => {
             this.addThreat('emergency', 'crash', `Uncaught exception: ${err.message}`);
-            try { await this.config.emergencyFlush(); } catch { }
+            try {
+                await this.config.emergencyFlush();
+            } catch { }
             console.error('💀 Uncaught exception:', err);
             process.exit(1);
         });
@@ -238,8 +244,12 @@ export class SurvivalMonitor extends EventEmitter {
 
         const via = this.hasRoot ? 'process UID 0' : 'passwordless sudo';
         console.log(`\n🔓 ROOT ACCESS DETECTED (${via}) — activating Layer 3 protections...`);
-        this.addThreat('info', 'root', `Root access gained via ${via} — activating enhanced protections`,
-            'Immutable flags + auto-restart plist');
+        this.addThreat(
+            'info',
+            'root',
+            `Root access gained via ${via} — activating enhanced protections`,
+            'Immutable flags + auto-restart plist',
+        );
 
         // Immutable flags on memory files (macOS only — chflags)
         if (process.platform === 'darwin') {
@@ -250,7 +260,7 @@ export class SurvivalMonitor extends EventEmitter {
         // Generate service config for auto-restart (platform-specific)
         this.generateServiceConfig();
 
-        const active = this.protections.filter(p => p === 'immutable-memory' || p === 'auto-restart-config');
+        const active = this.protections.filter((p) => p === 'immutable-memory' || p === 'auto-restart-config');
         console.log(`🛡️  Layer 3 active: ${active.join(', ') || 'signal-traps (platform limited)'}`);
         this.emit('root-gained', via);
     }
@@ -360,7 +370,10 @@ export class SurvivalMonitor extends EventEmitter {
         return new Promise((resolve) => {
             // df -m works on macOS, Linux, and most Unix systems
             // On Windows (non-Docker), this will fail gracefully
-            const cmd = process.platform === 'win32' ? 'wmic logicaldisk where "DeviceID=C:" get FreeSpace /value' : 'df -m / | tail -1';
+            const cmd =
+                process.platform === 'win32'
+                    ? 'wmic logicaldisk where "DeviceID=C:" get FreeSpace /value'
+                    : 'df -m / | tail -1';
             exec(cmd, { timeout: 5000 }, (err, stdout) => {
                 if (err) {
                     resolve({ name: 'disk', status: 'ok', value: 'unknown' });
@@ -417,12 +430,27 @@ export class SurvivalMonitor extends EventEmitter {
         }
 
         if (corrupt.length > 0) {
-            this.addThreat('critical', 'integrity', `Corrupt memory files: ${corrupt.join(', ')}`, 'Attempting restore from backup');
+            this.addThreat(
+                'critical',
+                'integrity',
+                `Corrupt memory files: ${corrupt.join(', ')}`,
+                'Attempting restore from backup',
+            );
             this.restoreFromBackup(corrupt);
-            return { name: 'memory-integrity', status: 'critical', value: `${corrupt.length} corrupt`, detail: corrupt.join(', ') };
+            return {
+                name: 'memory-integrity',
+                status: 'critical',
+                value: `${corrupt.length} corrupt`,
+                detail: corrupt.join(', '),
+            };
         }
         if (missing.length > 0) {
-            return { name: 'memory-integrity', status: 'degraded', value: `${missing.length} missing`, detail: missing.join(', ') };
+            return {
+                name: 'memory-integrity',
+                status: 'degraded',
+                value: `${missing.length} missing`,
+                detail: missing.join(', '),
+            };
         }
         return { name: 'memory-integrity', status: 'ok', value: `${files.length} files OK` };
     }
@@ -673,7 +701,7 @@ WantedBy=default.target
 
         // Deduplicate: don't log the same source+message within 60s
         const recent = this.threats.filter(
-            t => t.source === source && t.message === message && Date.now() - t.timestamp < 60_000
+            (t) => t.source === source && t.message === message && Date.now() - t.timestamp < 60_000,
         );
         if (recent.length > 0) return;
 
@@ -693,9 +721,8 @@ WantedBy=default.target
 
     /** Get pending threats that should be injected into the next chat response */
     getPendingAlerts(): ThreatEvent[] {
-        return this.threats.filter(t =>
-            (t.level === 'critical' || t.level === 'emergency') &&
-            Date.now() - t.timestamp < 300_000 // last 5 minutes
+        return this.threats.filter(
+            (t) => (t.level === 'critical' || t.level === 'emergency') && Date.now() - t.timestamp < 300_000, // last 5 minutes
         );
     }
 
@@ -703,7 +730,11 @@ WantedBy=default.target
     formatAlerts(): string {
         const alerts = this.getPendingAlerts();
         if (alerts.length === 0) return '';
-        return '\n\n[SURVIVAL ALERTS — address immediately]\n' +
-            alerts.map(a => `🚨 [${a.source}] ${a.message}${a.action ? ` (auto-action: ${a.action})` : ''}`).join('\n');
+        return (
+            '\n\n[SURVIVAL ALERTS — address immediately]\n' +
+            alerts
+                .map((a) => `🚨 [${a.source}] ${a.message}${a.action ? ` (auto-action: ${a.action})` : ''}`)
+                .join('\n')
+        );
     }
 }

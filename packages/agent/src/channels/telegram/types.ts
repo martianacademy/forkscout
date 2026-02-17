@@ -1,0 +1,141 @@
+/**
+ * Telegram API types (minimal subset) and bridge configuration.
+ */
+
+import type { UIMessage } from 'ai';
+
+// ── Telegram API types ───────────────────────────────
+
+export interface TelegramUser {
+    id: number;
+    is_bot: boolean;
+    first_name: string;
+    last_name?: string;
+    username?: string;
+    language_code?: string;
+}
+
+export interface TelegramChat {
+    id: number;
+    type: 'private' | 'group' | 'supergroup' | 'channel';
+    title?: string;
+    first_name?: string;
+    last_name?: string;
+    username?: string;
+}
+
+export interface TelegramPhotoSize {
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    file_size?: number;
+}
+
+export interface TelegramMessage {
+    message_id: number;
+    from?: TelegramUser;
+    chat: TelegramChat;
+    date: number;
+    text?: string;
+    caption?: string;
+    photo?: TelegramPhotoSize[];
+    reply_to_message?: TelegramMessage;
+}
+
+export interface TelegramUpdate {
+    update_id: number;
+    message?: TelegramMessage;
+    edited_message?: TelegramMessage;
+}
+
+export interface TelegramBotInfo {
+    id: number;
+    is_bot: boolean;
+    first_name: string;
+    username: string;
+}
+
+// ── Persistent state types ───────────────────────────
+
+/** A queued message from a user (stored to disk so nothing is lost across restarts) */
+export interface InboxMessage {
+    messageId: number;
+    chatId: number;
+    userId: string;
+    displayName: string;
+    username?: string;
+    text: string;
+    date: number;
+    responded: boolean;
+}
+
+export interface TelegramState {
+    offset: number;
+    lastStartedAt: number;
+    lastStoppedAt: number;
+    inbox: InboxMessage[];
+    version: number;
+}
+
+// ── Bridge config ────────────────────────────────────
+
+export interface TelegramBridgeConfig {
+    /** Telegram Bot API token */
+    token: string;
+    /** Long-polling timeout in seconds (default: 30) */
+    pollTimeout?: number;
+    /** Max message length before splitting (default: 4096 — Telegram limit) */
+    maxMessageLength?: number;
+}
+
+// ── Constants ────────────────────────────────────────
+
+/** Human-readable labels for tool calls (shown as progress updates) */
+export const TOOL_LABELS: Record<string, string> = {
+    web_search: '🔍 Searching the web…',
+    browse_web: '🌐 Browsing a page…',
+    screenshot: '📸 Taking a screenshot…',
+    read_file: '📄 Reading a file…',
+    write_file: '📝 Writing a file…',
+    safe_self_edit: '🛠 Editing source code…',
+    run_command: '⚙️ Running a command…',
+    memory_store: '🧠 Saving to memory…',
+    memory_recall: '🧠 Recalling from memory…',
+    knowledge_query: '📚 Searching knowledge graph…',
+    knowledge_store: '📚 Storing knowledge…',
+    schedule_task: '⏰ Scheduling a task…',
+    list_scheduled: '⏰ Checking scheduled tasks…',
+    list_files: '📂 Listing files…',
+    delete_file: '🗑 Deleting a file…',
+    date_time: '🕐 Checking date/time…',
+    grant_channel_access: '🔑 Updating access…',
+    send_telegram_message: '💬 Sending a message…',
+    send_telegram_photo: '📷 Sending a photo…',
+    send_telegram_file: '📎 Sending a file…',
+    browser_screenshot: '📸 Taking a screenshot…',
+    list_secrets: '🔑 Checking available secrets…',
+    http_request: '🌐 Making API request…',
+};
+
+// ── Chat history type ────────────────────────────────
+
+export type ChatHistories = Map<number, UIMessage[]>;
+
+// ── Helpers ──────────────────────────────────────────
+
+export function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Human-readable time ago string */
+export function humanTimeAgo(date: Date): string {
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (seconds < 60) return `${seconds} second(s) ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} minute(s) ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hour(s) ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day(s) ago`;
+}

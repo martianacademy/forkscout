@@ -15,7 +15,7 @@ import type { Scheduler } from '../scheduler';
 import type { McpConnector } from '../mcp/connector';
 import type { MemoryManager } from '../memory/manager';
 import type { SurvivalMonitor } from '../survival';
-import type { ChannelAuthStore } from '../channel-auth';
+import type { ChannelAuthStore } from '../channels/auth';
 import type { ModelRouter } from '../llm/router';
 
 /** Register all default tool groups into the toolSet */
