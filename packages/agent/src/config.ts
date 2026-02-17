@@ -155,7 +155,7 @@ export function loadConfig(force = false): ForkscoutConfig {
         budget: buildBudgetConfig(fileConfig.budget),
         agent: buildAgentConfig(fileConfig.agent),
         searxng: {
-            url: fileConfig.searxng?.url || DEFAULTS.searxng.url,
+            url: env('SEARXNG_URL') || fileConfig.searxng?.url || DEFAULTS.searxng.url,
         },
 
         secrets: {
