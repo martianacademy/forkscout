@@ -297,7 +297,12 @@ function resolveProvider(raw: string): ProviderType {
 export function createRouterFromEnv(): RouterConfig {
     const globalProvider = resolveProvider(process.env.MODEL_PROVIDER || process.env.LLM_PROVIDER || 'openrouter');
 
-    const globalApiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || '';
+    const globalApiKey = process.env.LLM_API_KEY
+        || process.env.OPENROUTER_API_KEY
+        || process.env.OPENAI_API_KEY
+        || process.env.ANTHROPIC_API_KEY
+        || process.env.GOOGLE_API_KEY
+        || '';
     const baseURLMap: Record<string, string> = {
         openrouter: 'https://openrouter.ai/api/v1',
         openai: 'https://api.openai.com/v1',
@@ -323,13 +328,40 @@ export function createRouterFromEnv(): RouterConfig {
         return KNOWN_PRICES[model] || { inputPer1M: 1.0, outputPer1M: 3.0 };
     }
 
+    /**
+     * Resolve the API key for a provider, checking provider-specific env vars.
+     * Priority: MODEL_<TIER>_API_KEY → provider-specific key → LLM_API_KEY
+     * This lets users add all their API keys once and the router picks the right one.
+     */
+    function resolveApiKey(provider: ProviderType, tierUpper: string): string {
+        // 1. Explicit per-tier key always wins
+        const tierKey = process.env[`MODEL_${tierUpper}_API_KEY`];
+        if (tierKey) return tierKey;
+
+        // 2. Provider-specific global key
+        const providerKeyMap: Record<ProviderType, string[]> = {
+            openrouter: ['OPENROUTER_API_KEY'],
+            openai: ['OPENAI_API_KEY'],
+            anthropic: ['ANTHROPIC_API_KEY'],
+            google: ['GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'],
+            ollama: [],  // Ollama doesn't need a key
+            'openai-compatible': [],
+        };
+        for (const envName of providerKeyMap[provider] || []) {
+            if (process.env[envName]) return process.env[envName]!;
+        }
+
+        // 3. Fall back to the global LLM key
+        return globalApiKey;
+    }
+
     /** Build tier config with optional per-tier provider override */
     function buildTierConfig(tier: string, modelId: string): ModelTierConfig {
         const tierUpper = tier.toUpperCase();
         const tierProvider = process.env[`MODEL_${tierUpper}_PROVIDER`]
             ? resolveProvider(process.env[`MODEL_${tierUpper}_PROVIDER`]!)
             : globalProvider;
-        const tierApiKey = process.env[`MODEL_${tierUpper}_API_KEY`] || globalApiKey;
+        const tierApiKey = resolveApiKey(tierProvider, tierUpper);
         const tierBaseURL = process.env[`MODEL_${tierUpper}_BASE_URL`] || (tierProvider === globalProvider ? globalBaseURL : undefined);
 
         return {
