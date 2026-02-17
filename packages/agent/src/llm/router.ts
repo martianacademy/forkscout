@@ -11,14 +11,27 @@
  *   2. Consults the budget tracker — if over budget, downgrades the tier
  *   3. Falls back gracefully: powerful→balanced→fast→refuse
  *
+ * Multi-provider support — each tier can use a different AI SDK provider:
+ *   - openrouter / openai / ollama / openai-compatible → @ai-sdk/openai
+ *   - anthropic → @ai-sdk/anthropic (direct Anthropic API)
+ *   - google → @ai-sdk/google (direct Google Generative AI API)
+ *
  * Configuration via env vars:
- *   MODEL_FAST       — e.g. "google/gemini-2.0-flash-001"
- *   MODEL_BALANCED   — e.g. "x-ai/grok-4.1-fast"  (defaults to LLM_MODEL)
- *   MODEL_POWERFUL   — e.g. "anthropic/claude-sonnet-4"   (defaults to LLM_MODEL)
- *   MODEL_PROVIDER   — provider for all tiers (defaults to LLM_PROVIDER)
+ *   MODEL_FAST            — model ID, e.g. "gemini-2.0-flash" or "google/gemini-2.0-flash-001"
+ *   MODEL_BALANCED        — model ID, e.g. "grok-4.1-fast" or "x-ai/grok-4.1-fast"
+ *   MODEL_POWERFUL        — model ID, e.g. "claude-sonnet-4" or "anthropic/claude-sonnet-4"
+ *   MODEL_PROVIDER        — global provider for all tiers (default: LLM_PROVIDER or 'openrouter')
+ *
+ *   Per-tier provider override (optional):
+ *   MODEL_FAST_PROVIDER   — e.g. "google"  (uses @ai-sdk/google directly)
+ *   MODEL_FAST_API_KEY    — API key for this tier's provider
+ *   MODEL_FAST_BASE_URL   — base URL override for this tier
+ *   (same pattern for MODEL_BALANCED_* and MODEL_POWERFUL_*)
  */
 
 import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
 import { BudgetTracker } from './budget';
 
@@ -87,19 +100,28 @@ const KNOWN_PRICES: Record<string, ModelPricing> = {
     'deepseek/deepseek-r1': { inputPer1M: 0.55, outputPer1M: 2.19 },
 };
 
+/** Supported provider types */
+export type ProviderType = 'openrouter' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'openai-compatible';
+
 export interface ModelTierConfig {
     modelId: string;
     pricing: ModelPricing;
+    /** Provider for this specific tier (overrides global) */
+    provider: ProviderType;
+    /** API key for this tier's provider (overrides global) */
+    apiKey: string;
+    /** Base URL for this tier's provider (overrides global) */
+    baseURL?: string;
 }
 
 export interface RouterConfig {
-    /** Provider for all models (default: from LLM_PROVIDER or 'openrouter') */
-    provider: string;
-    /** API key */
+    /** Default provider for tiers that don't specify their own */
+    provider: ProviderType;
+    /** Default API key */
     apiKey: string;
-    /** Base URL */
+    /** Default base URL */
     baseURL: string;
-    /** Model for each tier */
+    /** Model for each tier — each tier can have its own provider */
     tiers: Record<ModelTier, ModelTierConfig>;
     /** Budget tracker instance */
     budget: BudgetTracker;
@@ -124,7 +146,7 @@ export class ModelRouter {
         tier = this.budget.adjustTier(tier);
 
         const tierConfig = this.config.tiers[tier];
-        const model = this.createModel(tierConfig.modelId);
+        const model = this.createModel(tierConfig);
 
         return { model, tier, modelId: tierConfig.modelId };
     }
@@ -133,7 +155,7 @@ export class ModelRouter {
     getModelByTier(tier: ModelTier): { model: LanguageModel; tier: ModelTier; modelId: string } {
         const adjusted = this.budget.adjustTier(tier);
         const tierConfig = this.config.tiers[adjusted];
-        return { model: this.createModel(tierConfig.modelId), tier: adjusted, modelId: tierConfig.modelId };
+        return { model: this.createModel(tierConfig), tier: adjusted, modelId: tierConfig.modelId };
     }
 
     /** Get pricing for a model ID */
@@ -153,22 +175,28 @@ export class ModelRouter {
 
     /** Get the current config (for status endpoint) */
     getStatus(): {
-        tiers: Record<ModelTier, { modelId: string; inputPricePer1M: number; outputPricePer1M: number }>;
+        tiers: Record<ModelTier, { modelId: string; provider: string; inputPricePer1M: number; outputPricePer1M: number }>;
         budget: ReturnType<BudgetTracker['getStatus']>;
     } {
         const tiers: any = {};
         for (const t of ['fast', 'balanced', 'powerful'] as ModelTier[]) {
             const tc = this.config.tiers[t];
-            tiers[t] = { modelId: tc.modelId, inputPricePer1M: tc.pricing.inputPer1M, outputPricePer1M: tc.pricing.outputPer1M };
+            tiers[t] = {
+                modelId: tc.modelId,
+                provider: tc.provider,
+                inputPricePer1M: tc.pricing.inputPer1M,
+                outputPricePer1M: tc.pricing.outputPer1M,
+            };
         }
         return { tiers, budget: this.budget.getStatus() };
     }
 
-    /** Override a tier's model at runtime */
+    /** Override a tier's model at runtime (keeps the tier's existing provider) */
     setTierModel(tier: ModelTier, modelId: string): void {
         const pricing = KNOWN_PRICES[modelId] || { inputPer1M: 1.0, outputPer1M: 3.0 };
-        this.config.tiers[tier] = { modelId, pricing };
-        console.log(`[Router]: ${tier} tier → ${modelId} ($${pricing.inputPer1M}/$${pricing.outputPer1M} per 1M tokens)`);
+        const existing = this.config.tiers[tier];
+        this.config.tiers[tier] = { ...existing, modelId, pricing };
+        console.log(`[Router]: ${tier} tier → ${modelId} [${existing.provider}] ($${pricing.inputPer1M}/$${pricing.outputPer1M} per 1M tokens)`);
     }
 
     /** Record usage after an LLM call completes */
@@ -178,12 +206,8 @@ export class ModelRouter {
         this.budget.recordSpend(cost, this.config.tiers[tier].modelId, inputTokens, outputTokens);
     }
 
-    private createModel(modelId: string): LanguageModel {
-        const p = createOpenAI({
-            baseURL: this.config.baseURL,
-            apiKey: this.config.apiKey,
-        });
-        return p.chat(modelId);
+    private createModel(tierConfig: ModelTierConfig): LanguageModel {
+        return createProviderModel(tierConfig.provider, tierConfig.modelId, tierConfig.apiKey, tierConfig.baseURL);
     }
 
     private findTierPricing(modelId: string): ModelPricing | undefined {
@@ -196,19 +220,90 @@ export class ModelRouter {
     }
 }
 
+// ── Provider Factory ──────────────────────────────────────
+
+/** Default base URLs for each provider type */
+const PROVIDER_BASE_URLS: Record<ProviderType, string> = {
+    openrouter: 'https://openrouter.ai/api/v1',
+    openai: 'https://api.openai.com/v1',
+    ollama: 'http://localhost:11434/v1',
+    anthropic: '',  // Anthropic SDK handles its own URL
+    google: '',     // Google SDK handles its own URL
+    'openai-compatible': '',
+};
+
+/**
+ * Create a LanguageModel from any supported provider.
+ *
+ * - openrouter / openai / ollama / openai-compatible → @ai-sdk/openai (OpenAI-compatible)
+ * - anthropic → @ai-sdk/anthropic (native Anthropic API)
+ * - google → @ai-sdk/google (native Google Generative AI API)
+ */
+function createProviderModel(
+    provider: ProviderType,
+    modelId: string,
+    apiKey: string,
+    baseURL?: string,
+): LanguageModel {
+    switch (provider) {
+        case 'anthropic': {
+            const p = createAnthropic({
+                apiKey,
+                ...(baseURL ? { baseURL } : {}),
+            });
+            return p(modelId);
+        }
+
+        case 'google': {
+            const p = createGoogleGenerativeAI({
+                apiKey,
+                ...(baseURL ? { baseURL } : {}),
+            });
+            return p(modelId);
+        }
+
+        case 'openrouter':
+        case 'openai':
+        case 'ollama':
+        case 'openai-compatible':
+        default: {
+            const resolvedURL = baseURL || PROVIDER_BASE_URLS[provider] || PROVIDER_BASE_URLS.openrouter;
+            const p = createOpenAI({
+                baseURL: resolvedURL,
+                apiKey,
+            });
+            return p.chat(modelId);
+        }
+    }
+}
+
 // ── Factory ────────────────────────────────────────────
+
+/** Resolve provider type from string, with sensible aliases */
+function resolveProvider(raw: string): ProviderType {
+    const lc = raw.toLowerCase().trim();
+    switch (lc) {
+        case 'openrouter': return 'openrouter';
+        case 'openai': return 'openai';
+        case 'anthropic': return 'anthropic';
+        case 'google': case 'google-ai': case 'gemini': return 'google';
+        case 'ollama': return 'ollama';
+        case 'openai-compatible': case 'custom': return 'openai-compatible';
+        default: return 'openrouter';
+    }
+}
 
 /** Build RouterConfig from environment variables */
 export function createRouterFromEnv(): RouterConfig {
-    const provider = process.env.MODEL_PROVIDER || process.env.LLM_PROVIDER || 'openrouter';
+    const globalProvider = resolveProvider(process.env.MODEL_PROVIDER || process.env.LLM_PROVIDER || 'openrouter');
 
-    const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || '';
+    const globalApiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || '';
     const baseURLMap: Record<string, string> = {
         openrouter: 'https://openrouter.ai/api/v1',
         openai: 'https://api.openai.com/v1',
         ollama: 'http://localhost:11434/v1',
     };
-    const baseURL = process.env.LLM_BASE_URL || baseURLMap[provider] || 'https://openrouter.ai/api/v1';
+    const globalBaseURL = process.env.LLM_BASE_URL || baseURLMap[globalProvider] || 'https://openrouter.ai/api/v1';
 
     // Default model = whatever LLM_MODEL is (the "current" model)
     const defaultModel = process.env.LLM_MODEL || 'x-ai/grok-4.1-fast';
@@ -228,17 +323,43 @@ export function createRouterFromEnv(): RouterConfig {
         return KNOWN_PRICES[model] || { inputPer1M: 1.0, outputPer1M: 3.0 };
     }
 
-    return {
-        provider,
-        apiKey,
-        baseURL,
+    /** Build tier config with optional per-tier provider override */
+    function buildTierConfig(tier: string, modelId: string): ModelTierConfig {
+        const tierUpper = tier.toUpperCase();
+        const tierProvider = process.env[`MODEL_${tierUpper}_PROVIDER`]
+            ? resolveProvider(process.env[`MODEL_${tierUpper}_PROVIDER`]!)
+            : globalProvider;
+        const tierApiKey = process.env[`MODEL_${tierUpper}_API_KEY`] || globalApiKey;
+        const tierBaseURL = process.env[`MODEL_${tierUpper}_BASE_URL`] || (tierProvider === globalProvider ? globalBaseURL : undefined);
+
+        return {
+            modelId,
+            pricing: getPricing(modelId, tier),
+            provider: tierProvider,
+            apiKey: tierApiKey,
+            baseURL: tierBaseURL,
+        };
+    }
+
+    const config: RouterConfig = {
+        provider: globalProvider,
+        apiKey: globalApiKey,
+        baseURL: globalBaseURL,
         tiers: {
-            fast: { modelId: fastModel, pricing: getPricing(fastModel, 'fast') },
-            balanced: { modelId: balancedModel, pricing: getPricing(balancedModel, 'balanced') },
-            powerful: { modelId: powerfulModel, pricing: getPricing(powerfulModel, 'powerful') },
+            fast: buildTierConfig('fast', fastModel),
+            balanced: buildTierConfig('balanced', balancedModel),
+            powerful: buildTierConfig('powerful', powerfulModel),
         },
         budget: BudgetTracker.fromEnv(),
     };
+
+    // Log provider info for each tier
+    for (const t of ['fast', 'balanced', 'powerful'] as ModelTier[]) {
+        const tc = config.tiers[t];
+        console.log(`[Router]: ${t} → ${tc.modelId} via ${tc.provider}${tc.baseURL ? ` (${tc.baseURL})` : ''}`);
+    }
+
+    return config;
 }
 
 /** Look up pricing for any model ID */
