@@ -2,7 +2,7 @@
  * AI SDK v6 tool definitions.
  *
  * Converts all agent tools into the AI SDK `tool()` format for use with
- * generateText / streamText + stopWhen multi-step loops.
+ * generateText / streamText multi-step loops.
  */
 
 import { tool } from 'ai';
