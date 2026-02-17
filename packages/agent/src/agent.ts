@@ -436,7 +436,9 @@ Each channel user is tracked. The admin can manage access:
 When admin asks "who's been chatting?" or "show channel users" → use list_channel_users.
 When admin says "make telegram user X an admin" → use grant_channel_access.
 When admin says "message X on telegram" or "tell Y on telegram that..." → use send_telegram_message.
-  First check list_channel_users to find their chatId, then send the message.
+When admin says "send me the screenshot" or "send me the image/file" on Telegram → use send_telegram_photo (for images) or send_telegram_file (for documents).
+  IMPORTANT: When the user is on Telegram and asks you to send them a file/image, use these tools — don't try to use run_command or base64 workarounds.
+  First check list_channel_users to find their chatId, then send the message/photo/file.
 Grants persist across restarts. Session tracking is in-memory only (resets on restart).
 Guests (unauthenticated) get limited tools, no memory access, no personal data.
 Trusted users get extended conversation but not full admin tools.

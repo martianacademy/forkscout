@@ -13,8 +13,8 @@
  */
 
 import { generateText, stepCountIs, type UIMessage } from 'ai';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { resolve as resolvePath } from 'path';
+import { readFile, writeFile, mkdir, stat } from 'fs/promises';
+import { resolve as resolvePath, basename } from 'path';
 import type { Agent, ChatContext } from './agent';
 import { AGENT_ROOT } from './paths';
 
@@ -145,6 +145,10 @@ export class TelegramBridge {
         delete_file: '🗑 Deleting a file…',
         date_time: '🕐 Checking date/time…',
         grant_channel_access: '🔑 Updating access…',
+        send_telegram_message: '💬 Sending a message…',
+        send_telegram_photo: '📷 Sending a photo…',
+        send_telegram_file: '📎 Sending a file…',
+        browser_screenshot: '📸 Taking a screenshot…',
     };
 
     constructor(agent: Agent, config: TelegramBridgeConfig) {
@@ -270,6 +274,38 @@ export class TelegramBridge {
                     ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
                 });
             });
+        }
+    }
+
+    /** Send a photo from a local file path */
+    async sendPhoto(chatId: number, filePath: string, caption?: string): Promise<void> {
+        const url = `${this.baseUrl}/sendPhoto`;
+        const fileData = await readFile(filePath);
+        const fileName = basename(filePath);
+        const form = new FormData();
+        form.append('chat_id', String(chatId));
+        form.append('photo', new Blob([fileData]), fileName);
+        if (caption) form.append('caption', caption);
+        const res = await fetch(url, { method: 'POST', body: form });
+        const data = await res.json() as any;
+        if (!data.ok) {
+            throw new Error(`Telegram API sendPhoto: ${data.description || 'Unknown error'} (${data.error_code})`);
+        }
+    }
+
+    /** Send a document/file from a local file path */
+    async sendDocument(chatId: number, filePath: string, caption?: string): Promise<void> {
+        const url = `${this.baseUrl}/sendDocument`;
+        const fileData = await readFile(filePath);
+        const fileName = basename(filePath);
+        const form = new FormData();
+        form.append('chat_id', String(chatId));
+        form.append('document', new Blob([fileData]), fileName);
+        if (caption) form.append('caption', caption);
+        const res = await fetch(url, { method: 'POST', body: form });
+        const data = await res.json() as any;
+        if (!data.ok) {
+            throw new Error(`Telegram API sendDocument: ${data.description || 'Unknown error'} (${data.error_code})`);
         }
     }
 
