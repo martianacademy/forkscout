@@ -38,12 +38,22 @@ interface TelegramChat {
     username?: string;
 }
 
+interface TelegramPhotoSize {
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    file_size?: number;
+}
+
 interface TelegramMessage {
     message_id: number;
     from?: TelegramUser;
     chat: TelegramChat;
     date: number;
     text?: string;
+    caption?: string;
+    photo?: TelegramPhotoSize[];
     reply_to_message?: TelegramMessage;
 }
 
@@ -254,6 +264,36 @@ export class TelegramBridge {
         return data.result as T;
     }
 
+    /**
+     * Download a file from Telegram by file_id → returns base64 string + media type.
+     */
+    private async downloadFile(fileId: string): Promise<{ base64: string; mediaType: string } | null> {
+        try {
+            const fileInfo = await this.api<{ file_id: string; file_path?: string; file_size?: number }>('getFile', { file_id: fileId });
+            if (!fileInfo.file_path) return null;
+
+            const url = `https://api.telegram.org/file/bot${this.token}/${fileInfo.file_path}`;
+            const res = await fetch(url);
+            if (!res.ok) return null;
+
+            const buffer = Buffer.from(await res.arrayBuffer());
+            const base64 = buffer.toString('base64');
+
+            // Determine media type from file extension
+            const ext = fileInfo.file_path.split('.').pop()?.toLowerCase() || 'jpg';
+            const mediaTypes: Record<string, string> = {
+                jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+                gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+            };
+            const mediaType = mediaTypes[ext] || 'image/jpeg';
+
+            return { base64, mediaType };
+        } catch (err) {
+            console.error(`[Telegram]: Failed to download file ${fileId}:`, err);
+            return null;
+        }
+    }
+
     /** Verify the bot token and get bot info */
     async getMe(): Promise<TelegramBotInfo> {
         return this.api<TelegramBotInfo>('getMe');
@@ -444,16 +484,28 @@ export class TelegramBridge {
      */
     private async handleUpdate(update: TelegramUpdate, isMissed: boolean): Promise<void> {
         const msg = update.message;
-        if (!msg?.text || msg.from?.is_bot) return;  // skip non-text and bot messages
+        if (!msg || msg.from?.is_bot) return;  // skip bot messages
+
+        // Accept text messages and photo messages (with optional caption)
+        const hasText = !!msg.text?.trim();
+        const hasPhoto = !!(msg.photo && msg.photo.length > 0);
+        if (!hasText && !hasPhoto) return;  // skip unsupported message types
 
         const chatId = msg.chat.id;
         const user = msg.from!;
         const userId = String(user.id);
         const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ');
-        const text = msg.text.trim();
+        const text = (msg.text || msg.caption || '').trim();
 
-        // Skip empty messages
-        if (!text) return;
+        // Download photo if present (pick largest resolution)
+        let imageData: { base64: string; mediaType: string } | null = null;
+        if (hasPhoto) {
+            const largest = msg.photo![msg.photo!.length - 1]; // Telegram sends sizes smallest→largest
+            imageData = await this.downloadFile(largest.file_id);
+            if (imageData) {
+                console.log(`[Telegram]: Downloaded photo (${largest.width}x${largest.height})`);
+            }
+        }
 
         // Skip commands that start with / unless it's /start
         if (text.startsWith('/') && !text.startsWith('/start')) {
@@ -511,10 +563,20 @@ export class TelegramBridge {
         // Build message history for multi-turn context
         await this.sendTyping(chatId);
         const history = this.getOrCreateHistory(chatId);
+
+        // Build parts array — text + optional image
+        const parts: any[] = [];
+        if (text) parts.push({ type: 'text' as const, text });
+        if (imageData) {
+            parts.push({ type: 'image' as const, image: imageData.base64, mediaType: imageData.mediaType });
+            // If photo sent without caption, add a default prompt
+            if (!text) parts.unshift({ type: 'text' as const, text: 'What is in this image?' });
+        }
+
         const userMsg: UIMessage = {
             id: `tg-${msg.message_id}`,
             role: 'user' as const,
-            parts: [{ type: 'text' as const, text }],
+            parts,
         };
         history.push(userMsg);
 
@@ -541,11 +603,20 @@ export class TelegramBridge {
                 model: this.agent.getModel(),
                 system: systemPrompt,
                 messages: history.map(m => {
-                    const txt = m.parts
-                        ?.filter((p: any) => p.type === 'text')
-                        .map((p: any) => p.text)
-                        .join('\n') || '';
-                    return { role: m.role as 'user' | 'assistant', content: txt };
+                    // Build multi-modal content array (text + images)
+                    const contentParts: any[] = [];
+                    for (const p of (m.parts || []) as any[]) {
+                        if (p.type === 'text' && p.text) {
+                            contentParts.push({ type: 'text', text: p.text });
+                        } else if (p.type === 'image' && p.image) {
+                            contentParts.push({ type: 'image', image: p.image, mediaType: p.mediaType });
+                        }
+                    }
+                    // If only text, use simple string content (more compatible)
+                    const content = contentParts.length === 1 && contentParts[0].type === 'text'
+                        ? contentParts[0].text
+                        : contentParts;
+                    return { role: m.role as 'user' | 'assistant', content };
                 }),
                 tools: this.agent.getToolsForContext(ctx),
                 stopWhen: stepCountIs(6),
