@@ -6,8 +6,105 @@ Forkscout isn't a chatbot — it's a self-aware agent that remembers, learns, pr
 
 ---
 
+## Quick Start with Docker
+
+The fastest way to get Forkscout running. Requires only [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/).
+
+### 1. Clone & configure
+
+```bash
+git clone https://github.com/martianacademy/forkscout.git
+cd forkscout
+cp .env.example .env
+```
+
+Edit `.env` with your credentials:
+
+```env
+# Required
+LLM_PROVIDER=openrouter
+LLM_MODEL=x-ai/grok-4.1-fast
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=your-api-key-here
+
+# Recommended
+ADMIN_SECRET=your-secret-here
+
+# Optional — Telegram bot
+TELEGRAM_BOT_TOKEN=your-bot-token-here
+```
+
+### 2. Build & start
+
+```bash
+docker compose up -d
+```
+
+This starts two containers:
+
+| Container           | Port | Description                          |
+| ------------------- | ---- | ------------------------------------ |
+| `forkscout-agent`   | 3210 | The AI agent (API + Telegram bridge) |
+| `forkscout-searxng` | 8888 | Private search engine (web search)   |
+
+### 3. Verify
+
+```bash
+# Check both containers are healthy
+docker ps
+
+# Test the agent
+curl http://localhost:3210/api/status
+
+# Send a message
+curl -X POST http://localhost:3210/api/chat/sync \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"id":"1","role":"user","parts":[{"type":"text","text":"Hello!"}]}]}'
+```
+
+### 4. View logs
+
+```bash
+docker compose logs -f agent    # follow agent logs
+docker compose logs -f searxng  # follow search engine logs
+```
+
+### Custom ports
+
+```bash
+# Use different ports
+AGENT_PORT=4000 SEARXNG_PORT=9090 docker compose up -d
+```
+
+### Persistence
+
+The `packages/agent` directory is bind-mounted into the container. Everything the agent creates persists on your host filesystem:
+
+- **`.forkscout/`** — memory, knowledge graph, vector embeddings, auth, cron jobs, Telegram state
+- **`src/`** — source code (including any self-edits the agent makes)
+
+An anonymous volume keeps the Linux-compiled `node_modules` separate from your host.
+
+### Updating
+
+```bash
+git pull                              # get latest code
+docker compose up -d --build          # rebuild image & restart
+docker compose up -d --build -V       # rebuild + refresh node_modules (after dependency changes)
+```
+
+### Stopping
+
+```bash
+docker compose down      # stop containers (data persists)
+docker compose down -v   # stop + remove volumes (reset node_modules/searxng config)
+```
+
+---
+
 ## Table of Contents
 
+- [Quick Start with Docker](#quick-start-with-docker)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Getting Started](#getting-started)
