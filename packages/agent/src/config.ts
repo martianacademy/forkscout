@@ -140,7 +140,8 @@ export function loadConfig(force = false): ForkscoutConfig {
         env('DEFAULT_PROVIDER') || fileConfig.provider || DEFAULTS.provider
     );
 
-    const baseURL = fileConfig.baseURL
+    const baseURL = env('DEFAULT_BASE_URL')
+        || fileConfig.baseURL
         || PROVIDER_URLS[provider]
         || DEFAULTS.baseURL;
 
@@ -244,11 +245,18 @@ function buildAgentConfig(file: any): AgentSettings {
     return {
         maxIterations: file?.maxIterations ?? DEFAULTS.agent.maxIterations,
         autoRegisterTools: file?.autoRegisterTools ?? DEFAULTS.agent.autoRegisterTools,
-        port: file?.port ?? DEFAULTS.agent.port,
+        port: intEnv('AGENT_PORT') ?? file?.port ?? DEFAULTS.agent.port,
     };
 }
 
 // ── Utilities ──────────────────────────────────────────
+
+function intEnv(key: string): number | undefined {
+    const v = env(key);
+    if (v === undefined) return undefined;
+    const n = parseInt(v, 10);
+    return isNaN(n) ? undefined : n;
+}
 
 function findConfigFile(): string | null {
     // Search from cwd upward, then project root
