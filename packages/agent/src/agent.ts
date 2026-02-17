@@ -121,7 +121,7 @@ export class Agent {
         const schedulerPersistPath = resolvePath(AGENT_ROOT, '.forkscout', 'scheduler-jobs.json');
         this.scheduler = new Scheduler(
             (command: string) => new Promise((resolve, reject) => {
-                exec(command, { timeout: 30_000, maxBuffer: 1024 * 1024, shell: getShell() }, (error, stdout, stderr) => {
+                exec(command, { timeout: 30_000, maxBuffer: 1024 * 1024, shell: getShell() }, (error: Error | null, stdout: string, stderr: string) => {
                     if (error && !stdout && !stderr) reject(error);
                     else resolve((stdout || '').trim() + (stderr ? `\n[stderr]: ${stderr.trim()}` : ''));
                 });

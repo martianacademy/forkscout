@@ -56,7 +56,7 @@ export const safeSelfEditTool = {
             exec(
                 `npx tsc -p "${tsconfigPath}" --noEmit 2>&1 | grep -v "default-tools" | head -20`,
                 { timeout: 30_000, shell: getShell(), maxBuffer: 1024 * 1024, cwd: AGENT_ROOT },
-                (_error, stdout) => {
+                (_error: Error | null, stdout: string) => {
                     const output = (stdout || '').trim();
                     // If there's any error output that contains "error TS", compilation failed
                     const hasErrors = output.includes('error TS');

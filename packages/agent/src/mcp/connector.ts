@@ -98,10 +98,10 @@ export class McpConnector {
 
         if (config.url) {
             // Remote Streamable HTTP
-            transport = new StreamableHTTPClientTransport({
-                url: config.url,
-                headers: config.headers,
-            });
+            transport = new StreamableHTTPClientTransport(
+                new URL(config.url),
+                { requestInit: config.headers ? { headers: config.headers } : undefined },
+            );
         } else if (config.command) {
             // Local stdio
             transport = new StdioClientTransport({

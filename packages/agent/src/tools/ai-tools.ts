@@ -7,7 +7,7 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
-import { exec } from 'child_process';
+import { exec, type ExecException } from 'child_process';
 import { getConfig } from '../config';
 import { getShell } from '../utils/shell';
 import { readFile as fsReadFile } from 'fs/promises';
@@ -176,7 +176,7 @@ export const runCommand = tool({
                 timeout: 30_000,
                 maxBuffer: 1024 * 1024,
                 shell: getShell(),
-            }, (error, stdout, stderr) => {
+            }, (error: ExecException | null, stdout: string, stderr: string) => {
                 resolve({
                     stdout: scrubSecrets(stdout?.trim().slice(0, 4000) || ''),
                     stderr: scrubSecrets(stderr?.trim().slice(0, 2000) || ''),
@@ -371,7 +371,7 @@ export const safeSelfEdit = tool({
             exec(
                 `npx tsc -p "${tsconfigPath}" --noEmit 2>&1 | head -20`,
                 { timeout: 30_000, shell: getShell(), maxBuffer: 1024 * 1024, cwd: AGENT_ROOT },
-                (_error, stdout) => {
+                (_error: Error | null, stdout: string) => {
                     const output = (stdout || '').trim();
                     resolve({ success: !output.includes('error TS'), errors: output });
                 },
@@ -1275,7 +1275,8 @@ Use this when asked about costs, spending, budget, or model usage.`,
                 if (models.length > 0) {
                     report += `\n**Today's Usage by Model**:\n`;
                     for (const [modelId, usage] of models) {
-                        report += `- \`${modelId}\`: $${usage.cost.toFixed(4)} (${usage.calls} calls, ${usage.inputTokens} in / ${usage.outputTokens} out)\n`;
+                        const u = usage as { cost: number; calls: number; inputTokens: number; outputTokens: number };
+                        report += `- \`${modelId}\`: $${u.cost.toFixed(4)} (${u.calls} calls, ${u.inputTokens} in / ${u.outputTokens} out)\n`;
                     }
                 }
 

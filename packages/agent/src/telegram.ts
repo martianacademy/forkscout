@@ -15,7 +15,7 @@
 import { stepCountIs, type UIMessage } from 'ai';
 import { generateTextWithRetry } from './llm/retry';
 import type { ModelTier } from './llm/router';
-import { readFile, writeFile, mkdir, stat } from 'fs/promises';
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import { resolve as resolvePath, basename } from 'path';
 import type { Agent, ChatContext } from './agent';
 import { AGENT_ROOT } from './paths';

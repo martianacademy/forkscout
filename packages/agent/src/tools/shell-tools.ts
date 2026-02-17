@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { exec } from 'child_process';
+import { exec, type ExecException } from 'child_process';
 import { getShell } from '../utils/shell';
 import { resolveAgentPath, PROJECT_ROOT } from '../paths';
 
@@ -27,7 +27,7 @@ export const runCommandTool = {
                     maxBuffer: 1024 * 1024, // 1MB
                     shell: getShell(),
                 },
-                (error, stdout, stderr) => {
+                (error: ExecException | null, stdout: string, stderr: string) => {
                     resolve({
                         stdout: stdout?.trim().slice(0, 4000) || '',
                         stderr: stderr?.trim().slice(0, 2000) || '',
