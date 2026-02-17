@@ -1,15 +1,17 @@
 # ─── Forkscout Agent — Docker Compose ───
 #
 # Usage:
-#   docker compose up -d          # start agent + SearXNG
-#   docker compose up -d agent    # agent only (no SearXNG)
-#   docker compose logs -f agent  # follow logs
-#   docker compose down           # stop all
+#   docker compose up -d              # start (pulls pre-built image or builds locally)
+#   docker compose up -d --build      # force local build from Dockerfile
+#   docker compose pull && docker compose up -d  # use latest image from ghcr.io
+#   docker compose logs -f agent      # follow logs
+#   docker compose down               # stop all
 #
 # Copy .env.example → .env and fill in your keys before starting.
 
 services:
   agent:
+    image: ghcr.io/martianacademy/forkscout:latest
     build: .
     container_name: forkscout-agent
     restart: unless-stopped

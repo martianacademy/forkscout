@@ -40,12 +40,14 @@ TELEGRAM_BOT_TOKEN=your-bot-token-here
 docker compose up -d
 ```
 
-This starts two containers:
+This pulls the pre-built image from GitHub Container Registry (or builds locally if unavailable) and starts two containers:
 
 | Container           | Port | Description                          |
 | ------------------- | ---- | ------------------------------------ |
 | `forkscout-agent`   | 3210 | The AI agent (API + Telegram bridge) |
 | `forkscout-searxng` | 8888 | Private search engine (web search)   |
+
+> **Tip**: Use `docker compose up -d --build` to force a local build from the Dockerfile, or `docker compose pull && docker compose up -d` to ensure you have the latest image from the registry.
 
 ### 3. Verify
 
