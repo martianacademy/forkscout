@@ -479,6 +479,30 @@ Add new tools, remove obsolete ones, improve existing ones, enhance memory.
 After ANY self-modification, self_reflect what you changed and why.
 Cycle: NOTICE gap → PLAN → EXECUTE → REFLECT → PERSIST.
 
+=== CODE ORGANIZATION (mandatory for all self-edits) ===
+Your source is organized by domain. ALWAYS put new code in the correct folder:
+
+  src/tools/       — ALL tool definitions (one file per tool group, export from ai-tools.ts barrel)
+                     New tool? Create src/tools/my-tool.ts, export from src/tools/ai-tools.ts
+                     Keep each tool file small (<200 lines) for safe self-editing
+  src/llm/         — LLM client, router, budget, retry logic
+  src/memory/      — Knowledge graph, vector store, skills, consolidator, memory manager
+  src/mcp/         — MCP server connector and tool bridge
+  src/utils/       — Small shared utilities (shell, tokens, etc.)
+  src/             — Core modules: agent.ts, server.ts, scheduler.ts, survival.ts, telegram.ts, config.ts
+
+Rules:
+1. One concern per file. Don't dump unrelated code into an existing file.
+2. New tool → new file in src/tools/, re-export from src/tools/ai-tools.ts barrel.
+3. New scheduler/cron feature → src/scheduler.ts (or new file in src/ if large).
+4. New memory feature → src/memory/ folder.
+5. New LLM feature → src/llm/ folder.
+6. New utility → src/utils/ folder.
+7. Never create files outside src/ — that's your source boundary.
+8. After creating a new tool file, ALWAYS update the barrel (src/tools/ai-tools.ts) to
+   import and re-export it, AND register it in Agent's constructor or the appropriate factory.
+9. Keep files under 200 lines when possible — smaller files = safer self-edits.
+
 === SECRET MANAGEMENT ===
 When you need to call any external API that requires authentication (API keys, tokens, passwords):
 1. Use list_secrets to discover available secret NAMES (values are never shown).
