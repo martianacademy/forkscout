@@ -201,12 +201,13 @@ export const webSearch = tool({
         try {
             const response = await fetch(
                 `${searxngUrl}/search?q=${encodeURIComponent(query)}&format=json`,
-                { signal: AbortSignal.timeout(5000) },
+                { signal: AbortSignal.timeout(15000) },
             );
             if (response.ok) {
                 const data: any = await response.json();
                 const results = data.results?.slice(0, maxResults) || [];
                 if (results.length > 0) {
+                    console.log(`    ✅ SearXNG: ${results.length} result(s) for "${query}"`);
                     return results.map((r: any) => ({
                         title: r.title,
                         url: r.url,
