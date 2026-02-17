@@ -12,7 +12,7 @@
  * Env: TELEGRAM_BOT_TOKEN
  */
 
-import { generateText, stepCountIs, type UIMessage } from 'ai';
+import { generateText, type UIMessage } from 'ai';
 import { readFile, writeFile, mkdir, stat } from 'fs/promises';
 import { resolve as resolvePath, basename } from 'path';
 import type { Agent, ChatContext } from './agent';
@@ -595,9 +595,7 @@ export class TelegramBridge {
             // Refresh typing every ~4 seconds during generation
             const typingInterval = setInterval(() => this.sendTyping(chatId), 4000);
 
-            // Track steps for progress updates
-            let stepCount = 0;
-            const progressMsgIds: number[] = [];  // IDs of progress messages (to optionally clean up)
+
 
             const { text: responseText } = await generateText({
                 model: this.agent.getModel(),
@@ -619,10 +617,8 @@ export class TelegramBridge {
                     return { role: m.role as 'user' | 'assistant', content };
                 }),
                 tools: this.agent.getToolsForContext(ctx),
-                stopWhen: stepCountIs(15),
                 onStepFinish: ({ toolCalls }) => {
                     if (toolCalls?.length) {
-                        stepCount++;
                         console.log(`[Telegram/Agent]: ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
 
                         // Send progress update to user (non-blocking)
