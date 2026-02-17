@@ -1,248 +1,42 @@
 /**
- * Knowledge Graph — cognitive memory layer with stage lifecycle.
+ * KnowledgeGraph — persistent entity-relation store with stage lifecycle.
  *
- * Core data model for the cognitive architecture:
- * - Observations progress through stages: observation → episode → fact → belief → trait
- * - Each observation has evidence tracking (confirmations, contradictions, sources)
- * - Relations use a locked canonical ontology with weighted edges
- * - The LLM can ONLY write observations; the consolidator promotes stages
+ * The single class that owns the in-memory graph (entities + relations) and
+ * handles CRUD, search, traversal, LLM extraction merge, consolidation
+ * helpers, and auto-save to a JSON file.
  *
- * Persistence: single JSON file alongside vectors.json.
+ * **Golden rule**: every new observation or relation the LLM writes starts at
+ * `stage = 'observation'`. Only the consolidator promotes stages.
+ *
+ * @module knowledge-graph/graph
  */
 
-// ── Memory Stage Lifecycle ────────────────────────────
+import type {
+    Entity,
+    EntityType,
+    ExtractedEntities,
+    GraphData,
+    GraphSearchResult,
+    MemoryStage,
+    Relation,
+} from './types';
+import { SCHEMA_VERSION, SELF_ENTITY_NAME, STAGE_WEIGHTS } from './types';
+import { computeWeight, freshEvidence } from './evidence';
+import { normalizeRelationType } from './relations';
 
 /**
- * Stage lifecycle for observations:
- *   observation → episode → fact → belief → trait
+ * Persistent knowledge graph with entity CRUD, relations, search, traversal,
+ * LLM extraction merge, consolidation helpers, and auto-save.
  *
- * - observation: raw LLM captures (what was said)
- * - episode: contextual summary (what happened)
- * - fact: confirmed truth (verified multiple times)
- * - belief: stable opinion/pattern (held over time)
- * - trait: core identity trait (deeply ingrained)
+ * @example
+ * ```ts
+ * const kg = new KnowledgeGraph('/data/graph.json', 'Alice');
+ * await kg.init();
+ * kg.addEntity('TypeScript', 'technology', ['Preferred language']);
+ * const results = kg.search('TypeScript');
+ * await kg.flush();
+ * ```
  */
-export type MemoryStage = 'observation' | 'episode' | 'fact' | 'belief' | 'trait';
-
-/** Weight multiplier per stage — higher stage = more authoritative */
-export const STAGE_WEIGHTS: Record<MemoryStage, number> = {
-    observation: 0.3,
-    episode: 0.4,
-    fact: 0.7,
-    belief: 0.9,
-    trait: 1.0,
-};
-
-// ── Evidence Tracking ─────────────────────────────────
-
-/** Evidence record for an observation — tracks how well-supported it is */
-export interface Evidence {
-    /** Number of times this has been confirmed */
-    confirmations: number;
-    /** Number of times this has been contradicted */
-    contradictions: number;
-    /** Where the evidence came from (e.g. 'explicit', 'extracted', 'consolidator') */
-    sources: string[];
-    /** When this was last confirmed */
-    lastConfirmedAt: number;
-}
-
-/** Create fresh evidence for a new observation */
-export function freshEvidence(source: string = 'extracted'): Evidence {
-    return {
-        confirmations: 1,
-        contradictions: 0,
-        sources: [source],
-        lastConfirmedAt: Date.now(),
-    };
-}
-
-/**
- * Compute confidence from evidence: confirmations / (confirmations + contradictions * 2)
- * Contradictions are double-weighted to be conservative.
- */
-export function computeConfidence(evidence: Evidence): number {
-    const total = evidence.confirmations + evidence.contradictions * 2;
-    if (total === 0) return 0.5;
-    return evidence.confirmations / total;
-}
-
-/**
- * Compute weight = confidence × stage_weight
- * Used for ranking graph results.
- */
-export function computeWeight(evidence: Evidence, stage: MemoryStage): number {
-    return computeConfidence(evidence) * STAGE_WEIGHTS[stage];
-}
-
-// ── Observation Type ──────────────────────────────────
-
-/** A single observation within an entity — the atomic unit of knowledge */
-export interface Observation {
-    /** The content of the observation */
-    content: string;
-    /** Current stage in the lifecycle */
-    stage: MemoryStage;
-    /** Evidence supporting/contradicting this observation */
-    evidence: Evidence;
-    /** Where this observation came from */
-    source: string;
-    /** When this became valid (optional, for temporal reasoning) */
-    validFrom?: number;
-    /** When this stops being valid (optional, for temporal reasoning) */
-    validUntil?: number;
-    /** Decay rate per day (0 = never decays, 1 = fully decays in a day) */
-    decayRate?: number;
-    /** When this observation was first created */
-    createdAt: number;
-}
-
-// ── Relation Types (Canonical Ontology) ───────────────
-
-/** The canonical relation types — all relations must use one of these */
-export const RELATION_TYPES = [
-    'uses', 'prefers', 'preferred_over', 'works_at', 'created',
-    'depends_on', 'contains', 'instance_of', 'produces', 'related_to', 'serves',
-] as const;
-
-export type RelationType = typeof RELATION_TYPES[number];
-
-/** Map free-form relation strings to canonical types */
-const RELATION_ALIASES: Record<string, RelationType> = {
-    // uses
-    'uses': 'uses', 'used_by': 'uses', 'utilizes': 'uses', 'employs': 'uses',
-    'works_with': 'uses', 'runs_on': 'uses', 'built_with': 'uses',
-    // prefers
-    'prefers': 'prefers', 'likes': 'prefers', 'favors': 'prefers', 'chosen': 'prefers',
-    // preferred_over
-    'preferred_over': 'preferred_over', 'better_than': 'preferred_over',
-    // works_at
-    'works_at': 'works_at', 'employed_by': 'works_at', 'member_of': 'works_at',
-    'belongs_to': 'works_at',
-    // created
-    'created': 'created', 'authored': 'created', 'built': 'created',
-    'wrote': 'created', 'developed': 'created', 'made': 'created',
-    // depends_on
-    'depends_on': 'depends_on', 'requires': 'depends_on', 'needs': 'depends_on',
-    'relies_on': 'depends_on',
-    // contains
-    'contains': 'contains', 'has': 'contains', 'includes': 'contains',
-    'part_of': 'contains',
-    // instance_of
-    'instance_of': 'instance_of', 'is_a': 'instance_of', 'type_of': 'instance_of',
-    // produces
-    'produces': 'produces', 'generates': 'produces', 'outputs': 'produces',
-    'emits': 'produces',
-    // related_to (catch-all)
-    'related_to': 'related_to', 'associated_with': 'related_to',
-    'connected_to': 'related_to', 'linked_to': 'related_to',
-    // serves
-    'serves': 'serves', 'assists': 'serves', 'helps': 'serves',
-    'supports': 'serves', 'works_for': 'serves',
-};
-
-/** Normalize a free-form relation type to a canonical one */
-export function normalizeRelationType(type: string): RelationType {
-    const key = type.toLowerCase().trim().replace(/[\s-]+/g, '_');
-    return RELATION_ALIASES[key] ?? 'related_to';
-}
-
-import type { AccessContext } from './situation';
-
-// ── Core Types ────────────────────────────────────────
-
-export interface Entity {
-    name: string;
-    type: EntityType;
-    /** Observations now carry stage, evidence, and source metadata */
-    observations: Observation[];
-    /** How many times this entity has been accessed in search results */
-    accessCount: number;
-    /** Last access context — what query + domains triggered access */
-    lastAccessContext?: AccessContext;
-    /** When this entity was first seen */
-    createdAt: number;
-    /** When this entity was last updated */
-    updatedAt: number;
-}
-
-export type EntityType =
-    | 'person'
-    | 'project'
-    | 'technology'
-    | 'preference'
-    | 'concept'
-    | 'file'
-    | 'service'
-    | 'organization'
-    | 'agent-self'
-    | 'other';
-
-/** The canonical name for the agent's self-identity entity */
-export const SELF_ENTITY_NAME = 'Forkscout';
-
-export interface Relation {
-    from: string;
-    to: string;
-    /** Locked to canonical ontology */
-    type: RelationType;
-    /** Current stage in lifecycle */
-    stage: MemoryStage;
-    /** Evidence supporting this relation */
-    evidence: Evidence;
-    /** Computed weight = confidence × stage_weight */
-    weight: number;
-    /** Where this relation came from */
-    source: string;
-    /** Optional additional context */
-    context?: string;
-    /** Temporal validity */
-    validFrom?: number;
-    validUntil?: number;
-    createdAt: number;
-}
-
-/** Schema version for migration */
-const SCHEMA_VERSION = 2;
-
-export interface GraphData {
-    /** Schema version for automatic migration */
-    version?: number;
-    entities: Entity[];
-    relations: Relation[];
-    /** Consolidation metadata */
-    meta: {
-        lastConsolidatedAt: number | null;
-        mutationsSinceConsolidation: number;
-        consolidationCount: number;
-    };
-}
-
-export interface GraphSearchResult {
-    entity: Entity;
-    /** Directly connected entities */
-    neighbors: Array<{ entity: Entity; relation: Relation; direction: 'outgoing' | 'incoming' }>;
-    /** Relevance score (0–1) */
-    score: number;
-}
-
-// ── Extraction types (for LLM-based extraction) ───────
-
-export interface ExtractedEntities {
-    entities: Array<{
-        name: string;
-        type: EntityType;
-        observations: string[];
-    }>;
-    relations: Array<{
-        from: string;
-        to: string;
-        type: string;
-    }>;
-}
-
-// ── Knowledge Graph ───────────────────────────────────
-
 export class KnowledgeGraph {
     private entities = new Map<string, Entity>();
     private relations: Relation[] = [];
@@ -263,6 +57,7 @@ export class KnowledgeGraph {
 
     // ── Lifecycle ──────────────────────────────────────
 
+    /** Load graph from disk, migrating v1→v2 if necessary. */
     async init(): Promise<void> {
         try {
             const fs = await import('fs/promises');
@@ -285,7 +80,7 @@ export class KnowledgeGraph {
         console.log(`🧠 Knowledge graph: ${this.entities.size} entities, ${this.relations.length} relations (v${SCHEMA_VERSION})`);
     }
 
-    /** Migrate v1 data (string observations, free-form relations) to v2 */
+    /** Migrate v1 data (string observations, free-form relations) to v2. */
     private migrateV1(data: any): void {
         console.log('📦 Migrating knowledge graph v1 → v2...');
         const now = Date.now();
@@ -338,6 +133,7 @@ export class KnowledgeGraph {
         console.log(`📦 Migration complete: ${this.entities.size} entities, ${this.relations.length} relations`);
     }
 
+    /** Persist the graph to disk (no-op if clean). */
     async flush(): Promise<void> {
         if (!this.dirty) return;
         try {
@@ -357,6 +153,7 @@ export class KnowledgeGraph {
         }
     }
 
+    /** Wipe all data and persist immediately. */
     async clear(): Promise<void> {
         this.entities.clear();
         this.relations = [];
@@ -370,7 +167,12 @@ export class KnowledgeGraph {
     /**
      * Add or merge an entity. New observations always start at stage='observation'.
      * If entity exists, duplicate observations get their evidence reinforced.
-     * @param source Where this came from: 'explicit' | 'extracted' | 'consolidator'
+     *
+     * @param name   - Display name of the entity
+     * @param type   - Semantic type (person, technology, project, …)
+     * @param observationStrings - Facts about this entity
+     * @param source - Where this came from: 'explicit' | 'extracted' | 'consolidator'
+     * @returns The created or updated entity
      */
     addEntity(name: string, type: EntityType, observationStrings: string[], source: string = 'extracted'): Entity {
         const key = this.normalizeKey(name);
@@ -427,12 +229,16 @@ export class KnowledgeGraph {
         return entity;
     }
 
-    /** Get an entity by exact name */
+    /** Get an entity by exact name (case-insensitive). */
     getEntity(name: string): Entity | undefined {
         return this.entities.get(this.normalizeKey(name));
     }
 
-    /** Get the agent's self-identity entity (creates seed if missing, upgrades type if needed) */
+    /**
+     * Get the agent's self-identity entity.
+     * Creates a seed entity with core observations if missing,
+     * or upgrades type to `'agent-self'` if it was something else.
+     */
     getSelfEntity(): Entity {
         let self = this.entities.get(this.normalizeKey(SELF_ENTITY_NAME));
         if (!self) {
@@ -475,13 +281,20 @@ export class KnowledgeGraph {
         return self;
     }
 
-    /** Add observations to the self-entity specifically */
+    /** Add an observation to the self-entity (auto-creates if missing). */
     addSelfObservation(content: string, source: string = 'self-reflect'): void {
         this.getSelfEntity(); // ensure exists
         this.addObservations(SELF_ENTITY_NAME, [content], source);
     }
 
-    /** Add string observations to an existing entity (always stage='observation') */
+    /**
+     * Add string observations to an existing entity (always stage='observation').
+     *
+     * @param name         - Entity name
+     * @param observations - Array of fact strings to add
+     * @param source       - Evidence source label
+     * @returns `true` if the entity was found and updated
+     */
     addObservations(name: string, observations: string[], source: string = 'extracted'): boolean {
         const entity = this.entities.get(this.normalizeKey(name));
         if (!entity) return false;
@@ -509,9 +322,9 @@ export class KnowledgeGraph {
 
     /**
      * Update a rolling session observation on an entity.
-     * Replaces any existing observation starting with `[Current Session]` — only one per entity.
-     * This keeps each person's entity up-to-date with what was just discussed,
-     * surviving restarts naturally through the graph.
+     * Replaces any existing observation starting with `[Current Session]` —
+     * only one per entity. Keeps each person's entity up-to-date with what
+     * was just discussed, surviving restarts through the graph.
      */
     updateSessionContext(name: string, sessionText: string): boolean {
         const key = this.normalizeKey(name);
@@ -541,7 +354,7 @@ export class KnowledgeGraph {
         return true;
     }
 
-    /** Delete an entity and all its relations */
+    /** Delete an entity and all its relations. */
     deleteEntity(name: string): boolean {
         const key = this.normalizeKey(name);
         if (!this.entities.has(key)) return false;
@@ -557,8 +370,15 @@ export class KnowledgeGraph {
     // ── Relations ─────────────────────────────────────
 
     /**
-     * Add a relation between two entities. Type is normalized to canonical ontology.
-     * Duplicate relations get evidence reinforced. Always starts at stage='observation'.
+     * Add a relation between two entities.
+     * Type is normalized to canonical ontology. Duplicate relations get
+     * evidence reinforced. Always starts at stage='observation'.
+     *
+     * @param from    - Source entity name
+     * @param to      - Target entity name
+     * @param type    - Free-form relation type (normalized internally)
+     * @param context - Optional context string
+     * @param source  - Evidence source label
      * @returns The relation (new or existing)
      */
     addRelation(from: string, to: string, type: string, context?: string, source: string = 'extracted'): Relation {
@@ -603,7 +423,7 @@ export class KnowledgeGraph {
         return relation;
     }
 
-    /** Delete a specific relation */
+    /** Delete a specific relation by from/to/type triple. */
     deleteRelation(from: string, to: string, type: string): boolean {
         const normalizedType = normalizeRelationType(type);
         const before = this.relations.length;
@@ -625,6 +445,10 @@ export class KnowledgeGraph {
      * Search entities by name, type, or observation content.
      * Weights results by observation stage and evidence confidence.
      * Records access count and context for each accessed entity.
+     *
+     * @param query - Free-text search query
+     * @param limit - Maximum results to return (default 5)
+     * @returns Scored search results with neighbor context
      */
     search(query: string, limit = 5): GraphSearchResult[] {
         const q = query.toLowerCase();
@@ -683,7 +507,10 @@ export class KnowledgeGraph {
 
     /**
      * Get all directly connected entities for a given entity.
-     * Filters expired relations (validUntil) and sorts by weight.
+     * Filters expired relations (`validUntil`) and sorts by weight.
+     *
+     * @param name - Entity name to find neighbours of
+     * @returns Array of neighbour records with direction info
      */
     getNeighbors(name: string): Array<{ entity: Entity; relation: Relation; direction: 'outgoing' | 'incoming' }> {
         const key = this.normalizeKey(name);
@@ -715,7 +542,10 @@ export class KnowledgeGraph {
 
     /**
      * Multi-hop traversal: follow relations from a starting entity.
-     * Returns entities within `depth` hops.
+     *
+     * @param startName - Entity name to start from
+     * @param depth     - Number of hops to traverse (default 2)
+     * @returns Map of entity key → { entity, distance }
      */
     traverse(startName: string, depth = 2): Map<string, { entity: Entity; distance: number }> {
         const visited = new Map<string, { entity: Entity; distance: number }>();
@@ -752,6 +582,9 @@ export class KnowledgeGraph {
      * Merge extracted entities and relations into the graph.
      * Called after LLM extracts structured data from a conversation turn.
      * All new data starts at stage='observation' (golden rule).
+     *
+     * @param extracted - Structured entities + relations from LLM
+     * @returns Counts of newly created entities and relations
      */
     mergeExtracted(extracted: ExtractedEntities): { newEntities: number; newRelations: number } {
         let newEntities = 0;
@@ -801,6 +634,10 @@ export class KnowledgeGraph {
     /**
      * Format graph search results as a readable string for the LLM context.
      * Shows observation content with stage indicators for promoted observations.
+     *
+     * @param results  - Search results to format
+     * @param maxChars - Character budget (default 2000)
+     * @returns Formatted string for LLM system prompt injection
      */
     formatForContext(results: GraphSearchResult[], maxChars = 2000): string {
         if (results.length === 0) return '';
@@ -841,39 +678,42 @@ export class KnowledgeGraph {
 
     // ── Stats ─────────────────────────────────────────
 
+    /** Number of entities currently in the graph. */
     get entityCount(): number { return this.entities.size; }
+
+    /** Number of relations currently in the graph. */
     get relationCount(): number { return this.relations.length; }
 
-    /** Get all entities (for debugging/listing) */
+    /** Get all entities (for debugging/listing). */
     getAllEntities(): Entity[] {
         return Array.from(this.entities.values());
     }
 
-    /** Get all relations (for debugging/listing) */
+    /** Get all relations (for debugging/listing). */
     getAllRelations(): Relation[] {
         return [...this.relations];
     }
 
-    /** Get consolidation metadata */
+    /** Get consolidation metadata. */
     getMeta(): GraphData['meta'] {
         return { ...this.meta };
     }
 
     // ── Consolidator helpers ──────────────────────────
 
-    /** Set an entity directly (used by consolidator for stage promotion) */
+    /** Set an entity directly (used by consolidator for stage promotion). */
     setEntity(entity: Entity): void {
         this.entities.set(this.normalizeKey(entity.name), entity);
         this.scheduleSave();
     }
 
-    /** Replace all relations (used by consolidator after dedup/normalization) */
+    /** Replace all relations (used by consolidator after dedup/normalization). */
     setRelations(relations: Relation[]): void {
         this.relations = relations;
         this.scheduleSave();
     }
 
-    /** Mark consolidation as completed */
+    /** Mark consolidation as completed. */
     markConsolidated(): void {
         this.meta.lastConsolidatedAt = Date.now();
         this.meta.mutationsSinceConsolidation = 0;
@@ -881,7 +721,7 @@ export class KnowledgeGraph {
         this.scheduleSave();
     }
 
-    /** Check if consolidation should trigger based on mutation threshold */
+    /** Check if consolidation should trigger based on mutation threshold. */
     needsConsolidation(threshold = 100): boolean {
         return this.meta.mutationsSinceConsolidation >= threshold;
     }
@@ -892,12 +732,13 @@ export class KnowledgeGraph {
         return name.toLowerCase().trim();
     }
 
-    /** Track a mutation and schedule save */
+    /** Track a mutation and schedule auto-save. */
     private trackMutation(): void {
         this.meta.mutationsSinceConsolidation++;
         this.scheduleSave();
     }
 
+    /** Debounced save — waits 1 s after last mutation. */
     private scheduleSave(): void {
         this.dirty = true;
         if (this.saveTimer) return;
@@ -906,41 +747,4 @@ export class KnowledgeGraph {
             await this.flush();
         }, 1000);
     }
-}
-
-// ── Extraction prompt template ────────────────────────
-
-/**
- * Returns the prompt to extract entities and relations from a conversation.
- * Used by MemoryManager after each assistant turn.
- */
-export function buildExtractionPrompt(userMessage: string, assistantMessage: string): string {
-    return `Extract structured knowledge from this conversation exchange. 
-Identify entities (people, projects, technologies, preferences, services) and relations between them.
-
-CONVERSATION:
-User: ${userMessage}
-Assistant: ${assistantMessage.slice(0, 2000)}
-
-Respond ONLY with valid JSON matching this schema:
-{
-  "entities": [
-    { "name": "EntityName", "type": "person|project|technology|preference|concept|file|service|organization|other", "observations": ["fact about this entity"] }
-  ],
-  "relations": [
-    { "from": "EntityA", "to": "EntityB", "type": "RELATION_TYPE" }
-  ]
-}
-
-ALLOWED RELATION TYPES (use ONLY these):
-  ${RELATION_TYPES.join(', ')}
-
-Rules:
-- Only extract concrete, factual information — no speculation
-- Entity names should be proper nouns or specific terms (e.g. "React", "TypeScript", not "a framework")
-- Observations should be self-contained facts (e.g. "User prefers TypeScript over JavaScript")
-- Relations MUST use one of the allowed types listed above
-- Skip trivial or generic exchanges (e.g. "hello", "thanks")
-- If nothing meaningful to extract, return {"entities": [], "relations": []}
-- Keep it concise — 2-5 entities max per exchange`;
 }
