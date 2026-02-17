@@ -8,6 +8,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { exec } from 'child_process';
+import { getShell } from '../utils/shell';
 import { readFile as fsReadFile } from 'fs/promises';
 import { basename } from 'path';
 import { resolveAgentPath, PROJECT_ROOT, AGENT_SRC, AGENT_ROOT } from '../paths';
@@ -167,15 +168,12 @@ export const runCommand = tool({
         cwd: z.string().describe('Working directory (relative to project root or absolute, defaults to project root)').optional(),
     }),
     execute: async ({ command, cwd }) => {
-        // Pick a shell that actually exists (zsh on macOS, bash/sh in Docker)
-        const fs = await import('fs');
-        const shell = ['/bin/zsh', '/bin/bash', '/bin/sh'].find(s => fs.existsSync(s)) || '/bin/sh';
         return new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
             exec(command, {
                 cwd: cwd ? resolveAgentPath(cwd) : PROJECT_ROOT,
                 timeout: 30_000,
                 maxBuffer: 1024 * 1024,
-                shell,
+                shell: getShell(),
             }, (error, stdout, stderr) => {
                 resolve({
                     stdout: scrubSecrets(stdout?.trim().slice(0, 4000) || ''),
@@ -369,7 +367,7 @@ export const safeSelfEdit = tool({
         const compileResult = await new Promise<{ success: boolean; errors: string }>((resolve) => {
             exec(
                 `npx tsc -p "${tsconfigPath}" --noEmit 2>&1 | head -20`,
-                { timeout: 30_000, shell: '/bin/zsh', maxBuffer: 1024 * 1024, cwd: AGENT_ROOT },
+                { timeout: 30_000, shell: getShell(), maxBuffer: 1024 * 1024, cwd: AGENT_ROOT },
                 (_error, stdout) => {
                     const output = (stdout || '').trim();
                     resolve({ success: !output.includes('error TS'), errors: output });

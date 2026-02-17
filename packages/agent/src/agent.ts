@@ -5,6 +5,7 @@ import { Scheduler, type CronAlert } from './scheduler';
 import { McpConnector, loadMcpConfig, type McpConfig } from './mcp/connector';
 import { coreTools, createSchedulerTools, createMcpTools, createMemoryTools, createSurvivalTools, createChannelAuthTools, createTelegramTools } from './tools/ai-tools';
 import { exec } from 'child_process';
+import { getShell } from './utils/shell';
 import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT, AGENT_SRC, PROJECT_ROOT } from './paths';
 import { SurvivalMonitor } from './survival';
@@ -115,7 +116,7 @@ export class Agent {
         const schedulerPersistPath = resolvePath(AGENT_ROOT, '.forkscout', 'scheduler-jobs.json');
         this.scheduler = new Scheduler(
             (command: string) => new Promise((resolve, reject) => {
-                exec(command, { timeout: 30_000, maxBuffer: 1024 * 1024, shell: '/bin/zsh' }, (error, stdout, stderr) => {
+                exec(command, { timeout: 30_000, maxBuffer: 1024 * 1024, shell: getShell() }, (error, stdout, stderr) => {
                     if (error && !stdout && !stderr) reject(error);
                     else resolve((stdout || '').trim() + (stderr ? `\n[stderr]: ${stderr.trim()}` : ''));
                 });

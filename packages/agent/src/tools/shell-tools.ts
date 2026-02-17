@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { exec } from 'child_process';
+import { getShell } from '../utils/shell';
 import { resolveAgentPath, PROJECT_ROOT } from '../paths';
 
 /**
@@ -24,7 +25,7 @@ export const runCommandTool = {
                     cwd: params.cwd ? resolveAgentPath(params.cwd) : PROJECT_ROOT,
                     timeout: 30_000,
                     maxBuffer: 1024 * 1024, // 1MB
-                    shell: '/bin/zsh',
+                    shell: getShell(),
                 },
                 (error, stdout, stderr) => {
                     resolve({

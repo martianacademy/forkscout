@@ -10,6 +10,7 @@
 
 import { z } from 'zod';
 import { exec } from 'child_process';
+import { getShell } from '../utils/shell';
 import { resolve as resolvePath } from 'path';
 import { AGENT_SRC, AGENT_ROOT } from '../paths';
 import { resolveAgentPath } from '../paths';
@@ -54,7 +55,7 @@ export const safeSelfEditTool = {
         const compileResult = await new Promise<{ success: boolean; errors: string }>((resolve) => {
             exec(
                 `npx tsc -p "${tsconfigPath}" --noEmit 2>&1 | grep -v "default-tools" | head -20`,
-                { timeout: 30_000, shell: '/bin/zsh', maxBuffer: 1024 * 1024, cwd: AGENT_ROOT },
+                { timeout: 30_000, shell: getShell(), maxBuffer: 1024 * 1024, cwd: AGENT_ROOT },
                 (_error, stdout) => {
                     const output = (stdout || '').trim();
                     // If there's any error output that contains "error TS", compilation failed
