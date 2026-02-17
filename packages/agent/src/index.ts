@@ -19,6 +19,9 @@ export {
     computeConfidence, computeWeight, freshEvidence, normalizeRelationType,
 } from './memory/knowledge-graph';
 export { SkillStore, type Skill, type SkillData } from './memory/skills';
+export { Consolidator, type ConsolidationConfig, type ConsolidationResult } from './memory/consolidator';
+export { generateTextWithRetry, streamTextWithRetry, generateTextQuiet, type RetryConfig } from './llm/retry';
+export { countTokens, truncateToTokens } from './utils/tokens';
 export {
     classifySituation, domainBoost, observationDomainBoost,
     buildAccessContext, registerDomain, getDomain, listDomains, domainCount,

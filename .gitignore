@@ -43,3 +43,4 @@ temp-*.ts
 *.tmp
 *.bak
 *.bak2
+packages/agent/.forkscout-backup-*

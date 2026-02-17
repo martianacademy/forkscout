@@ -264,6 +264,11 @@ export class VectorStore {
         return [...new Set(this.chunks.map(c => c.sessionId))];
     }
 
+    /** Get unconsolidated chunks (for consolidator skill synthesis) */
+    getUnconsolidated(): MemoryChunk[] {
+        return this.chunks.filter(c => !c.consolidated);
+    }
+
     /** Total chunk count */
     get size(): number {
         return this.chunks.length;

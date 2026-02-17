@@ -29,7 +29,8 @@ console.log();
 
 console.log('Starting Forkscout Agent (interactive mode)...\n');
 
-import { generateText, stepCountIs } from 'ai';
+import { stepCountIs } from 'ai';
+import { generateTextWithRetry } from './llm/retry';
 import * as readline from 'readline';
 
 createAgent(config)
@@ -55,7 +56,7 @@ createAgent(config)
                 try {
                     const systemPrompt = await agent.buildSystemPrompt(input);
                     agent.saveToMemory('user', input);
-                    const { text } = await generateText({
+                    const { text } = await generateTextWithRetry({
                         model: agent.getModel(),
                         system: systemPrompt,
                         prompt: input,

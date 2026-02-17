@@ -197,6 +197,11 @@ export class SkillStore {
         return this.skills.get(id);
     }
 
+    /** Check if a skill exists by id */
+    hasSkill(id: string): boolean {
+        return this.skills.has(id);
+    }
+
     /** Get all skills */
     getAllSkills(): Skill[] {
         return Array.from(this.skills.values());

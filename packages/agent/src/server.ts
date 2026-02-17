@@ -7,13 +7,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { Readable } from 'stream';
 import {
-    streamText,
-    generateText,
     stepCountIs,
     convertToModelMessages,
 
     type UIMessage,
 } from 'ai';
+import { generateTextWithRetry, streamTextWithRetry } from './llm/retry';
 import { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
 import type { ChannelAuthStore } from './channel-auth';
 import { TelegramBridge } from './telegram';
@@ -239,7 +238,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 agent.saveToMemory('user', userText, ctx);
 
                 // Stream with AI SDK v6 — tools filtered by access level
-                const result = streamText({
+                const result = streamTextWithRetry({
                     model: agent.getModel(),
                     system: systemPrompt,
                     messages: await convertToModelMessages(messages),
@@ -300,7 +299,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 agent.saveToMemory('user', userText, ctx);
 
                 try {
-                    const { text } = await generateText({
+                    const { text } = await generateTextWithRetry({
                         model: agent.getModel(),
                         system: systemPrompt,
                         messages: await convertToModelMessages(messages),

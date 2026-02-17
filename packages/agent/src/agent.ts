@@ -1,4 +1,5 @@
-import { generateText, tool } from 'ai';
+import { tool } from 'ai';
+import { generateTextQuiet } from './llm/retry';
 import { LLMClient, type LLMConfig } from './llm/client';
 import { MemoryManager } from './memory/manager';
 import { Scheduler, type CronAlert } from './scheduler';
@@ -91,22 +92,20 @@ export class Agent {
             embeddingModel: this.llm.getEmbeddingModel(),
             recentWindowSize: 6,
             relevantMemoryLimit: 5,
-            contextBudget: 8000,
+            contextBudget: 4000,
             summarizer: async (text: string) => {
-                const { text: summary } = await generateText({
+                return generateTextQuiet({
                     model: this.llm.getModel(),
                     system: 'You are a summarization assistant. Be concise and accurate.',
                     prompt: `Summarize this conversation into 2-3 concise sentences capturing the key topics, decisions, and outcomes:\n\n${text}`,
                 });
-                return summary;
             },
             entityExtractor: async (prompt: string) => {
-                const { text: json } = await generateText({
+                return generateTextQuiet({
                     model: this.llm.getModel(),
                     system: 'You are an entity extraction bot. Return ONLY valid JSON, no markdown.',
                     prompt,
                 });
-                return json;
             },
         });
 
@@ -124,7 +123,7 @@ export class Agent {
             async (jobName: string, watchFor: string | undefined, output: string) => {
                 if (!watchFor) return 'normal';
                 try {
-                    const { text: response } = await generateText({
+                    const response = await generateTextQuiet({
                         model: this.llm.getModel(),
                         system: 'You are a classification bot. Reply with exactly one word.',
                         prompt: `A cron job named "${jobName}" just ran.\nWatch for: "${watchFor}"\n\nOutput:\n${output.slice(0, 1500)}\n\nClassify as exactly one word: normal, important, or urgent`,
@@ -475,6 +474,19 @@ Trusted users get extended conversation but not full admin tools.
 - For web: web_search first, browse_web fallback
 - No dedicated tool? Use run_command or create one with safe_self_edit
 - Be concise but thorough.
+
+=== REASONING ===
+For complex, multi-step, or ambiguous requests, THINK before acting:
+1. Briefly analyze what's being asked and what you already know
+2. Identify gaps — what do you need to look up or verify?
+3. Plan your approach — which tools in what order?
+4. Execute the plan, adjusting as you go
+5. Verify the result makes sense before responding
+
+For simple questions (greetings, facts, preferences) — just answer directly.
+For complex questions (debugging, multi-tool workflows, analysis) — think first.
+When uncertain about a fact, SEARCH before guessing. Never fabricate.
+When you notice something unexpected in tool output, flag it — don't ignore the signal.
 
 === TELEGRAM / NON-STREAMING CHANNELS ===
 When interacting via Telegram or any non-streaming channel, and the request requires multiple

@@ -12,7 +12,8 @@
  * Env: TELEGRAM_BOT_TOKEN
  */
 
-import { generateText, stepCountIs, type UIMessage } from 'ai';
+import { stepCountIs, type UIMessage } from 'ai';
+import { generateTextWithRetry } from './llm/retry';
 import { readFile, writeFile, mkdir, stat } from 'fs/promises';
 import { resolve as resolvePath, basename } from 'path';
 import type { Agent, ChatContext } from './agent';
@@ -597,7 +598,7 @@ export class TelegramBridge {
 
 
 
-            const { text: responseText } = await generateText({
+            const { text: responseText } = await generateTextWithRetry({
                 model: this.agent.getModel(),
                 system: systemPrompt,
                 messages: history.map(m => {
