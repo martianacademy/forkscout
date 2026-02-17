@@ -34,7 +34,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
 import { BudgetTracker } from './budget';
-import { loadConfig, resolveApiKeyForProvider, type ProviderType } from '../config';
+import { loadConfig, resolveApiKeyForProvider, resolveApiUrlForProvider, type ProviderType } from '../config';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -295,6 +295,7 @@ export function createRouterFromEnv(): RouterConfig {
 
         const tierApiKey = resolveApiKeyForProvider(tierProvider, cfg);
         const tierBaseURL = tierCfg.baseURL
+            || resolveApiUrlForProvider(tierProvider, cfg)
             || (tierProvider === globalProvider ? globalBaseURL : undefined);
 
         return {
