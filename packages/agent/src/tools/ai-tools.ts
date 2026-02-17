@@ -477,15 +477,17 @@ export function createMcpTools(
 ) {
     return {
         add_mcp_server: tool({
-            description: 'Add and connect a new MCP server at runtime. Its tools are discovered and registered automatically.',
+            description: 'Add and connect a new MCP server at runtime. Its tools are discovered and registered automatically. Provide EITHER command (local stdio) OR url (remote HTTP/SSE).',
             inputSchema: z.object({
                 name: z.string().describe('Unique name for this server'),
-                command: z.string().describe('The command to run (e.g. "npx", "node")'),
+                command: z.string().optional().describe('The command to run for local servers (e.g. "npx", "node")'),
                 args: z.array(z.string()).optional().describe('Arguments for the command'),
                 env: z.record(z.string()).optional().describe('Extra environment variables'),
+                url: z.string().optional().describe('Remote MCP server URL (e.g. "https://mcp.deepwiki.com/mcp")'),
+                headers: z.record(z.string()).optional().describe('HTTP headers for remote auth'),
             }),
-            execute: async ({ name, command, args, env }) => {
-                const serverConfig: McpServerConfig = { command, args, env, enabled: true };
+            execute: async ({ name, command, args, env, url, headers }) => {
+                const serverConfig: McpServerConfig = { command, args, env, url, headers, enabled: true };
                 const mcpTools = await connector.connectServer(name, serverConfig);
 
                 // Convert MCP tools to AI SDK format and register

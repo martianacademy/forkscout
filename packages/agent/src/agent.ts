@@ -4,7 +4,7 @@ import { LLMClient, type LLMConfig } from './llm/client';
 import { ModelRouter, createRouterFromEnv, type ModelPurpose } from './llm/router';
 import { MemoryManager } from './memory/manager';
 import { Scheduler, type CronAlert } from './scheduler';
-import { McpConnector, loadMcpConfig, type McpConfig } from './mcp/connector';
+import { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './mcp/connector';
 import { coreTools, createSchedulerTools, createMcpTools, createMemoryTools, createSurvivalTools, createChannelAuthTools, createTelegramTools, createBudgetTools } from './tools/ai-tools';
 import { exec } from 'child_process';
 import { getShell } from './utils/shell';
@@ -321,10 +321,13 @@ export class Agent {
     // ── MCP ────────────────────────────────────────────
 
     /** Built-in MCP servers that are always available on startup */
-    private static readonly DEFAULT_MCP_SERVERS: Record<string, { command: string; args?: string[]; enabled?: boolean }> = {
+    private static readonly DEFAULT_MCP_SERVERS: Record<string, McpServerConfig> = {
         'sequential-thinking': {
             command: 'npx',
             args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+        },
+        'deepwiki': {
+            url: 'https://mcp.deepwiki.com/mcp',
         },
     };
 
