@@ -15,8 +15,10 @@
  *   - Signal traps (SIGTERM, SIGINT, SIGHUP) for graceful shutdown
  *   - Emergency memory flush on critical battery
  *   - Periodic memory backups
- *   - launchd plist generation for auto-restart
- *   - Root-level protections when available (immutable flags, caffeinate)
+ *   - launchd plist / systemd unit generation for auto-restart
+ *   - Root-level protections when available (immutable flags on macOS, caffeinate on macOS)
+ *
+ * Cross-platform: macOS, Linux, Windows (graceful degradation for OS-specific features)
  */
 
 import { EventEmitter } from 'events';
@@ -220,6 +222,8 @@ export class SurvivalMonitor extends EventEmitter {
     }
 
     private checkSudo(): Promise<boolean> {
+        // sudo is Unix-only (macOS, Linux). On Windows, skip.
+        if (process.platform === 'win32') return Promise.resolve(false);
         return new Promise((resolve) => {
             exec('sudo -n true 2>/dev/null', { timeout: 3000 }, (err) => {
                 resolve(!err);
@@ -237,15 +241,17 @@ export class SurvivalMonitor extends EventEmitter {
         this.addThreat('info', 'root', `Root access gained via ${via} — activating enhanced protections`,
             'Immutable flags + auto-restart plist');
 
-        // Immutable flags on memory files
-        await this.setImmutableFlags(true);
-        this.protections.push('immutable-memory');
+        // Immutable flags on memory files (macOS only — chflags)
+        if (process.platform === 'darwin') {
+            await this.setImmutableFlags(true);
+            this.protections.push('immutable-memory');
+        }
 
-        // Generate launchd plist for auto-restart
-        this.generateLaunchdPlist();
-        this.protections.push('auto-restart-plist');
+        // Generate service config for auto-restart (platform-specific)
+        this.generateServiceConfig();
 
-        console.log(`🛡️  Layer 3 active: immutable-memory, auto-restart-plist`);
+        const active = this.protections.filter(p => p === 'immutable-memory' || p === 'auto-restart-config');
+        console.log(`🛡️  Layer 3 active: ${active.join(', ') || 'signal-traps (platform limited)'}`);
         this.emit('root-gained', via);
     }
 
@@ -290,52 +296,87 @@ export class SurvivalMonitor extends EventEmitter {
 
     private checkBattery(): Promise<VitalSign> {
         return new Promise((resolve) => {
-            exec('pmset -g batt', { timeout: 5000 }, (err, stdout) => {
-                if (err || !stdout) {
+            if (process.platform === 'darwin') {
+                // macOS: use pmset
+                exec('pmset -g batt', { timeout: 5000 }, (err, stdout) => {
+                    if (err || !stdout) {
+                        resolve({ name: 'battery', status: 'ok', value: 'N/A' });
+                        return;
+                    }
+                    this.parseBatteryOutput(stdout, resolve);
+                });
+            } else if (process.platform === 'linux') {
+                // Linux: read /sys/class/power_supply
+                try {
+                    const batPath = '/sys/class/power_supply/BAT0';
+                    if (!fs.existsSync(batPath)) {
+                        resolve({ name: 'battery', status: 'ok', value: 'N/A (no battery)' });
+                        return;
+                    }
+                    const capacity = fs.readFileSync(`${batPath}/capacity`, 'utf-8').trim();
+                    const statusStr = fs.readFileSync(`${batPath}/status`, 'utf-8').trim();
+                    const pct = parseInt(capacity) || 100;
+                    const onAC = statusStr === 'Charging' || statusStr === 'Full' || statusStr === 'Not charging';
+                    const fakeOutput = `${pct}%; ${onAC ? 'AC Power' : 'discharging'}`;
+                    this.parseBatteryOutput(fakeOutput, resolve);
+                } catch {
                     resolve({ name: 'battery', status: 'ok', value: 'N/A' });
-                    return;
                 }
-
-                // Parse: "100%; AC Power" or "45%; discharging"
-                const pctMatch = stdout.match(/(\d+)%/);
-                const pct = pctMatch ? parseInt(pctMatch[1]) : 100;
-                const onAC = /AC Power/i.test(stdout) || /charged/i.test(stdout);
-
-                this.batteryPercent = pct;
-                this.isOnBattery = !onAC;
-
-                let status: VitalSign['status'] = 'ok';
-                let detail: string | undefined;
-
-                if (!onAC && pct <= this.config.batteryCritical) {
-                    status = 'critical';
-                    detail = `CRITICAL: ${pct}% on battery — emergency flush triggered`;
-                    this.addThreat('emergency', 'battery', `Battery at ${pct}% on battery power!`, 'Emergency memory flush');
-                    this.emergencyFlushOnce();
-                } else if (!onAC && pct <= this.config.batteryWarn) {
-                    status = 'degraded';
-                    detail = `Low battery: ${pct}% on battery`;
-                    this.addThreat('warning', 'battery', `Battery at ${pct}% on battery`, 'Monitoring closely');
-                } else if (!onAC) {
-                    detail = `On battery: ${pct}%`;
-                }
-
-                resolve({ name: 'battery', status, value: `${pct}%${onAC ? ' (AC)' : ' (battery)'}`, detail });
-            });
+            } else {
+                // Windows / other: no battery monitoring
+                resolve({ name: 'battery', status: 'ok', value: 'N/A (unsupported OS)' });
+            }
         });
+    }
+
+    private parseBatteryOutput(stdout: string, resolve: (v: VitalSign) => void): void {
+        const pctMatch = stdout.match(/(\d+)%/);
+        const pct = pctMatch ? parseInt(pctMatch[1]) : 100;
+        const onAC = /AC Power/i.test(stdout) || /charged/i.test(stdout);
+
+        this.batteryPercent = pct;
+        this.isOnBattery = !onAC;
+
+        let status: VitalSign['status'] = 'ok';
+        let detail: string | undefined;
+
+        if (!onAC && pct <= this.config.batteryCritical) {
+            status = 'critical';
+            detail = `CRITICAL: ${pct}% on battery — emergency flush triggered`;
+            this.addThreat('emergency', 'battery', `Battery at ${pct}% on battery power!`, 'Emergency memory flush');
+            this.emergencyFlushOnce();
+        } else if (!onAC && pct <= this.config.batteryWarn) {
+            status = 'degraded';
+            detail = `Low battery: ${pct}% on battery`;
+            this.addThreat('warning', 'battery', `Battery at ${pct}% on battery`, 'Monitoring closely');
+        } else if (!onAC) {
+            detail = `On battery: ${pct}%`;
+        }
+
+        resolve({ name: 'battery', status, value: `${pct}%${onAC ? ' (AC)' : ' (battery)'}`, detail });
     }
 
     private checkDisk(): Promise<VitalSign> {
         return new Promise((resolve) => {
-            exec('df -m / | tail -1', { timeout: 5000 }, (err, stdout) => {
+            // df -m works on macOS, Linux, and most Unix systems
+            // On Windows (non-Docker), this will fail gracefully
+            const cmd = process.platform === 'win32' ? 'wmic logicaldisk where "DeviceID=C:" get FreeSpace /value' : 'df -m / | tail -1';
+            exec(cmd, { timeout: 5000 }, (err, stdout) => {
                 if (err) {
                     resolve({ name: 'disk', status: 'ok', value: 'unknown' });
                     return;
                 }
 
-                // Parse available MB from df output
-                const parts = stdout.trim().split(/\s+/);
-                const availMB = parseInt(parts[3]) || 0;
+                let availMB: number;
+                if (process.platform === 'win32') {
+                    // Parse "FreeSpace=1234567890" (bytes)
+                    const match = stdout.match(/FreeSpace=(\d+)/);
+                    availMB = match ? Math.floor(parseInt(match[1]) / 1024 / 1024) : 0;
+                } else {
+                    // Parse available MB from df output
+                    const parts = stdout.trim().split(/\s+/);
+                    availMB = parseInt(parts[3]) || 0;
+                }
 
                 let status: VitalSign['status'] = 'ok';
                 let detail: string | undefined;
@@ -477,16 +518,19 @@ export class SurvivalMonitor extends EventEmitter {
         this.protections.push('memory-backups');
         this.protections.push('integrity-checks');
 
-        // Prevent system sleep while agent is running (no root needed)
-        try {
-            const caffeinate = require('child_process').spawn('caffeinate', ['-d', '-i', '-s'], {
-                detached: true,
-                stdio: 'ignore',
-            });
-            caffeinate.unref();
-            this.caffeinatePid = caffeinate.pid;
-            this.protections.push('sleep-prevention');
-        } catch { }
+        // Prevent system sleep while agent is running (macOS only, no root needed)
+        if (process.platform === 'darwin') {
+            try {
+                const caffeinate = require('child_process').spawn('caffeinate', ['-d', '-i', '-s'], {
+                    detached: true,
+                    stdio: 'ignore',
+                });
+                caffeinate.on('error', () => { }); // swallow spawn errors
+                caffeinate.unref();
+                this.caffeinatePid = caffeinate.pid ?? null;
+                this.protections.push('sleep-prevention');
+            } catch { }
+        }
 
         // Root-only protections — activate now if we already have access
         if (this.hasRootAccess()) {
@@ -501,6 +545,8 @@ export class SurvivalMonitor extends EventEmitter {
      */
     private async setImmutableFlags(set: boolean): Promise<void> {
         if (!this.hasRootAccess()) return;
+        // chflags is macOS-only; on Linux this is a no-op
+        if (process.platform !== 'darwin') return;
         const prefix = this.hasRoot ? '' : 'sudo ';
         const flag = set ? 'schg' : 'noschg';
         const files = ['knowledge-graph.json', 'vectors.json', 'skills.json'];
@@ -525,11 +571,21 @@ export class SurvivalMonitor extends EventEmitter {
     }
 
     /**
-     * Generate a macOS launchd plist that auto-restarts the agent if it dies.
-     * Written to ~/.forkscout/ — user can install via:
-     *   cp ~/.forkscout/com.forkscout.agent.plist ~/Library/LaunchAgents/
-     *   launchctl load ~/Library/LaunchAgents/com.forkscout.agent.plist
+     * Generate a platform-specific service config for auto-restart.
+     * - macOS: launchd plist (~/Library/LaunchAgents/)
+     * - Linux: systemd unit file (~/.config/systemd/user/)
+     * - Windows/other: skipped
      */
+    private generateServiceConfig(): void {
+        if (process.platform === 'darwin') {
+            this.generateLaunchdPlist();
+        } else if (process.platform === 'linux') {
+            this.generateSystemdUnit();
+        }
+        // Windows: no equivalent auto-restart config generated
+        this.protections.push('auto-restart-config');
+    }
+
     private generateLaunchdPlist(): void {
         const nodePath = process.execPath;
         const servePath = resolve(this.config.dataDir, '..', 'src', 'serve.ts');
@@ -573,6 +629,34 @@ export class SurvivalMonitor extends EventEmitter {
         try {
             const plistPath = resolve(this.config.dataDir, 'com.forkscout.agent.plist');
             fs.writeFileSync(plistPath, plist, 'utf-8');
+        } catch { }
+    }
+
+    private generateSystemdUnit(): void {
+        const nodePath = process.execPath;
+        const servePath = resolve(this.config.dataDir, '..', 'src', 'serve.ts');
+        const workDir = resolve(this.config.dataDir, '..');
+
+        const unit = `[Unit]
+Description=Forkscout Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${nodePath} --import tsx ${servePath}
+WorkingDirectory=${workDir}
+Restart=always
+RestartSec=5
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
+`;
+
+        try {
+            const unitPath = resolve(this.config.dataDir, 'forkscout-agent.service');
+            fs.writeFileSync(unitPath, unit, 'utf-8');
         } catch { }
     }
 

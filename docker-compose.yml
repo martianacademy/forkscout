@@ -1,0 +1,51 @@
+# ─── Forkscout Agent — Docker Compose ───
+#
+# Usage:
+#   docker compose up -d          # start agent + SearXNG
+#   docker compose up -d agent    # agent only (no SearXNG)
+#   docker compose logs -f agent  # follow logs
+#   docker compose down           # stop all
+#
+# Copy .env.example → .env and fill in your keys before starting.
+
+services:
+  agent:
+    build: .
+    container_name: forkscout-agent
+    restart: unless-stopped
+    ports:
+      - "${AGENT_PORT:-3210}:3210"
+    env_file:
+      - .env
+    environment:
+      - AGENT_PORT=3210
+      # Point SearXNG to the compose service
+      - SEARXNG_URL=http://searxng:8080
+    volumes:
+      # Persist agent memory, knowledge graph, sessions across restarts
+      - agent-data:/app/packages/agent/.forkscout
+    depends_on:
+      searxng:
+        condition: service_healthy
+
+  # SearXNG — private search engine (used by web_search tool)
+  searxng:
+    image: searxng/searxng:latest
+    container_name: forkscout-searxng
+    restart: unless-stopped
+    ports:
+      - "${SEARXNG_PORT:-8888}:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
+    volumes:
+      - searxng-data:/etc/searxng
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  agent-data:
+  searxng-data:

@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 #
 # Forkscout Agent Watchdog
 # Runs the agent with crash-loop protection.

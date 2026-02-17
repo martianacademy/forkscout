@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment (secrets)
+.env
+.env.local
+.env.*.local
+
+# Runtime data
+.forkscout/
+*.pid
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Generated / temp / test
+generated_images/
+images/
+.tmp/
+temp/
+temp-*.ts
+*.tmp
+*.bak
+*.bak2
+
+# Git
+.git/
+.gitignore
+
+# Docker (don't copy Docker files into the image)
+Dockerfile
+docker-compose.yml
+
+# Docs (not needed at runtime)
+*.md
+!packages/agent/package.json
