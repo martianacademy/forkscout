@@ -18,14 +18,11 @@ cd forkscout
 cp .env.example .env
 ```
 
-Edit `.env` with your credentials:
+Edit `.env` with your API key (all other settings live in `forkscout.config.json`):
 
 ```env
-# Required
-LLM_PROVIDER=openrouter
-LLM_MODEL=x-ai/grok-4.1-fast
-LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_API_KEY=your-api-key-here
+# Required — at least one provider API key
+OPENROUTER_API_KEY=sk-or-v1-your-key-here
 
 # Recommended
 ADMIN_SECRET=your-secret-here
@@ -139,9 +136,23 @@ docker compose down -v   # stop + remove volumes (reset node_modules/searxng con
 ### Core Agent
 
 - **AI SDK v6** — streaming (`streamText`) and sync (`generateText`) with multi-step tool loops
-- **OpenRouter** — default provider (supports OpenAI, Anthropic, Ollama, any OpenAI-compatible API)
-- **39 tools** — file system, shell, web, memory, scheduling, self-edit, MCP, channel auth, Telegram
+- **Multi-Provider** — OpenRouter (default), OpenAI, Anthropic, Google, Ollama, any OpenAI-compatible API
+- **49+ tools** — file system, shell, web, memory, scheduling, self-edit, MCP, channel auth, Telegram, budget management
 - **Hot-swappable LLM** — change model/provider at runtime via API
+
+### Multi-Model Router & Budget
+
+- **Tiered Model Routing** — `fast` (cheap/quick), `balanced` (default), `powerful` (complex tasks) — each tier can use a different model and provider
+- **Per-Provider API Keys** — configure separate API keys and URLs for OpenRouter, OpenAI, Anthropic, Google, and OpenAI-compatible providers simultaneously
+- **Budget Tracking** — daily and monthly spending limits with real-time cost tracking per request
+- **Budget Warnings** — configurable warning threshold (default 80%) alerts before hitting limits
+- **Automatic Retry & Failover** — exponential backoff with jitter on transient errors, automatic failover across providers
+
+### Centralized Configuration
+
+- **`forkscout.config.json`** — single config file for all non-secret settings (models, router tiers, budget, agent behavior)
+- **`.env` for secrets only** — API keys, tokens, and deployment overrides
+- **Per-provider URLs** — custom API endpoints per provider (e.g. proxies, self-hosted instances) via env vars with hardcoded fallbacks
 
 ### Cognitive Memory
 
@@ -152,6 +163,7 @@ docker compose down -v   # stop + remove volumes (reset node_modules/searxng con
 - **Situation Classifier** — detects conversation domain (tech, personal, career, etc.) and boosts relevant memories
 - **Auto Entity Extraction** — extracts entities and relations from every conversation turn
 - **Self-Identity** — autobiographical memory entity that evolves over time
+- **LLM-Powered Consolidation** — periodic background process that promotes cognitive stages, reinforces evidence, and prunes stale data
 
 ### Multi-Channel Communication
 
@@ -195,15 +207,23 @@ docker compose down -v   # stop + remove volumes (reset node_modules/searxng con
               │                   │
 ┌─────────────▼───────────────────▼───────────┐
 │              Agent Core                      │
-│  ┌─────────┐ ┌──────────┐ ┌──────────────┐  │
-│  │ LLM     │ │ Tool     │ │ System       │  │
-│  │ Client  │ │ Registry │ │ Prompt       │  │
-│  └────┬────┘ └────┬─────┘ └──────┬───────┘  │
-│       │           │              │           │
-│  ┌────▼───────────▼──────────────▼────────┐  │
-│  │          AI SDK v6 (streamText)        │  │
-│  │       Multi-step tool execution        │  │
-│  └────────────────────────────────────────┘  │
+│  ┌─────────────────────────────────────────┐ │
+│  │     Model Router (fast/balanced/power)  │ │
+│  │  ┌─────────┐ ┌──────────┐ ┌─────────┐  │ │
+│  │  │OpenRouter│ │ OpenAI   │ │Anthropic│  │ │
+│  │  └─────────┘ └──────────┘ └─────────┘  │ │
+│  │         Budget Tracker ($5/day)         │ │
+│  └─────────────────────────────────────────┘ │
+│                                              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────────┐ │
+│  │ Tool     │ │ Config   │ │ System       │ │
+│  │ Registry │ │ Loader   │ │ Prompt       │ │
+│  └────┬─────┘ └──────────┘ └──────┬───────┘ │
+│       │                           │          │
+│  ┌────▼───────────────────────────▼────────┐ │
+│  │          AI SDK v6 (streamText)         │ │
+│  │    Multi-step tool execution + retry    │ │
+│  └─────────────────────────────────────────┘ │
 │                                              │
 │  ┌──────────┐ ┌───────────┐ ┌────────────┐  │
 │  │ Memory   │ │ Survival  │ │ Channel    │  │
@@ -246,28 +266,25 @@ pnpm install
 cp .env.example .env
 ```
 
-Edit `.env` with your credentials:
+Edit `.env` with your API key(s):
 
 ```env
-# Required
-LLM_PROVIDER=openrouter
-LLM_MODEL=x-ai/grok-4.1-fast
-LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_API_KEY=your-api-key-here
+# Required — at least one provider API key
+OPENROUTER_API_KEY=sk-or-v1-your-key-here
+
+# Optional — additional providers (if routing tiers to different providers)
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+GOOGLE_API_KEY=
 
 # Security
 ADMIN_SECRET=your-secret-here
 
 # Optional — Telegram bot
 TELEGRAM_BOT_TOKEN=your-bot-token-here
-
-# Optional — Web search
-SEARXNG_URL=http://localhost:8888
-
-# Optional — Tuning
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=2000
 ```
+
+All non-secret settings (model, temperature, router tiers, budget) live in `forkscout.config.json` at the project root.
 
 ### Run the Agent
 
@@ -299,20 +316,69 @@ curl -X POST http://localhost:3210/api/chat/sync \
 
 ## Configuration
 
-### Environment Variables
+Forkscout uses a **two-layer config system**:
 
-| Variable             | Required    | Default                        | Description                                                 |
-| -------------------- | ----------- | ------------------------------ | ----------------------------------------------------------- |
-| `LLM_PROVIDER`       | Yes         | `openrouter`                   | LLM provider: `openrouter`, `openai`, `anthropic`, `ollama` |
-| `LLM_MODEL`          | Yes         | `x-ai/grok-4.1-fast`           | Model identifier                                            |
-| `LLM_BASE_URL`       | Yes         | `https://openrouter.ai/api/v1` | API base URL                                                |
-| `LLM_API_KEY`        | Yes         | —                              | API key for the LLM provider                                |
-| `ADMIN_SECRET`       | Recommended | —                              | Secret for admin authentication                             |
-| `TELEGRAM_BOT_TOKEN` | No          | —                              | Telegram Bot API token                                      |
-| `SEARXNG_URL`        | No          | `http://localhost:8888`        | SearXNG instance URL                                        |
-| `LLM_TEMPERATURE`    | No          | `0.7`                          | Response creativity (0-1)                                   |
-| `LLM_MAX_TOKENS`     | No          | `2000`                         | Max tokens per response                                     |
-| `AGENT_PORT`         | No          | `3210`                         | HTTP server port                                            |
+- **`forkscout.config.json`** — all non-secret settings (committed to repo)
+- **`.env`** — API keys, tokens, and deployment overrides (gitignored)
+
+### Config File (`forkscout.config.json`)
+
+```json
+{
+  "provider": "openrouter",
+  "model": "x-ai/grok-4.1-fast",
+  "temperature": 0.7,
+  "maxTokens": 2000,
+  "router": {
+    "fast": {
+      "model": "google/gemini-2.0-flash-001",
+      "provider": "openrouter"
+    },
+    "balanced": { "model": "x-ai/grok-4.1-fast", "provider": "openrouter" },
+    "powerful": {
+      "model": "anthropic/claude-sonnet-4.5",
+      "provider": "openrouter"
+    }
+  },
+  "budget": {
+    "dailyUSD": 5,
+    "monthlyUSD": 50,
+    "warningPct": 80
+  },
+  "agent": {
+    "maxIterations": 10,
+    "port": 3210
+  },
+  "searxng": {
+    "url": "http://localhost:8888"
+  }
+}
+```
+
+Each router tier can use a **different provider** — e.g. fast queries via Google Gemini, complex tasks via Anthropic Claude, all routed through OpenRouter or directly.
+
+### Environment Variables (`.env`)
+
+| Variable                      | Required    | Default                        | Description                                |
+| ----------------------------- | ----------- | ------------------------------ | ------------------------------------------ |
+| `OPENROUTER_API_KEY`          | Yes\*       | —                              | OpenRouter API key                         |
+| `OPENROUTER_API_URL`          | No          | `https://openrouter.ai/api/v1` | Override OpenRouter endpoint               |
+| `OPENAI_API_KEY`              | No          | —                              | OpenAI API key (for direct OpenAI access)  |
+| `OPENAI_API_URL`              | No          | `https://api.openai.com/v1`    | Override OpenAI endpoint                   |
+| `ANTHROPIC_API_KEY`           | No          | —                              | Anthropic API key                          |
+| `ANTHROPIC_API_URL`           | No          | `https://api.anthropic.com/v1` | Override Anthropic endpoint                |
+| `GOOGLE_API_KEY`              | No          | —                              | Google AI API key                          |
+| `GOOGLE_API_URL`              | No          | Google default                 | Override Google AI endpoint                |
+| `OPEN_API_COMPATIBLE_API_KEY` | No          | —                              | Key for any OpenAI-compatible provider     |
+| `OPEN_API_COMPATIBLE_API_URL` | No          | —                              | URL for any OpenAI-compatible provider     |
+| `ADMIN_SECRET`                | Recommended | —                              | Secret for admin authentication            |
+| `TELEGRAM_BOT_TOKEN`          | No          | —                              | Telegram Bot API token                     |
+| `SEARXNG_URL`                 | No          | `http://localhost:8888`        | SearXNG instance URL (deployment override) |
+| `AGENT_PORT`                  | No          | `3210`                         | HTTP server port (deployment override)     |
+
+\* At least one provider API key is required. If routing all tiers through OpenRouter, only `OPENROUTER_API_KEY` is needed.
+
+URL env vars use a fallback chain: **env var → hardcoded default → SDK default**. Leave empty to use defaults.
 
 ### Runtime Config
 
@@ -441,7 +507,7 @@ The `send_telegram_message` tool resolves users by name, @username, or userId fr
 
 ## Tools
 
-### 39 Built-in Tools
+### 49+ Built-in Tools
 
 #### File System (5)
 
@@ -495,11 +561,19 @@ The `send_telegram_message` tool resolves users by name, @username, or userId fr
 
 #### MCP (3)
 
-| Tool                | Description                      |
-| ------------------- | -------------------------------- |
-| `add_mcp_server`    | Connect an MCP server at runtime |
-| `remove_mcp_server` | Disconnect an MCP server         |
-| `list_mcp_servers`  | List connected MCP servers       |
+| Tool                | Description                                                      |
+| ------------------- | ---------------------------------------------------------------- |
+| `add_mcp_server`    | Connect an MCP server at runtime (local stdio or remote HTTP)    |
+| `remove_mcp_server` | Disconnect an MCP server                                         |
+| `list_mcp_servers`  | List connected MCP servers                                       |
+
+#### Budget & Model (3)
+
+| Tool              | Description                                              |
+| ----------------- | -------------------------------------------------------- |
+| `check_budget`    | Check current spending vs daily/monthly limits           |
+| `budget_report`   | Detailed cost breakdown by model, tier, and time period  |
+| `switch_tier`     | Switch the active model tier (fast/balanced/powerful)     |
 
 #### Self-Evolution (1)
 
@@ -532,6 +606,14 @@ The `send_telegram_message` tool resolves users by name, @username, or userId fr
 #### MCP-Provided (variable)
 
 Additional tools discovered from connected MCP servers appear dynamically at runtime.
+
+**Default MCP servers** (auto-connected on startup):
+
+| Server                  | Transport        | Tools Provided                                           |
+| ----------------------- | ---------------- | -------------------------------------------------------- |
+| `sequential-thinking`   | stdio (local)    | `sequentialthinking` — Chain-of-thought reasoning         |
+| `deepwiki`              | HTTP (remote)    | `read_wiki_structure`, `read_wiki_contents`, `ask_question` — GitHub repo analysis |
+| `context7`              | stdio (local)    | `resolve-library-id`, `get-library-docs` — Library documentation (if configured in mcp.json) |
 
 ---
 
@@ -607,7 +689,7 @@ All memory data is stored in `.forkscout/`:
 
 | Role      | Tools Available                                     |
 | --------- | --------------------------------------------------- |
-| **Admin** | All 39+ tools                                       |
+| **Admin** | All 49+ tools                                       |
 | **Guest** | `web_search`, `browse_web`, `get_current_date` only |
 
 ### Protected Paths
@@ -635,6 +717,20 @@ Non-admin users:
 
 Forkscout supports the [Model Context Protocol](https://modelcontextprotocol.io/) for extending capabilities with external tool servers.
 
+### Transport Types
+
+| Type             | Use Case                      | Example                                          |
+| ---------------- | ----------------------------- | ------------------------------------------------ |
+| **stdio**        | Local process (spawn)         | `npx -y @context7/mcp@latest`                    |
+| **Streamable HTTP** | Remote server (URL)       | `https://mcp.deepwiki.com/mcp`                   |
+
+### Default MCP Servers
+
+Forkscout auto-connects to these on startup (no config needed):
+
+- **sequential-thinking** (stdio) — chain-of-thought reasoning via `@modelcontextprotocol/server-sequential-thinking`
+- **deepwiki** (remote HTTP) — GitHub repo analysis via `https://mcp.deepwiki.com/mcp`
+
 ### Adding MCP Servers
 
 Via config file (`.forkscout/mcp.json`):
@@ -646,6 +742,11 @@ Via config file (`.forkscout/mcp.json`):
       "command": "npx",
       "args": ["-y", "@context7/mcp@latest"],
       "enabled": true
+    },
+    "my-remote-server": {
+      "url": "https://my-mcp-server.example.com/mcp",
+      "headers": { "Authorization": "Bearer my-token" },
+      "enabled": true
     }
   }
 }
@@ -654,6 +755,8 @@ Via config file (`.forkscout/mcp.json`):
 Or at runtime — tell the agent:
 
 > "Add an MCP server called 'context7' with command 'npx' and args ['-y', '@context7/mcp@latest']"
+
+> "Add a remote MCP server called 'deepwiki' with url 'https://mcp.deepwiki.com/mcp'"
 
 The agent discovers and registers all tools from connected MCP servers automatically.
 
@@ -709,7 +812,8 @@ Built into the system prompt as pre-rational behavioral triggers:
 
 ```
 forkscout/
-├── .env.example              # Environment template
+├── .env.example              # Environment template (secrets only)
+├── forkscout.config.json      # All non-secret settings (models, router, budget)
 ├── .gitignore
 ├── package.json              # Workspace root
 ├── pnpm-workspace.yaml       # pnpm workspace config
@@ -725,6 +829,7 @@ forkscout/
         ├── serve.ts           # Entry point (starts server)
         ├── server.ts          # HTTP API server
         ├── agent.ts           # Agent core (tools, memory, prompts)
+        ├── config.ts          # Centralized config loader (forkscout.config.json + .env)
         ├── telegram.ts        # Telegram bridge (long polling)
         ├── channel-auth.ts    # Channel authorization store
         ├── scheduler.ts       # Cron job scheduler
@@ -733,17 +838,28 @@ forkscout/
         ├── cli.ts             # CLI interface
         ├── index.ts           # Package exports
         ├── llm/
-        │   └── client.ts      # LLM client (OpenRouter/OpenAI/Ollama)
+        │   ├── client.ts      # LLM client (provider-agnostic)
+        │   ├── router.ts      # Multi-model router (fast/balanced/powerful tiers)
+        │   ├── budget.ts      # Budget tracker (daily/monthly spending limits)
+        │   └── retry.ts       # Retry/failover with exponential backoff
         ├── mcp/
-        │   └── connector.ts   # MCP server connector
+        │   ├── connector.ts   # MCP server connector (stdio + remote HTTP)
+        │   └── tools.ts       # MCP management tools
         ├── memory/
         │   ├── manager.ts     # Memory manager (orchestrates all layers)
         │   ├── vector-store.ts# Vector store with embeddings
         │   ├── knowledge-graph.ts # Knowledge graph with cognitive dynamics
         │   ├── skills.ts      # Skill store (procedural memory)
-        │   └── situation.ts   # Situation classifier
+        │   ├── situation.ts   # Situation classifier
+        │   └── consolidator.ts# LLM-powered memory consolidation
+        ├── utils/
+        │   ├── shell.ts       # Cross-platform shell utilities
+        │   └── tokens.ts      # Token counting & budget utilities
         └── tools/
             ├── ai-tools.ts    # All AI SDK tool definitions
+            ├── default-tools.ts # File, shell, web, utility tools
+            ├── shell-tools.ts # Shell command tools
+            ├── self-edit-tools.ts # Self-evolution tools
             └── registry.ts    # Tool registry types
 ```
 
@@ -757,6 +873,7 @@ forkscout/
 ├── channel-auth.json       # Persistent channel grants
 ├── telegram-state.json     # Telegram offset + inbox
 ├── mcp.json                # MCP server configuration
+├── budget.json             # Budget tracking (spending, costs per request)
 └── backups/                # Periodic memory snapshots
 ```
 
@@ -767,7 +884,9 @@ forkscout/
 | Package                     | Version   | Purpose                                           |
 | --------------------------- | --------- | ------------------------------------------------- |
 | `ai`                        | `^6.0.86` | AI SDK v6 — streaming, tools, messages            |
-| `@ai-sdk/openai`            | `^3.0.29` | OpenAI-compatible provider (used with OpenRouter) |
+| `@ai-sdk/openai`            | `^3.0.29` | OpenAI-compatible provider (OpenRouter, OpenAI)   |
+| `@ai-sdk/anthropic`         | `^3.0.44` | Anthropic provider (direct Claude access)         |
+| `@ai-sdk/google`            | `^3.0.29` | Google AI provider (Gemini models)                |
 | `zod`                       | `^3.23.8` | Schema validation for tool inputs                 |
 | `dotenv`                    | `^17.3.1` | Environment variable loading                      |
 | `playwright`                | `^1.49.1` | Headless browser for web search/browsing          |
