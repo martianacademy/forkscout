@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { generateTextQuiet } from './llm/retry';
 import { LLMClient, type LLMConfig } from './llm/client';
-import { ModelRouter, createRouterFromEnv, type ModelPurpose, type ModelTier } from './llm/router';
+import { ModelRouter, createRouterFromEnv, type ModelPurpose } from './llm/router';
 import { MemoryManager } from './memory/manager';
 import { Scheduler, type CronAlert } from './scheduler';
 import { McpConnector, loadMcpConfig, type McpConfig } from './mcp/connector';
