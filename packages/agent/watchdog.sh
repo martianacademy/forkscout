@@ -65,7 +65,7 @@ run_agent() {
     # Always use plain tsx (not tsx watch) — tsx watch kills the process on every
     # source-file save, which destroys in-flight LLM calls during interactive chat.
     # The watchdog loop already provides crash restart, so tsx watch is redundant here.
-    pnpm exec tsx src/cli.ts
+    pnpm exec tsx src/serve.ts
 
     exit_code=$?
     local elapsed=$(( $(date +%s) - start_time ))

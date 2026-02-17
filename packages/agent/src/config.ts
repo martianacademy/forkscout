@@ -40,6 +40,8 @@ export interface AgentSettings {
     maxIterations: number;
     autoRegisterTools: boolean;
     port: number;
+    /** Owner/creator name used in knowledge graph bootstrap and identity references */
+    owner: string;
 }
 
 export interface SearxngConfig {
@@ -101,7 +103,7 @@ const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         powerful: { model: 'anthropic/claude-sonnet-4', provider: 'openrouter' },
     },
     budget: { dailyUSD: 5, monthlyUSD: 50, warningPct: 80 },
-    agent: { maxIterations: 10, autoRegisterTools: true, port: 3210 },
+    agent: { maxIterations: 10, autoRegisterTools: true, port: 3210, owner: 'Admin' },
     searxng: { url: 'http://localhost:8888' },
 };
 
@@ -293,6 +295,7 @@ function buildAgentConfig(file: any): AgentSettings {
         maxIterations: file?.maxIterations ?? DEFAULTS.agent.maxIterations,
         autoRegisterTools: file?.autoRegisterTools ?? DEFAULTS.agent.autoRegisterTools,
         port: intEnv('AGENT_PORT') ?? file?.port ?? DEFAULTS.agent.port,
+        owner: env('AGENT_OWNER') || file?.owner || DEFAULTS.agent.owner,
     };
 }
 

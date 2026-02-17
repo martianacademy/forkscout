@@ -561,19 +561,19 @@ The `send_telegram_message` tool resolves users by name, @username, or userId fr
 
 #### MCP (3)
 
-| Tool                | Description                                                      |
-| ------------------- | ---------------------------------------------------------------- |
-| `add_mcp_server`    | Connect an MCP server at runtime (local stdio or remote HTTP)    |
-| `remove_mcp_server` | Disconnect an MCP server                                         |
-| `list_mcp_servers`  | List connected MCP servers                                       |
+| Tool                | Description                                                   |
+| ------------------- | ------------------------------------------------------------- |
+| `add_mcp_server`    | Connect an MCP server at runtime (local stdio or remote HTTP) |
+| `remove_mcp_server` | Disconnect an MCP server                                      |
+| `list_mcp_servers`  | List connected MCP servers                                    |
 
 #### Budget & Model (3)
 
-| Tool              | Description                                              |
-| ----------------- | -------------------------------------------------------- |
-| `check_budget`    | Check current spending vs daily/monthly limits           |
-| `budget_report`   | Detailed cost breakdown by model, tier, and time period  |
-| `switch_tier`     | Switch the active model tier (fast/balanced/powerful)     |
+| Tool            | Description                                             |
+| --------------- | ------------------------------------------------------- |
+| `check_budget`  | Check current spending vs daily/monthly limits          |
+| `budget_report` | Detailed cost breakdown by model, tier, and time period |
+| `switch_tier`   | Switch the active model tier (fast/balanced/powerful)   |
 
 #### Self-Evolution (1)
 
@@ -609,11 +609,11 @@ Additional tools discovered from connected MCP servers appear dynamically at run
 
 **Default MCP servers** (auto-connected on startup):
 
-| Server                  | Transport        | Tools Provided                                           |
-| ----------------------- | ---------------- | -------------------------------------------------------- |
-| `sequential-thinking`   | stdio (local)    | `sequentialthinking` — Chain-of-thought reasoning         |
-| `deepwiki`              | HTTP (remote)    | `read_wiki_structure`, `read_wiki_contents`, `ask_question` — GitHub repo analysis |
-| `context7`              | stdio (local)    | `resolve-library-id`, `get-library-docs` — Library documentation (if configured in mcp.json) |
+| Server                | Transport     | Tools Provided                                                                               |
+| --------------------- | ------------- | -------------------------------------------------------------------------------------------- |
+| `sequential-thinking` | stdio (local) | `sequentialthinking` — Chain-of-thought reasoning                                            |
+| `deepwiki`            | HTTP (remote) | `read_wiki_structure`, `read_wiki_contents`, `ask_question` — GitHub repo analysis           |
+| `context7`            | stdio (local) | `resolve-library-id`, `get-library-docs` — Library documentation (if configured in mcp.json) |
 
 ---
 
@@ -719,10 +719,10 @@ Forkscout supports the [Model Context Protocol](https://modelcontextprotocol.io/
 
 ### Transport Types
 
-| Type             | Use Case                      | Example                                          |
-| ---------------- | ----------------------------- | ------------------------------------------------ |
-| **stdio**        | Local process (spawn)         | `npx -y @context7/mcp@latest`                    |
-| **Streamable HTTP** | Remote server (URL)       | `https://mcp.deepwiki.com/mcp`                   |
+| Type                | Use Case              | Example                        |
+| ------------------- | --------------------- | ------------------------------ |
+| **stdio**           | Local process (spawn) | `npx -y @context7/mcp@latest`  |
+| **Streamable HTTP** | Remote server (URL)   | `https://mcp.deepwiki.com/mcp` |
 
 ### Default MCP Servers
 
@@ -881,16 +881,16 @@ forkscout/
 
 ## Dependencies
 
-| Package                     | Version   | Purpose                                           |
-| --------------------------- | --------- | ------------------------------------------------- |
-| `ai`                        | `^6.0.86` | AI SDK v6 — streaming, tools, messages            |
-| `@ai-sdk/openai`            | `^3.0.29` | OpenAI-compatible provider (OpenRouter, OpenAI)   |
-| `@ai-sdk/anthropic`         | `^3.0.44` | Anthropic provider (direct Claude access)         |
-| `@ai-sdk/google`            | `^3.0.29` | Google AI provider (Gemini models)                |
-| `zod`                       | `^3.23.8` | Schema validation for tool inputs                 |
-| `dotenv`                    | `^17.3.1` | Environment variable loading                      |
-| `playwright`                | `^1.49.1` | Headless browser for web search/browsing          |
-| `@modelcontextprotocol/sdk` | `^1.26.0` | MCP client for external tool servers              |
+| Package                     | Version   | Purpose                                         |
+| --------------------------- | --------- | ----------------------------------------------- |
+| `ai`                        | `^6.0.86` | AI SDK v6 — streaming, tools, messages          |
+| `@ai-sdk/openai`            | `^3.0.29` | OpenAI-compatible provider (OpenRouter, OpenAI) |
+| `@ai-sdk/anthropic`         | `^3.0.44` | Anthropic provider (direct Claude access)       |
+| `@ai-sdk/google`            | `^3.0.29` | Google AI provider (Gemini models)              |
+| `zod`                       | `^3.23.8` | Schema validation for tool inputs               |
+| `dotenv`                    | `^17.3.1` | Environment variable loading                    |
+| `playwright`                | `^1.49.1` | Headless browser for web search/browsing        |
+| `@modelcontextprotocol/sdk` | `^1.26.0` | MCP client for external tool servers            |
 
 Zero external dependencies for Telegram (uses native `fetch`).
 

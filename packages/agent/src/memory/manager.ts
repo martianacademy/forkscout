@@ -64,6 +64,8 @@ export interface MemoryConfig {
     chunkOverlap?: number;
     /** Consolidation config overrides */
     consolidation?: ConsolidationConfig;
+    /** Owner name for knowledge graph identity bootstrap */
+    ownerName?: string;
 }
 
 export class MemoryManager {
@@ -96,6 +98,7 @@ export class MemoryManager {
 
         this.graph = new KnowledgeGraph(
             `${this.config.storagePath}/knowledge-graph.json`,
+            config.ownerName,
         );
 
         this.skills = new SkillStore(
@@ -198,6 +201,12 @@ export class MemoryManager {
         return this.recentMessages
             .slice(-n)
             .map(({ role, content }) => ({ role, content }));
+    }
+
+    /** Get recent history with timestamps (for session context persistence) */
+    getRecentHistoryWithTimestamps(limit?: number): Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }> {
+        const n = limit ?? this.config.recentWindowSize ?? 6;
+        return this.recentMessages.slice(-n).map(({ role, content, timestamp }) => ({ role, content, timestamp }));
     }
 
     /** Search for relevant memories across ALL past sessions */
@@ -463,6 +472,38 @@ export class MemoryManager {
     /** Record an observation about the agent itself */
     recordSelfObservation(content: string, source: string = 'self-reflect'): void {
         this.graph.addSelfObservation(content, source);
+    }
+
+    /**
+     * Update a person's entity with the latest conversation context.
+     * Called after each assistant reply so the entity always has a rolling
+     * "[Current Session]" observation reflecting recent exchanges.
+     * Survives restarts — the graph is persisted to disk.
+     *
+     * @param entityName The person's name (e.g. "Suru")
+     * @param exchanges Recent messages with timestamps (last 10)
+     * @param channel Optional channel identifier (e.g. "telegram")
+     */
+    updateEntitySession(
+        entityName: string,
+        exchanges: Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }>,
+        channel?: string,
+    ): void {
+        if (!entityName || exchanges.length === 0) return;
+
+        // Build a detailed session log from the last 10 messages
+        const lines: string[] = [];
+        const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        lines.push(`(updated ${now}${channel ? `, via ${channel}` : ''}, ${exchanges.length} messages)`);
+
+        for (const msg of exchanges.slice(-10)) {
+            const prefix = msg.role === 'user' ? 'User' : 'Agent';
+            const ts = msg.timestamp.toISOString().slice(11, 19); // HH:MM:SS
+            const preview = msg.content.slice(0, 200);
+            lines.push(`[${ts}] ${prefix}: ${preview}${msg.content.length > 200 ? '…' : ''}`);
+        }
+
+        this.graph.updateSessionContext(entityName, lines.join('\n'));
     }
 
     // ── Entity Extraction ─────────────────────────────

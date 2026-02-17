@@ -5,7 +5,7 @@
  * we organize by *why* the memory matters right now — the active life situation.
  *
  * Domains are not storage labels — they are retrieval lenses.
- * The same memory ("Suru prefers TypeScript") surfaces differently depending
+ * The same memory ("User prefers TypeScript") surfaces differently depending
  * on whether we're planning a project (planning+capability) or buying a gift (social+identity).
  *
  * The domain registry is extensible: the agent can discover and register new
@@ -22,9 +22,9 @@ import type { EntityType } from './knowledge-graph';
 
 /** Built-in life domains — the universal situations a mind encounters */
 export const BUILT_IN_DOMAINS = [
-    'identity',     // who/relationship — "who is Suru?"
-    'preference',   // likes/dislikes — "what does Suru like?"
-    'capability',   // skills/ability — "can Suru fix this?"
+    'identity',     // who/relationship — "who is this person?"
+    'preference',   // likes/dislikes — "what do they like?"
+    'capability',   // skills/ability — "can they fix this?"
     'knowledge',    // factual info — "what is Rust?"
     'planning',     // deciding actions — "what should we do?"
     'episodic',     // past events — "what happened earlier?"

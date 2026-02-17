@@ -131,7 +131,7 @@ function detectChatContext(req: IncomingMessage, body?: any, channelAuth?: Chann
             const referer = (req.headers['referer'] || '').toLowerCase();
 
             if (referer.includes('localhost') && (ua.includes('mozilla') || ua.includes('chrome') || ua.includes('safari'))) {
-                ctx = { channel: 'frontend', sender: 'Suru', isAdmin };
+                ctx = { channel: 'frontend', isAdmin };
             } else if (ua.includes('curl') || ua.includes('httpie') || ua.includes('wget')) {
                 ctx = { channel: 'terminal', isAdmin };
             } else if (ua.includes('telegrambot')) {

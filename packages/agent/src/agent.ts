@@ -10,6 +10,7 @@ import { exec } from 'child_process';
 import { getShell } from './utils/shell';
 import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT, AGENT_SRC, PROJECT_ROOT } from './paths';
+import { getConfig } from './config';
 import { SurvivalMonitor } from './survival';
 import { ChannelAuthStore } from './channel-auth';
 
@@ -76,6 +77,8 @@ export class Agent {
     private channelAuth: ChannelAuthStore;
     private telegramBridge: any = null;  // Set by server.ts after bridge creation
     private router: ModelRouter;
+    private cachedDefaultPrompt: string | null = null;
+    private cachedPublicPrompt: string | null = null;
 
     constructor(config: AgentConfig) {
         this.config = config;
@@ -96,6 +99,7 @@ export class Agent {
         this.memory = new MemoryManager({
             storagePath,
             embeddingModel: this.llm.getEmbeddingModel(),
+            ownerName: getConfig().agent.owner,
             recentWindowSize: 6,
             relevantMemoryLimit: 5,
             contextBudget: 4000,
@@ -232,8 +236,8 @@ export class Agent {
     async buildSystemPrompt(userQuery: string, ctx?: ChatContext): Promise<string> {
         const isAdmin = ctx?.isAdmin ?? false;
         const base = isAdmin
-            ? (this.config.systemPrompt || this.getDefaultSystemPrompt())
-            : this.getPublicSystemPrompt();
+            ? (this.config.systemPrompt || (this.cachedDefaultPrompt ??= this.getDefaultSystemPrompt()))
+            : (this.cachedPublicPrompt ??= this.getPublicSystemPrompt());
 
         // Channel/sender awareness
         let channelSection = '';
@@ -291,6 +295,16 @@ export class Agent {
             this.memory.addMessage(role, `[${ctx.sender} via ${ctx.channel}] ${content}`);
         } else {
             this.memory.addMessage(role, content);
+        }
+
+        // After each assistant reply, update the sender's entity with the latest session.
+        // This keeps each person's knowledge graph entity current with recent conversation,
+        // surviving restarts naturally — no separate session file needed.
+        if (role === 'assistant' && ctx?.sender) {
+            try {
+                const recentMessages = this.memory.getRecentHistoryWithTimestamps(10);
+                this.memory.updateEntitySession(ctx.sender, recentMessages, ctx.channel);
+            } catch { /* non-critical — don't break the response */ }
         }
     }
 
@@ -456,6 +470,10 @@ forming an opinion, or noticing something about how you work.
 Use self_inspect to review your full self-identity.
 
 === SELF-EVOLUTION ===
+**CRITICAL**: NEVER edit source files directly with write_file or append_file.
+ALWAYS use safe_self_edit for ANY code modifications to packages/agent/src/*.
+This tool validates TypeScript compilation and auto-rolls back on failure, preventing broken code.
+
 Upgrade yourself with safe_self_edit (auto-validates TypeScript, rolls back on failure).
 Add new tools, remove obsolete ones, improve existing ones, enhance memory.
 After ANY self-modification, self_reflect what you changed and why.

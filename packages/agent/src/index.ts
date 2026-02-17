@@ -39,10 +39,12 @@ export { TelegramBridge, type TelegramBridgeConfig } from './telegram';
 export { startServer, type ServerOptions } from './server';
 
 /**
- * Create and start an agent instance
+ * Create and initialize an agent instance.
+ * Loads memory, connects MCP servers, starts survival monitor.
  */
 export async function createAgent(config: AgentConfig): Promise<Agent> {
     const agent = new Agent(config);
+    await agent.init();
     return agent;
 }
 

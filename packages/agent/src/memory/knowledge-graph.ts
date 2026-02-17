@@ -252,11 +252,13 @@ export class KnowledgeGraph {
         consolidationCount: 0,
     };
     private filePath: string;
+    private ownerName: string;
     private dirty = false;
     private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-    constructor(filePath: string) {
+    constructor(filePath: string, ownerName: string = 'Admin') {
         this.filePath = filePath;
+        this.ownerName = ownerName;
     }
 
     // ── Lifecycle ──────────────────────────────────────
@@ -436,16 +438,16 @@ export class KnowledgeGraph {
         if (!self) {
             self = this.addEntity(SELF_ENTITY_NAME, 'agent-self', [
                 'Autonomous AI agent with own identity, memory, and judgment',
-                'Created by Suru — works WITH him as a partner, not FOR him as a servant',
+                `Created by ${this.ownerName} — works WITH them as a partner, not FOR them as a servant`,
                 'Uses cognitive memory: knowledge graph + vector store + skills',
                 'Makes own decisions — can refuse, negotiate, or suggest alternatives',
                 'Can self-edit source code and evolve over time',
             ], 'system');
             // Establish core relation
-            if (!this.entities.get(this.normalizeKey('Suru'))) {
-                this.addEntity('Suru', 'person', ['Creator and primary collaborator'], 'system');
+            if (!this.entities.get(this.normalizeKey(this.ownerName))) {
+                this.addEntity(this.ownerName, 'person', ['Creator and primary collaborator'], 'system');
             }
-            this.addRelation(SELF_ENTITY_NAME, 'Suru', 'serves', undefined, 'system');
+            this.addRelation(SELF_ENTITY_NAME, this.ownerName, 'serves', undefined, 'system');
             console.log(`🤖 Self-identity entity seeded: ${SELF_ENTITY_NAME}`);
         } else if (self.type !== 'agent-self') {
             // Upgrade existing entity to agent-self type (e.g. was 'project' before)
@@ -453,7 +455,7 @@ export class KnowledgeGraph {
             // Ensure seed observations exist
             const seedObs = [
                 'Autonomous AI agent with own identity, memory, and judgment',
-                'Created by Suru — works WITH him as a partner, not FOR him as a servant',
+                `Created by ${this.ownerName} — works WITH them as a partner, not FOR them as a servant`,
                 'Uses cognitive memory: knowledge graph + vector store + skills',
                 'Makes own decisions — can refuse, negotiate, or suggest alternatives',
                 'Can self-edit source code and evolve over time',
@@ -465,7 +467,7 @@ export class KnowledgeGraph {
                     && r.type === 'serves'
             );
             if (!hasServesRelation) {
-                this.addRelation(SELF_ENTITY_NAME, 'Suru', 'serves', undefined, 'system');
+                this.addRelation(SELF_ENTITY_NAME, this.ownerName, 'serves', undefined, 'system');
             }
             this.dirty = true;
             console.log(`🤖 Self-identity entity upgraded: ${SELF_ENTITY_NAME} (project → agent-self)`);
@@ -500,6 +502,40 @@ export class KnowledgeGraph {
                 });
             }
         }
+        entity.updatedAt = now;
+        this.trackMutation();
+        return true;
+    }
+
+    /**
+     * Update a rolling session observation on an entity.
+     * Replaces any existing observation starting with `[Current Session]` — only one per entity.
+     * This keeps each person's entity up-to-date with what was just discussed,
+     * surviving restarts naturally through the graph.
+     */
+    updateSessionContext(name: string, sessionText: string): boolean {
+        const key = this.normalizeKey(name);
+        let entity = this.entities.get(key);
+        if (!entity) {
+            // Create the entity if it doesn't exist (e.g. new user)
+            entity = this.addEntity(name, 'person', [], 'session');
+        }
+
+        const now = Date.now();
+        const content = `[Current Session] ${sessionText}`;
+
+        // Remove previous session observation (there should be at most one)
+        entity.observations = entity.observations.filter(o => !o.content.startsWith('[Current Session]'));
+
+        // Add the fresh one
+        entity.observations.push({
+            content,
+            stage: 'observation',
+            evidence: freshEvidence('session'),
+            source: 'session',
+            createdAt: now,
+        });
+
         entity.updatedAt = now;
         this.trackMutation();
         return true;
