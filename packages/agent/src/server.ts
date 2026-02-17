@@ -13,6 +13,7 @@ import {
     type UIMessage,
 } from 'ai';
 import { generateTextWithRetry, streamTextWithRetry } from './llm/retry';
+import type { ModelTier } from './llm/router';
 import { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
 import type { ChannelAuthStore } from './channel-auth';
 import { TelegramBridge } from './telegram';
@@ -203,6 +204,14 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
     const agent = new Agent(config);
     await agent.init();
 
+    // Log router configuration
+    const routerStatus = agent.getRouter().getStatus();
+    console.log(`\n📊 Model Router:`);
+    for (const [tier, info] of Object.entries(routerStatus.tiers)) {
+        console.log(`   ${tier}: ${info.modelId} ($${info.inputPricePer1M}/$${info.outputPricePer1M} per 1M tokens)`);
+    }
+    console.log(`   Budget: $${routerStatus.budget.dailyLimitUSD}/day, $${routerStatus.budget.monthlyLimitUSD}/month`);
+
     const channelAuth = agent.getChannelAuth();
 
     const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -238,8 +247,10 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 agent.saveToMemory('user', userText, ctx);
 
                 // Stream with AI SDK v6 — tools filtered by access level
+                const { model: chatModel, tier: chatTier, modelId: chatModelId } = agent.getModelForPurpose('chat');
+                console.log(`[Router]: Using ${chatTier} tier (${chatModelId})`);
                 const result = streamTextWithRetry({
-                    model: agent.getModel(),
+                    model: chatModel,
                     system: systemPrompt,
                     messages: await convertToModelMessages(messages),
                     tools: agent.getToolsForContext(ctx),
@@ -255,8 +266,12 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                             }
                         }
                     },
-                    onFinish: ({ text, steps }) => {
+                    onFinish: ({ text, steps, usage }) => {
                         console.log(`[Agent]: Done (${steps?.length || 0} step(s))`);
+                        // Record cost
+                        if (usage) {
+                            agent.getRouter().recordUsage(chatTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+                        }
                         if (text) {
                             agent.saveToMemory('assistant', text);
                             console.log(`[Agent]: ${text.slice(0, 200)}${text.length > 200 ? '…' : ''}`);
@@ -299,13 +314,20 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 agent.saveToMemory('user', userText, ctx);
 
                 try {
-                    const { text } = await generateTextWithRetry({
-                        model: agent.getModel(),
+                    const { model: syncModel, tier: syncTier, modelId: syncModelId } = agent.getModelForPurpose('chat');
+                    console.log(`[Router]: Sync using ${syncTier} tier (${syncModelId})`);
+                    const { text, usage } = await generateTextWithRetry({
+                        model: syncModel,
                         system: systemPrompt,
                         messages: await convertToModelMessages(messages),
                         tools: agent.getToolsForContext(ctx),
                         stopWhen: stepCountIs(20),
                     });
+
+                    // Record cost
+                    if (usage) {
+                        agent.getRouter().recordUsage(syncTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+                    }
 
                     agent.saveToMemory('assistant', text);
                     sendJSON(res, 200, { response: text });
@@ -351,10 +373,12 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
             // ── GET /api/status ──
             if (req.method === 'GET' && url === '/api/status') {
                 const tools = agent.getToolList();
+                const routerStatus = agent.getRouter().getStatus();
                 sendJSON(res, 200, {
                     running: agent.getState().running,
                     tools: tools.map(t => t.name),
                     toolCount: tools.length,
+                    router: routerStatus,
                     telegram: telegramBridge ? {
                         connected: telegramBridge.isRunning(),
                         bot: telegramBridge.getBotInfo()?.username || null,

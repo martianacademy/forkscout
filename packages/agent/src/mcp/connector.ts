@@ -3,6 +3,7 @@
  *
  * Supports:
  *   - stdio transport (spawn a local process)
+ *   - Streamable HTTP (remote servers via URL)
  *   - Auto-discovers tools from each connected server
  *   - Converts MCP tools to agent Tool format (with Zod schemas)
  *   - Graceful connect/disconnect lifecycle
@@ -10,18 +11,23 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 import type { Tool } from '../tools/registry';
 
 // ─── Config types ───────────────────────────────────────
 
 export interface McpServerConfig {
-    /** The executable to spawn (e.g. "npx", "node", "python") */
-    command: string;
+    /** The executable to spawn (e.g. "npx", "node", "python") — for local stdio */
+    command?: string;
     /** Arguments passed to the command */
     args?: string[];
     /** Extra environment variables */
     env?: Record<string, string>;
+    /** Remote server URL (e.g. "https://mcp.deepwiki.com/mcp") — for Streamable HTTP */
+    url?: string;
+    /** HTTP headers for remote auth (e.g. { Authorization: 'Bearer {{TOKEN}}' }) */
+    headers?: Record<string, string>;
     /** Only register tools matching these names (if omitted, all tools) */
     toolFilter?: string[];
     /** Whether this server is enabled (default true) */
@@ -38,7 +44,7 @@ export interface McpConfig {
 interface ConnectedServer {
     name: string;
     client: Client;
-    transport: StdioClientTransport;
+    transport: StdioClientTransport | StreamableHTTPClientTransport;
     tools: Tool[];
 }
 
@@ -76,6 +82,7 @@ export class McpConnector {
     /**
      * Connect to a single MCP server and return its tools.
      * Public so the agent can hot-add servers at runtime.
+     * Supports local stdio OR remote Streamable HTTP.
      */
     async connectServer(name: string, config: McpServerConfig): Promise<Tool[]> {
         // Prevent duplicate connections
@@ -87,20 +94,33 @@ export class McpConnector {
             { name: `forkscout-${name}`, version: '1.0.0' },
         );
 
-        const transport = new StdioClientTransport({
-            command: config.command,
-            args: config.args ?? [],
-            env: config.env,
-            stderr: 'pipe',
-        });
+        let transport: StdioClientTransport | StreamableHTTPClientTransport;
 
-        // Pipe stderr to console for debugging
-        const stderr = transport.stderr;
-        if (stderr && 'on' in stderr) {
-            (stderr as any).on('data', (chunk: Buffer) => {
-                const line = chunk.toString().trim();
-                if (line) console.error(`[mcp:${name}] ${line}`);
+        if (config.url) {
+            // Remote Streamable HTTP
+            transport = new StreamableHTTPClientTransport({
+                url: config.url,
+                headers: config.headers,
             });
+        } else if (config.command) {
+            // Local stdio
+            transport = new StdioClientTransport({
+                command: config.command,
+                args: config.args ?? [],
+                env: config.env,
+                stderr: 'pipe',
+            });
+
+            // Pipe stderr to console for debugging
+            const stderr = (transport as any).stderr;
+            if (stderr && 'on' in stderr) {
+                stderr.on('data', (chunk: Buffer) => {
+                    const line = chunk.toString().trim();
+                    if (line) console.error(`[mcp:${name}] ${line}`);
+                });
+            }
+        } else {
+            throw new Error(`MCP server "${name}": Must provide either 'command' (local) or 'url' (remote)`);
         }
 
         await client.connect(transport);

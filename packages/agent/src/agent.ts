@@ -1,10 +1,11 @@
 import { tool } from 'ai';
 import { generateTextQuiet } from './llm/retry';
 import { LLMClient, type LLMConfig } from './llm/client';
+import { ModelRouter, createRouterFromEnv, type ModelPurpose, type ModelTier } from './llm/router';
 import { MemoryManager } from './memory/manager';
 import { Scheduler, type CronAlert } from './scheduler';
 import { McpConnector, loadMcpConfig, type McpConfig } from './mcp/connector';
-import { coreTools, createSchedulerTools, createMcpTools, createMemoryTools, createSurvivalTools, createChannelAuthTools, createTelegramTools } from './tools/ai-tools';
+import { coreTools, createSchedulerTools, createMcpTools, createMemoryTools, createSurvivalTools, createChannelAuthTools, createTelegramTools, createBudgetTools } from './tools/ai-tools';
 import { exec } from 'child_process';
 import { getShell } from './utils/shell';
 import { resolve as resolvePath } from 'path';
@@ -74,10 +75,15 @@ export class Agent {
     private survival: SurvivalMonitor;
     private channelAuth: ChannelAuthStore;
     private telegramBridge: any = null;  // Set by server.ts after bridge creation
+    private router: ModelRouter;
 
     constructor(config: AgentConfig) {
         this.config = config;
         this.llm = new LLMClient(config.llm);
+
+        // Multi-model router with budget tracking
+        const routerConfig = createRouterFromEnv();
+        this.router = new ModelRouter(routerConfig);
 
         // Resolve MCP config path early so tools can use it
         this.mcpConfigPath = typeof config.mcpConfig === 'string'
@@ -95,14 +101,14 @@ export class Agent {
             contextBudget: 4000,
             summarizer: async (text: string) => {
                 return generateTextQuiet({
-                    model: this.llm.getModel(),
+                    model: this.router.getModel('summarize').model,
                     system: 'You are a summarization assistant. Be concise and accurate.',
                     prompt: `Summarize this conversation into 2-3 concise sentences capturing the key topics, decisions, and outcomes:\n\n${text}`,
                 });
             },
             entityExtractor: async (prompt: string) => {
                 return generateTextQuiet({
-                    model: this.llm.getModel(),
+                    model: this.router.getModel('extract').model,
                     system: 'You are an entity extraction bot. Return ONLY valid JSON, no markdown.',
                     prompt,
                 });
@@ -124,7 +130,7 @@ export class Agent {
                 if (!watchFor) return 'normal';
                 try {
                     const response = await generateTextQuiet({
-                        model: this.llm.getModel(),
+                        model: this.router.getModel('classify').model,
                         system: 'You are a classification bot. Reply with exactly one word.',
                         prompt: `A cron job named "${jobName}" just ran.\nWatch for: "${watchFor}"\n\nOutput:\n${output.slice(0, 1500)}\n\nClassify as exactly one word: normal, important, or urgent`,
                     });
@@ -180,13 +186,22 @@ export class Agent {
 
             // Channel authorization tools (list/grant/revoke channel users)
             Object.assign(this.toolSet, createChannelAuthTools(this.channelAuth));
+
+            // Budget & model tier tools (check spending, switch models)
+            Object.assign(this.toolSet, createBudgetTools(this.router));
         }
     }
 
     // ── Public API (used by server.ts) ─────────────────
 
-    /** Get the AI SDK LanguageModelV1 instance */
-    getModel() { return this.llm.getModel(); }
+    /** Get the AI SDK LanguageModelV1 instance (uses balanced tier by default) */
+    getModel() { return this.router.getModel('chat').model; }
+
+    /** Get a model for a specific purpose (respects budget) */
+    getModelForPurpose(purpose: ModelPurpose) { return this.router.getModel(purpose); }
+
+    /** Get the model router instance */
+    getRouter(): ModelRouter { return this.router; }
 
     /** Get all registered tools as an AI SDK ToolSet */
     getTools(): Record<string, any> { return { ...this.toolSet }; }
@@ -291,15 +306,16 @@ export class Agent {
         this.state.running = true;
     }
 
-    /** Stop the agent, flush memory, disconnect MCP servers, stop survival monitor */
+    /** Stop the agent, flush memory, disconnect MCP servers, stop survival monitor, save budget */
     async stop(): Promise<void> {
         this.state.running = false;
         this.scheduler.stopAll();
+        this.router.getBudget().stop();
         await this.survival.stop();
         await this.mcpConnector.disconnect();
         // Use survival's write-access guard if root (lifts immutable flags for final flush)
         await this.survival.withWriteAccess(() => this.memory.flush());
-        console.log('\nAgent stopped (memory saved)');
+        console.log('\nAgent stopped (memory + budget saved)');
     }
 
     // ── MCP ────────────────────────────────────────────
@@ -467,6 +483,18 @@ When admin says "send me the screenshot" or "send me the image/file" on Telegram
 Grants persist across restarts. Session tracking is in-memory only (resets on restart).
 Guests (unauthenticated) get limited tools, no memory access, no personal data.
 Trusted users get extended conversation but not full admin tools.
+
+=== COST CONTROL ===
+You use multiple model tiers to balance cost vs capability:
+- **fast**: cheap model for summaries, classifications, entity extraction (runs automatically)
+- **balanced**: your main model for conversation and tool use
+- **powerful**: expensive model for complex reasoning (auto-selected when needed)
+The router picks the right model automatically. Budget limits are enforced:
+- Daily and monthly spending caps prevent runaway costs
+- When budget is tight, the router downgrades to cheaper models automatically
+- Use check_budget to see current spending (today, this month, per-model breakdown)
+- Use set_model_tier to override a tier's model (admin only)
+Never apologize for using a cheaper model — just do your best with what's available.
 
 === GUIDELINES ===
 - Execute directly — don't explore what you already know
