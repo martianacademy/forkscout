@@ -30,7 +30,7 @@ export {
 } from './memory/situation';
 export { coreTools, createSchedulerTools, createMcpTools, createMemoryTools, createSurvivalTools, createChannelAuthTools, createBudgetTools } from './tools/ai-tools';
 export { ModelRouter, createRouterFromEnv, getModelPricing, type ModelPurpose, type ModelTier, type ModelTierConfig, type ModelPricing, type RouterConfig } from './llm/router';
-export { loadConfig, getConfig, resolveApiKeyForProvider, type ForkscoutConfig, type ProviderType, type TierConfig, type BudgetConfig, type AgentSettings, type SearxngConfig } from './config';
+export { loadConfig, getConfig, resolveApiKeyForProvider, resolveApiUrlForProvider, type ForkscoutConfig, type ProviderType, type TierConfig, type BudgetConfig, type AgentSettings, type SearxngConfig } from './config';
 export { BudgetTracker, type BudgetData, type BudgetLimits, type BudgetStatus, type SpendRecord } from './llm/budget';
 export { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './mcp/connector';
 export { SurvivalMonitor, type SurvivalStatus, type SurvivalConfig, type VitalSign, type ThreatEvent, type ThreatLevel } from './survival';

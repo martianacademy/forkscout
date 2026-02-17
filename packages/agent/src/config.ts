@@ -73,9 +73,15 @@ export interface ForkscoutConfig {
     // ── Secrets (resolved from .env, never in config file) ──
     secrets: {
         openrouterApiKey: string;
+        openrouterApiUrl: string;
         openaiApiKey: string;
+        openaiApiUrl: string;
         anthropicApiKey: string;
+        anthropicApiUrl: string;
         googleApiKey: string;
+        googleApiUrl: string;
+        openApiCompatibleApiKey: string;
+        openApiCompatibleApiUrl: string;
         adminSecret: string;
         telegramBotToken: string;
     };
@@ -104,6 +110,8 @@ const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
 const PROVIDER_URLS: Record<string, string> = {
     openrouter: 'https://openrouter.ai/api/v1',
     openai: 'https://api.openai.com/v1',
+    anthropic: 'https://api.anthropic.com/v1',
+    google: 'https://generativelanguage.googleapis.com/v1beta',
     ollama: 'http://localhost:11434/v1',
 };
 
@@ -140,7 +148,7 @@ export function loadConfig(force = false): ForkscoutConfig {
         env('DEFAULT_PROVIDER') || fileConfig.provider || DEFAULTS.provider
     );
 
-    const baseURL = env('SELF_HOSTING_LLM_URL')
+    const baseURL = resolveProviderUrl(provider)
         || fileConfig.baseURL
         || PROVIDER_URLS[provider]
         || DEFAULTS.baseURL;
@@ -161,9 +169,15 @@ export function loadConfig(force = false): ForkscoutConfig {
 
         secrets: {
             openrouterApiKey: env('OPENROUTER_API_KEY') || '',
+            openrouterApiUrl: env('OPENROUTER_API_URL') || PROVIDER_URLS.openrouter,
             openaiApiKey: env('OPENAI_API_KEY') || '',
+            openaiApiUrl: env('OPENAI_API_URL') || PROVIDER_URLS.openai,
             anthropicApiKey: env('ANTHROPIC_API_KEY') || '',
+            anthropicApiUrl: env('ANTHROPIC_API_URL') || PROVIDER_URLS.anthropic,
             googleApiKey: env('GOOGLE_API_KEY') || '',
+            googleApiUrl: env('GOOGLE_API_URL') || PROVIDER_URLS.google,
+            openApiCompatibleApiKey: env('OPEN_API_COMPATIBLE_API_KEY') || '',
+            openApiCompatibleApiUrl: env('OPEN_API_COMPATIBLE_API_URL') || '',
             adminSecret: env('ADMIN_SECRET') || '',
             telegramBotToken: env('TELEGRAM_BOT_TOKEN') || '',
         },
@@ -191,7 +205,7 @@ export function resolveApiKeyForProvider(provider: ProviderType, cfg?: Forkscout
         anthropic: c.secrets.anthropicApiKey,
         google: c.secrets.googleApiKey,
         ollama: '',
-        'openai-compatible': '',
+        'openai-compatible': c.secrets.openApiCompatibleApiKey,
     };
 
     // Provider-specific key first
@@ -205,6 +219,39 @@ export function resolveApiKeyForProvider(provider: ProviderType, cfg?: Forkscout
         || c.secrets.anthropicApiKey
         || c.secrets.googleApiKey
         || '';
+}
+
+/**
+ * Resolve the API URL for a given provider type.
+ * Priority: provider-specific env URL → PROVIDER_URLS default
+ */
+export function resolveApiUrlForProvider(provider: ProviderType, cfg?: ForkscoutConfig): string | undefined {
+    const c = cfg || getConfig();
+    const map: Record<ProviderType, string> = {
+        openrouter: c.secrets.openrouterApiUrl,
+        openai: c.secrets.openaiApiUrl,
+        anthropic: c.secrets.anthropicApiUrl,
+        google: c.secrets.googleApiUrl,
+        ollama: PROVIDER_URLS.ollama,
+        'openai-compatible': c.secrets.openApiCompatibleApiUrl,
+    };
+    return map[provider] || PROVIDER_URLS[provider];
+}
+
+/**
+ * Internal: resolve the provider URL from env for the default provider
+ * (used during config loading before the config is fully built).
+ */
+function resolveProviderUrl(provider: ProviderType): string | undefined {
+    const envUrlMap: Record<string, string> = {
+        openrouter: 'OPENROUTER_API_URL',
+        openai: 'OPENAI_API_URL',
+        anthropic: 'ANTHROPIC_API_URL',
+        google: 'GOOGLE_API_URL',
+        'openai-compatible': 'OPEN_API_COMPATIBLE_API_URL',
+    };
+    const envKey = envUrlMap[provider];
+    return envKey ? env(envKey) : undefined;
 }
 
 // ── Builder helpers ────────────────────────────────────
