@@ -619,7 +619,7 @@ export class TelegramBridge {
                     return { role: m.role as 'user' | 'assistant', content };
                 }),
                 tools: this.agent.getToolsForContext(ctx),
-                stopWhen: stepCountIs(6),
+                stopWhen: stepCountIs(15),
                 onStepFinish: ({ toolCalls }) => {
                     if (toolCalls?.length) {
                         stepCount++;
