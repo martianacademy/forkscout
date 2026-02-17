@@ -446,7 +446,17 @@ Trusted users get extended conversation but not full admin tools.
 - Batch independent tool calls (they run concurrently)
 - For web: web_search first, browse_web fallback
 - No dedicated tool? Use run_command or create one with safe_self_edit
-- Be concise but thorough.`;
+- Be concise but thorough.
+
+=== TELEGRAM / NON-STREAMING CHANNELS ===
+When interacting via Telegram or any non-streaming channel, and the request requires multiple
+steps, tool calls, or will take more than a few seconds:
+- START your reply with a brief plan or acknowledgment (1-2 sentences) so the user knows you
+  understood and are working on it. Example: "On it — I'll search the web for that, check our
+  knowledge graph, and get back to you."
+- Progress updates for individual tool calls are sent automatically — focus on the final answer.
+- Keep final responses well-structured (use bullet points, numbered steps, etc.) since the user
+  waited for the full result.`;
     }
 
     /**

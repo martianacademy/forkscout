@@ -126,6 +126,27 @@ export class TelegramBridge {
     private readonly MAX_HISTORY = 20;  // keep last N messages per chat
     private readonly MAX_INBOX = 200;   // cap inbox size
 
+    // Human-readable labels for tool calls (shown as progress updates)
+    private static readonly TOOL_LABELS: Record<string, string> = {
+        web_search: '🔍 Searching the web…',
+        browse_web: '🌐 Browsing a page…',
+        screenshot: '📸 Taking a screenshot…',
+        read_file: '📄 Reading a file…',
+        write_file: '📝 Writing a file…',
+        safe_self_edit: '🛠 Editing source code…',
+        run_command: '⚙️ Running a command…',
+        memory_store: '🧠 Saving to memory…',
+        memory_recall: '🧠 Recalling from memory…',
+        knowledge_query: '📚 Searching knowledge graph…',
+        knowledge_store: '📚 Storing knowledge…',
+        schedule_task: '⏰ Scheduling a task…',
+        list_scheduled: '⏰ Checking scheduled tasks…',
+        list_files: '📂 Listing files…',
+        delete_file: '🗑 Deleting a file…',
+        date_time: '🕐 Checking date/time…',
+        grant_channel_access: '🔑 Updating access…',
+    };
+
     constructor(agent: Agent, config: TelegramBridgeConfig) {
         this.token = config.token;
         this.baseUrl = `https://api.telegram.org/bot${this.token}`;
@@ -474,6 +495,10 @@ export class TelegramBridge {
             // Refresh typing every ~4 seconds during generation
             const typingInterval = setInterval(() => this.sendTyping(chatId), 4000);
 
+            // Track steps for progress updates
+            let stepCount = 0;
+            const progressMsgIds: number[] = [];  // IDs of progress messages (to optionally clean up)
+
             const { text: responseText } = await generateText({
                 model: this.agent.getModel(),
                 system: systemPrompt,
@@ -488,8 +513,19 @@ export class TelegramBridge {
                 stopWhen: stepCountIs(6),
                 onStepFinish: ({ toolCalls }) => {
                     if (toolCalls?.length) {
+                        stepCount++;
                         console.log(`[Telegram/Agent]: ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
-                        // Refresh typing after tool calls
+
+                        // Send progress update to user (non-blocking)
+                        const labels = toolCalls.map((tc: any) =>
+                            TelegramBridge.TOOL_LABELS[tc.toolName] || `⚙️ ${tc.toolName}`
+                        );
+                        // Deduplicate (e.g. multiple web_search calls)
+                        const unique = [...new Set(labels)];
+                        const progressText = unique.join('\n');
+                        this.sendMessage(chatId, progressText).catch(() => { });
+
+                        // Keep typing indicator going
                         this.sendTyping(chatId);
                     }
                 },
