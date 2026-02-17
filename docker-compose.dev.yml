@@ -8,4 +8,6 @@ services:
   agent:
     volumes:
       - ./packages/agent:/app/packages/agent
+      # Anonymous volume keeps Linux-compiled node_modules from the image,
+      # preventing macOS host node_modules from overriding them.
       - /app/packages/agent/node_modules

@@ -24,14 +24,11 @@ services:
       # Point SearXNG to the compose service
       - SEARXNG_URL=http://searxng:8080
     volumes:
-      # Named volume: on first run Docker copies the image's agent code into this volume.
-      # All agent self-edits, memory, cron jobs, auth — everything persists here,
-      # even across `docker compose down` + `up` or image updates.
-      # To reset to a fresh image state: docker volume rm forkscout_agent-data
-      - agent-data:/app/packages/agent
-      # Anonymous volume keeps Linux-compiled node_modules from the image build.
-      # To update deps after a Dockerfile change: docker compose up --build -V
-      - /app/packages/agent/node_modules
+      # Named volume at /app: on first run Docker copies everything from the image.
+      # All agent changes persist — source code, node_modules, memory, cron jobs, auth.
+      # System-level packages (OS libs, Playwright browsers) stay in the image layer.
+      # To reset to a fresh image state: docker volume rm forkscout_app-data
+      - app-data:/app
     depends_on:
       searxng:
         condition: service_healthy
@@ -55,5 +52,5 @@ services:
       retries: 3
 
 volumes:
-  agent-data:
+  app-data:
   searxng-data:

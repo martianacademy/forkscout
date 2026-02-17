@@ -80,18 +80,13 @@ AGENT_PORT=4000 SEARXNG_PORT=9090 docker compose up -d
 
 ### Persistence
 
-A named Docker volume (`agent-data`) stores the entire agent package. On first run, Docker copies the image's code into the volume. After that, all agent changes persist — self-edited source code, memory, knowledge graph, cron jobs, auth, Telegram state — even across `docker compose down` + `up` or image updates.
-
-- **`.forkscout/`** — memory, knowledge graph, vector embeddings, auth, cron jobs, Telegram state
-- **`src/`** — source code (including any self-edits the agent makes)
-
-An anonymous volume keeps the Linux-compiled `node_modules` separate.
+A named Docker volume (`app-data`) stores the entire `/app` directory. On first run, Docker copies everything from the image into the volume. After that, all changes persist — source code, node_modules, memory, knowledge graph, cron jobs, auth, Telegram state — even across `docker compose down` + `up`. System-level packages (OS libs, Playwright browsers) remain in the image layer.
 
 To reset to a fresh image state:
 
 ```bash
 docker compose down
-docker volume rm forkscout_agent-data
+docker volume rm forkscout_app-data
 docker compose up -d
 ```
 
