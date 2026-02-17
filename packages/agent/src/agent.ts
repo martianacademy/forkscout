@@ -305,6 +305,14 @@ export class Agent {
 
     // ── MCP ────────────────────────────────────────────
 
+    /** Built-in MCP servers that are always available on startup */
+    private static readonly DEFAULT_MCP_SERVERS: Record<string, { command: string; args?: string[]; enabled?: boolean }> = {
+        'sequential-thinking': {
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+        },
+    };
+
     private async connectMcpServers(): Promise<void> {
         let mcpConfig: McpConfig;
 
@@ -312,6 +320,13 @@ export class Agent {
             mcpConfig = this.config.mcpConfig;
         } else {
             mcpConfig = await loadMcpConfig(this.mcpConfigPath);
+        }
+
+        // Merge built-in defaults (user config takes precedence)
+        for (const [name, cfg] of Object.entries(Agent.DEFAULT_MCP_SERVERS)) {
+            if (!(name in mcpConfig.servers)) {
+                mcpConfig.servers[name] = cfg;
+            }
         }
 
         const serverCount = Object.keys(mcpConfig.servers).length;
