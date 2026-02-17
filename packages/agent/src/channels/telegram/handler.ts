@@ -8,14 +8,14 @@ import type { ModelTier } from '../../llm/router';
 import type { Agent, ChatContext } from '../../agent';
 import type { TelegramUpdate } from './types';
 import { TOOL_LABELS, humanTimeAgo } from './types';
-import type { TelegramApi } from './api';
+import { downloadFile, sendMessage, sendTyping } from './api';
 import type { TelegramStateManager } from './state';
 
 // ── Handler dependencies ─────────────────────────────
 
 export interface TelegramHandlerDeps {
     agent: Agent;
-    api: TelegramApi;
+    token: string;
     state: TelegramStateManager;
     getOrCreateHistory(chatId: number): UIMessage[];
     trimHistory(chatId: number): void;
@@ -34,7 +34,7 @@ export async function handleTelegramUpdate(
     isMissed: boolean,
     deps: TelegramHandlerDeps,
 ): Promise<void> {
-    const { agent, api, state } = deps;
+    const { agent, token, state } = deps;
     const msg = update.message;
     if (!msg || msg.from?.is_bot) return; // skip bot messages
 
@@ -53,7 +53,7 @@ export async function handleTelegramUpdate(
     let imageData: { base64: string; mediaType: string } | null = null;
     if (hasPhoto) {
         const largest = msg.photo![msg.photo!.length - 1]; // Telegram sends sizes smallest→largest
-        imageData = await api.downloadFile(largest.file_id);
+        imageData = await downloadFile(token, largest.file_id);
         if (imageData) {
             console.log(`[Telegram]: Downloaded photo (${largest.width}x${largest.height})`);
         }
@@ -61,13 +61,13 @@ export async function handleTelegramUpdate(
 
     // Skip commands that start with / unless it's /start
     if (text.startsWith('/') && !text.startsWith('/start')) {
-        await api.sendMessage(chatId, "I respond to regular messages, not commands. Just type what you need!");
+        await sendMessage(token, chatId, "I respond to regular messages, not commands. Just type what you need!");
         return;
     }
 
     // Handle /start
     if (text.startsWith('/start')) {
-        await api.sendMessage(chatId, `Hey ${user.first_name}! 👋 I'm Forkscout. Just send me a message and I'll help out!`);
+        await sendMessage(token, chatId, `Hey ${user.first_name}! 👋 I'm Forkscout. Just send me a message and I'll help out!`);
         return;
     }
 
@@ -112,7 +112,7 @@ export async function handleTelegramUpdate(
         metadata,
     };
 
-    await api.sendTyping(chatId);
+    await sendTyping(token, chatId);
     const history = deps.getOrCreateHistory(chatId);
 
     // Build parts array — text + optional image
@@ -143,7 +143,7 @@ export async function handleTelegramUpdate(
         agent.saveToMemory('user', text, ctx);
 
         // Refresh typing every ~4 seconds during generation
-        const typingInterval = setInterval(() => api.sendTyping(chatId), 4000);
+        const typingInterval = setInterval(() => sendTyping(token, chatId), 4000);
 
         const { model: tgModel, tier: tgTier } = agent.getModelForPurpose('chat');
 
@@ -176,8 +176,8 @@ export async function handleTelegramUpdate(
                         (tc: any) => TOOL_LABELS[tc.toolName] || `⚙️ ${tc.toolName}`,
                     );
                     const unique = [...new Set(labels)];
-                    api.sendMessage(chatId, unique.join('\n')).catch(() => { });
-                    api.sendTyping(chatId);
+                    sendMessage(token, chatId, unique.join('\n')).catch(() => { });
+                    sendTyping(token, chatId);
                 }
             },
         });
@@ -206,7 +206,7 @@ export async function handleTelegramUpdate(
 
         // Send response
         if (responseText.trim()) {
-            await api.sendMessage(chatId, responseText);
+            await sendMessage(token, chatId, responseText);
             console.log(`[Telegram/Agent → ${who}]: ${responseText.slice(0, 200)}${responseText.length > 200 ? '…' : ''}`);
         } else {
             console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
@@ -214,6 +214,6 @@ export async function handleTelegramUpdate(
     } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`[Telegram]: Error generating response for ${who}:`, errMsg);
-        await api.sendMessage(chatId, 'Sorry, I hit an error processing that. Try again in a moment.');
+        await sendMessage(token, chatId, 'Sorry, I hit an error processing that. Try again in a moment.');
     }
 }

@@ -10,12 +10,13 @@ import type { Agent } from '../../agent';
 import { AGENT_ROOT } from '../../paths';
 import type { TelegramBotInfo, TelegramBridgeConfig, TelegramUpdate, InboxMessage } from './types';
 import { sleep } from './types';
-import { TelegramApi } from './api';
+import { callApi, getMe, sendMessage, sendPhoto, sendDocument } from './api';
 import { TelegramStateManager } from './state';
 import { handleTelegramUpdate } from './handler';
 
 export class TelegramBridge {
-    private api: TelegramApi;
+    private token: string;
+    private maxMsgLen: number;
     private state: TelegramStateManager;
     private agent: Agent;
     private pollTimeout: number;
@@ -31,9 +32,9 @@ export class TelegramBridge {
 
     constructor(agent: Agent, config: TelegramBridgeConfig) {
         this.agent = agent;
+        this.token = config.token;
+        this.maxMsgLen = config.maxMessageLength ?? 4096;
         this.pollTimeout = config.pollTimeout ?? 30;
-
-        this.api = new TelegramApi(config.token, config.maxMessageLength ?? 4096);
 
         const dataDir = resolvePath(AGENT_ROOT, '.forkscout');
         this.state = new TelegramStateManager(resolvePath(dataDir, 'telegram-state.json'));
@@ -45,7 +46,7 @@ export class TelegramBridge {
     async start(): Promise<void> {
         // Verify token
         try {
-            this.botInfo = await this.api.getMe();
+            this.botInfo = await getMe(this.token);
             console.log(`\n📱 Telegram bridge connected: @${this.botInfo.username} (${this.botInfo.first_name})`);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -80,7 +81,7 @@ export class TelegramBridge {
      */
     private async processMissedMessages(): Promise<void> {
         try {
-            const updates = await this.api.call<TelegramUpdate[]>('getUpdates', {
+            const updates = await callApi<TelegramUpdate[]>(this.token, 'getUpdates', {
                 offset: this.offset,
                 timeout: 0,
                 allowed_updates: ['message'],
@@ -109,7 +110,7 @@ export class TelegramBridge {
     private async poll(): Promise<void> {
         while (this.running) {
             try {
-                const updates = await this.api.call<TelegramUpdate[]>('getUpdates', {
+                const updates = await callApi<TelegramUpdate[]>(this.token, 'getUpdates', {
                     offset: this.offset,
                     timeout: this.pollTimeout,
                     allowed_updates: ['message'],
@@ -139,7 +140,7 @@ export class TelegramBridge {
     private async handleUpdate(update: TelegramUpdate, isMissed: boolean): Promise<void> {
         return handleTelegramUpdate(update, isMissed, {
             agent: this.agent,
-            api: this.api,
+            token: this.token,
             state: this.state,
             getOrCreateHistory: (chatId) => this.getOrCreateHistory(chatId),
             trimHistory: (chatId) => this.trimHistory(chatId),
@@ -183,11 +184,6 @@ export class TelegramBridge {
         return this.running;
     }
 
-    /** Get the API wrapper (for telegram tools) */
-    getApi(): TelegramApi {
-        return this.api;
-    }
-
     /** Get unresponded inbox messages */
     getUnrespondedMessages(userId?: string): InboxMessage[] {
         return this.state.getUnrespondedMessages(userId);
@@ -195,16 +191,16 @@ export class TelegramBridge {
 
     /** Send a message via the API (public — used by telegram tools) */
     async sendMessage(chatId: number, text: string, replyToMessageId?: number): Promise<void> {
-        return this.api.sendMessage(chatId, text, replyToMessageId);
+        return sendMessage(this.token, chatId, text, replyToMessageId, this.maxMsgLen);
     }
 
     /** Send a photo via the API (public — used by telegram tools) */
     async sendPhoto(chatId: number, filePath: string, caption?: string): Promise<void> {
-        return this.api.sendPhoto(chatId, filePath, caption);
+        return sendPhoto(this.token, chatId, filePath, caption);
     }
 
     /** Send a document via the API (public — used by telegram tools) */
     async sendDocument(chatId: number, filePath: string, caption?: string): Promise<void> {
-        return this.api.sendDocument(chatId, filePath, caption);
+        return sendDocument(this.token, chatId, filePath, caption);
     }
 }
