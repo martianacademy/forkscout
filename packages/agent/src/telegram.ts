@@ -586,10 +586,13 @@ export class TelegramBridge {
             history.push(asstMsg);
             this.trimHistory(chatId);
 
-            // Send response
-            await this.sendMessage(chatId, responseText);
-
-            console.log(`[Telegram/Agent → ${who}]: ${responseText.slice(0, 200)}${responseText.length > 200 ? '…' : ''}`);
+            // Send response (skip if empty — LLM may return no text after tool-only steps)
+            if (responseText.trim()) {
+                await this.sendMessage(chatId, responseText);
+                console.log(`[Telegram/Agent → ${who}]: ${responseText.slice(0, 200)}${responseText.length > 200 ? '…' : ''}`);
+            } else {
+                console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
+            }
         } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             console.error(`[Telegram]: Error generating response for ${who}:`, errMsg);

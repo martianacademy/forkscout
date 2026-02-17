@@ -167,12 +167,15 @@ export const runCommand = tool({
         cwd: z.string().describe('Working directory (relative to project root or absolute, defaults to project root)').optional(),
     }),
     execute: async ({ command, cwd }) => {
+        // Pick a shell that actually exists (zsh on macOS, bash/sh in Docker)
+        const fs = await import('fs');
+        const shell = ['/bin/zsh', '/bin/bash', '/bin/sh'].find(s => fs.existsSync(s)) || '/bin/sh';
         return new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
             exec(command, {
                 cwd: cwd ? resolveAgentPath(cwd) : PROJECT_ROOT,
                 timeout: 30_000,
                 maxBuffer: 1024 * 1024,
-                shell: '/bin/zsh',
+                shell,
             }, (error, stdout, stderr) => {
                 resolve({
                     stdout: scrubSecrets(stdout?.trim().slice(0, 4000) || ''),
