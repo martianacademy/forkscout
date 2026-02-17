@@ -140,7 +140,7 @@ export function loadConfig(force = false): ForkscoutConfig {
         env('DEFAULT_PROVIDER') || fileConfig.provider || DEFAULTS.provider
     );
 
-    const baseURL = env('DEFAULT_BASE_URL')
+    const baseURL = env('SELF_HOSTING_LLM_URL')
         || fileConfig.baseURL
         || PROVIDER_URLS[provider]
         || DEFAULTS.baseURL;
