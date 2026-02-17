@@ -36,15 +36,19 @@ export function createMcpManagementTools(
         description: 'Add and connect a new MCP server at runtime. The server is spawned, its tools are discovered and registered, and the config is saved to disk so the server persists across restarts.',
         parameters: z.object({
             name: z.string().describe('Unique name for this server (e.g. "github", "filesystem", "brave-search")'),
-            command: z.string().describe('The command to run (e.g. "npx", "node", "python", "uvx")'),
+            command: z.string().optional().describe('The command to run for local servers (e.g. "npx", "node", "python", "uvx")'),
             args: z.array(z.string()).optional().describe('Arguments for the command (e.g. ["-y", "@modelcontextprotocol/server-github"])'),
             env: z.record(z.string()).optional().describe('Extra environment variables (e.g. {"GITHUB_TOKEN": "ghp_xxx"})'),
+            url: z.string().optional().describe('Remote MCP server URL (e.g. "https://mcp.deepwiki.com/mcp")'),
+            headers: z.record(z.string()).optional().describe('HTTP headers for remote auth (e.g. {"Authorization": "Bearer xxx"})'),
         }),
-        execute: async (params: { name: string; command: string; args?: string[]; env?: Record<string, string> }) => {
+        execute: async (params: { name: string; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string> }) => {
             const serverConfig: McpServerConfig = {
                 command: params.command,
                 args: params.args,
                 env: params.env,
+                url: params.url,
+                headers: params.headers,
                 enabled: true,
             };
 

@@ -4,21 +4,24 @@
 import { resolve } from 'path';
 import { config as loadEnv } from 'dotenv';
 
-// Load .env from repo root
+// Load .env from repo root (secrets only)
 loadEnv({ path: resolve(__dirname, '../../../.env') });
 
 import { createAgent, type AgentConfig } from './index';
+import { loadConfig, resolveApiKeyForProvider } from './config';
 
+const cfg = loadConfig();
 const config: AgentConfig = {
     llm: {
-        provider: (process.env.LLM_PROVIDER as any) || 'ollama',
-        model: process.env.LLM_MODEL || 'gpt-oss:120b',
-        baseURL: process.env.LLM_BASE_URL || 'http://localhost:11434/v1',
-        temperature: parseFloat(process.env.LLM_TEMPERATURE || '0.7'),
-        maxTokens: parseInt(process.env.LLM_MAX_TOKENS || '2000'),
+        provider: cfg.provider as any,
+        model: cfg.model,
+        baseURL: cfg.baseURL,
+        apiKey: resolveApiKeyForProvider(cfg.provider),
+        temperature: cfg.temperature,
+        maxTokens: cfg.maxTokens,
     },
-    maxIterations: parseInt(process.env.AGENT_MAX_ITERATIONS || '10'),
-    autoRegisterDefaultTools: process.env.AGENT_AUTO_REGISTER_TOOLS !== 'false',
+    maxIterations: cfg.agent.maxIterations,
+    autoRegisterDefaultTools: cfg.agent.autoRegisterTools,
 };
 
 console.log('🤖 Forkscout Agent Configuration:');
@@ -29,7 +32,9 @@ console.log();
 
 console.log('Starting Forkscout Agent (interactive mode)...\n');
 
-import { generateText, stepCountIs } from 'ai';
+import { stepCountIs } from 'ai';
+import { generateTextWithRetry } from './llm/retry';
+import type { ModelTier } from './llm/router';
 import * as readline from 'readline';
 
 createAgent(config)
@@ -55,13 +60,18 @@ createAgent(config)
                 try {
                     const systemPrompt = await agent.buildSystemPrompt(input);
                     agent.saveToMemory('user', input);
-                    const { text } = await generateText({
-                        model: agent.getModel(),
+                    const { model: cliModel, tier: cliTier } = agent.getModelForPurpose('chat');
+                    const { text, usage } = await generateTextWithRetry({
+                        model: cliModel,
                         system: systemPrompt,
                         prompt: input,
                         tools: agent.getTools(),
                         stopWhen: stepCountIs(20),
                     });
+                    // Record cost
+                    if (usage) {
+                        agent.getRouter().recordUsage(cliTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+                    }
                     agent.saveToMemory('assistant', text);
                     console.log(`\n[Forkscout]: ${text}\n`);
                 } catch (error) {

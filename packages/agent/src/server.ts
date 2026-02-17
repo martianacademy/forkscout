@@ -7,16 +7,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { Readable } from 'stream';
 import {
-    streamText,
-    generateText,
     stepCountIs,
     convertToModelMessages,
 
     type UIMessage,
 } from 'ai';
+import { generateTextWithRetry, streamTextWithRetry } from './llm/retry';
+import type { ModelTier } from './llm/router';
 import { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
 import type { ChannelAuthStore } from './channel-auth';
 import { TelegramBridge } from './telegram';
+import { getConfig } from './config';
 
 
 export interface ServerOptions {
@@ -61,7 +62,7 @@ function setCors(res: ServerResponse) {
  *   3. Auto-detect from User-Agent / Referer
  */
 function detectChatContext(req: IncomingMessage, body?: any, channelAuth?: ChannelAuthStore): ChatContext {
-    const adminSecret = process.env.ADMIN_SECRET;
+    const adminSecret = getConfig().secrets.adminSecret;
 
     // ── Admin detection ──────────────────────────────
     let isAdmin = false;
@@ -198,11 +199,19 @@ function extractUserText(messages: UIMessage[]): string {
  *   GET  /api/models        — fetch available models
  */
 export async function startServer(config: AgentConfig, opts: ServerOptions = {}): Promise<void> {
-    const port = opts.port || parseInt(process.env.AGENT_PORT || '3210');
+    const port = opts.port || getConfig().agent.port;
     const host = opts.host || '0.0.0.0';
 
     const agent = new Agent(config);
     await agent.init();
+
+    // Log router configuration
+    const routerStatus = agent.getRouter().getStatus();
+    console.log(`\n📊 Model Router:`);
+    for (const [tier, info] of Object.entries(routerStatus.tiers)) {
+        console.log(`   ${tier}: ${info.modelId} ($${info.inputPricePer1M}/$${info.outputPricePer1M} per 1M tokens)`);
+    }
+    console.log(`   Budget: $${routerStatus.budget.dailyLimitUSD}/day, $${routerStatus.budget.monthlyLimitUSD}/month`);
 
     const channelAuth = agent.getChannelAuth();
 
@@ -239,8 +248,10 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 agent.saveToMemory('user', userText, ctx);
 
                 // Stream with AI SDK v6 — tools filtered by access level
-                const result = streamText({
-                    model: agent.getModel(),
+                const { model: chatModel, tier: chatTier, modelId: chatModelId } = agent.getModelForPurpose('chat');
+                console.log(`[Router]: Using ${chatTier} tier (${chatModelId})`);
+                const result = streamTextWithRetry({
+                    model: chatModel,
                     system: systemPrompt,
                     messages: await convertToModelMessages(messages),
                     tools: agent.getToolsForContext(ctx),
@@ -256,8 +267,12 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                             }
                         }
                     },
-                    onFinish: ({ text, steps }) => {
+                    onFinish: ({ text, steps, usage }) => {
                         console.log(`[Agent]: Done (${steps?.length || 0} step(s))`);
+                        // Record cost
+                        if (usage) {
+                            agent.getRouter().recordUsage(chatTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+                        }
                         if (text) {
                             agent.saveToMemory('assistant', text);
                             console.log(`[Agent]: ${text.slice(0, 200)}${text.length > 200 ? '…' : ''}`);
@@ -300,13 +315,20 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 agent.saveToMemory('user', userText, ctx);
 
                 try {
-                    const { text } = await generateText({
-                        model: agent.getModel(),
+                    const { model: syncModel, tier: syncTier, modelId: syncModelId } = agent.getModelForPurpose('chat');
+                    console.log(`[Router]: Sync using ${syncTier} tier (${syncModelId})`);
+                    const { text, usage } = await generateTextWithRetry({
+                        model: syncModel,
                         system: systemPrompt,
                         messages: await convertToModelMessages(messages),
                         tools: agent.getToolsForContext(ctx),
                         stopWhen: stepCountIs(20),
                     });
+
+                    // Record cost
+                    if (usage) {
+                        agent.getRouter().recordUsage(syncTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+                    }
 
                     agent.saveToMemory('assistant', text);
                     sendJSON(res, 200, { response: text });
@@ -352,10 +374,12 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
             // ── GET /api/status ──
             if (req.method === 'GET' && url === '/api/status') {
                 const tools = agent.getToolList();
+                const routerStatus = agent.getRouter().getStatus();
                 sendJSON(res, 200, {
                     running: agent.getState().running,
                     tools: tools.map(t => t.name),
                     toolCount: tools.length,
+                    router: routerStatus,
                     telegram: telegramBridge ? {
                         connected: telegramBridge.isRunning(),
                         bot: telegramBridge.getBotInfo()?.username || null,
@@ -444,7 +468,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                         const data: any = await r.json();
                         models = (data.models || []).map((m: any) => ({ id: m.name, name: m.name }));
                     } else if (prov === 'openai') {
-                        const apiKey = currentConfig.apiKey || process.env.OPENAI_API_KEY || '';
+                        const apiKey = currentConfig.apiKey || getConfig().secrets.openaiApiKey || '';
                         const r = await fetch('https://api.openai.com/v1/models', {
                             headers: { Authorization: `Bearer ${apiKey}` },
                         });
@@ -476,7 +500,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
 
     // ── Telegram bridge (auto-start if token is set) ──────────
     let telegramBridge: TelegramBridge | null = null;
-    const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+    const tgToken = getConfig().secrets.telegramBotToken;
     if (tgToken) {
         telegramBridge = new TelegramBridge(agent, { token: tgToken });
         agent.setTelegramBridge(telegramBridge);

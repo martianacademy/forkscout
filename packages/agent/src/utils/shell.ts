@@ -36,21 +36,21 @@ const WINDOWS_SHELLS = [
     'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
 ] as const;
 
-let _cachedShell: string | true | undefined;
+let _cachedShell: string | undefined;
 
 /**
- * Returns the best available shell path, or `true` to let Node pick the OS default.
+ * Returns the best available shell path, or `undefined` to let Node pick the OS default.
  * Result is cached after first call.
  */
-export function getShell(): string | true {
+export function getShell(): string | undefined {
     if (_cachedShell !== undefined) return _cachedShell;
 
     if (IS_WINDOWS) {
         // On Windows, prefer Git Bash for POSIX compatibility
-        _cachedShell = WINDOWS_SHELLS.find(s => existsSync(s)) ?? true;
+        _cachedShell = WINDOWS_SHELLS.find(s => existsSync(s));
     } else {
         // Unix: zsh (macOS) → bash (most Linux) → sh (Alpine/minimal)
-        _cachedShell = UNIX_SHELLS.find(s => existsSync(s)) ?? true;
+        _cachedShell = UNIX_SHELLS.find(s => existsSync(s));
     }
 
     return _cachedShell;

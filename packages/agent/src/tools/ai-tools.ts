@@ -7,11 +7,13 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
-import { exec } from 'child_process';
+import { exec, type ExecException } from 'child_process';
+import { getConfig } from '../config';
 import { getShell } from '../utils/shell';
 import { readFile as fsReadFile } from 'fs/promises';
 import { basename } from 'path';
 import { resolveAgentPath, PROJECT_ROOT, AGENT_SRC, AGENT_ROOT } from '../paths';
+import type { ModelRouter, ModelTier } from '../llm/router';
 
 // ─── Secret Management Helpers ──────────────────────────
 
@@ -174,7 +176,7 @@ export const runCommand = tool({
                 timeout: 30_000,
                 maxBuffer: 1024 * 1024,
                 shell: getShell(),
-            }, (error, stdout, stderr) => {
+            }, (error: ExecException | null, stdout: string, stderr: string) => {
                 resolve({
                     stdout: scrubSecrets(stdout?.trim().slice(0, 4000) || ''),
                     stderr: scrubSecrets(stderr?.trim().slice(0, 2000) || ''),
@@ -195,7 +197,7 @@ export const webSearch = tool({
     }),
     execute: async ({ query, limit }) => {
         const maxResults = limit || 5;
-        const searxngUrl = process.env.SEARXNG_URL || 'http://localhost:8888';
+        const searxngUrl = getConfig().searxng.url;
 
         // Try SearXNG first
         try {
@@ -369,7 +371,7 @@ export const safeSelfEdit = tool({
             exec(
                 `npx tsc -p "${tsconfigPath}" --noEmit 2>&1 | head -20`,
                 { timeout: 30_000, shell: getShell(), maxBuffer: 1024 * 1024, cwd: AGENT_ROOT },
-                (_error, stdout) => {
+                (_error: Error | null, stdout: string) => {
                     const output = (stdout || '').trim();
                     resolve({ success: !output.includes('error TS'), errors: output });
                 },
@@ -475,15 +477,17 @@ export function createMcpTools(
 ) {
     return {
         add_mcp_server: tool({
-            description: 'Add and connect a new MCP server at runtime. Its tools are discovered and registered automatically.',
+            description: 'Add and connect a new MCP server at runtime. Its tools are discovered and registered automatically. Provide EITHER command (local stdio) OR url (remote HTTP/SSE).',
             inputSchema: z.object({
                 name: z.string().describe('Unique name for this server'),
-                command: z.string().describe('The command to run (e.g. "npx", "node")'),
+                command: z.string().optional().describe('The command to run for local servers (e.g. "npx", "node")'),
                 args: z.array(z.string()).optional().describe('Arguments for the command'),
                 env: z.record(z.string()).optional().describe('Extra environment variables'),
+                url: z.string().optional().describe('Remote MCP server URL (e.g. "https://mcp.deepwiki.com/mcp")'),
+                headers: z.record(z.string()).optional().describe('HTTP headers for remote auth'),
             }),
-            execute: async ({ name, command, args, env }) => {
-                const serverConfig: McpServerConfig = { command, args, env, enabled: true };
+            execute: async ({ name, command, args, env, url, headers }) => {
+                const serverConfig: McpServerConfig = { command, args, env, url, headers, enabled: true };
                 const mcpTools = await connector.connectServer(name, serverConfig);
 
                 // Convert MCP tools to AI SDK format and register
@@ -1233,6 +1237,82 @@ Provide a chatId, userId, name, or @username.`;
                     const errMsg = err instanceof Error ? err.message : String(err);
                     return `❌ Failed to send file: ${errMsg}`;
                 }
+            },
+        }),
+    };
+}
+
+// ─── Budget & Model Tier Tools ──────────────────────────
+
+/**
+ * Create tools for budget monitoring and model tier management.
+ * These let the agent (and admin) check spending and control model selection.
+ */
+export function createBudgetTools(router: ModelRouter) {
+    return {
+        check_budget: tool({
+            description: `Check current LLM spending and budget status.
+Shows today's spending, monthly total, per-model breakdown, budget limits,
+and whether any tier downgrades are in effect due to budget constraints.
+Use this when asked about costs, spending, budget, or model usage.`,
+            inputSchema: z.object({}),
+            execute: async () => {
+                const status = router.getStatus();
+                const budget = status.budget;
+
+                let report = `💰 **LLM Budget Status**\n\n`;
+                report += `**Today**: $${budget.todayUSD.toFixed(4)} / $${budget.dailyLimitUSD.toFixed(2)} (${budget.dailyPct.toFixed(1)}%)\n`;
+                report += `**This Month**: $${budget.monthUSD.toFixed(4)} / $${budget.monthlyLimitUSD.toFixed(2)} (${budget.monthlyPct.toFixed(1)}%)\n\n`;
+
+                if (budget.cappedTier) {
+                    report += `⚠️ **Budget cap active** — limited to \`${budget.cappedTier}\` tier\n\n`;
+                }
+
+                report += `**Model Tiers**:\n`;
+                for (const [tier, info] of Object.entries(status.tiers)) {
+                    report += `- ${tier}: \`${info.modelId}\` ($${info.inputPricePer1M}/$${info.outputPricePer1M} per 1M tokens)\n`;
+                }
+
+                const models = Object.entries(budget.todayByModel);
+                if (models.length > 0) {
+                    report += `\n**Today's Usage by Model**:\n`;
+                    for (const [modelId, usage] of models) {
+                        const u = usage as { cost: number; calls: number; inputTokens: number; outputTokens: number };
+                        report += `- \`${modelId}\`: $${u.cost.toFixed(4)} (${u.calls} calls, ${u.inputTokens} in / ${u.outputTokens} out)\n`;
+                    }
+                }
+
+                return report;
+            },
+        }),
+
+        set_model_tier: tool({
+            description: `Change the model used for a specific tier (fast/balanced/powerful).
+Example: set the fast tier to "google/gemini-2.0-flash-lite-001" for cheaper background tasks.
+Only the admin should use this. Changes take effect immediately.`,
+            inputSchema: z.object({
+                tier: z.enum(['fast', 'balanced', 'powerful']).describe('Which tier to change'),
+                modelId: z.string().describe('The model ID to use (e.g. "google/gemini-2.0-flash-001", "x-ai/grok-4.1-fast")'),
+            }),
+            execute: async ({ tier, modelId }) => {
+                router.setTierModel(tier as ModelTier, modelId);
+                return `✅ ${tier} tier now uses \`${modelId}\``;
+            },
+        }),
+
+        set_budget_limit: tool({
+            description: `Update daily or monthly budget limits. Use this to increase or decrease spending caps.
+Only the admin should use this.`,
+            inputSchema: z.object({
+                dailyUSD: z.number().optional().describe('New daily limit in USD (e.g. 10.0)'),
+                monthlyUSD: z.number().optional().describe('New monthly limit in USD (e.g. 100.0)'),
+            }),
+            execute: async ({ dailyUSD, monthlyUSD }) => {
+                const patch: Record<string, number> = {};
+                if (dailyUSD !== undefined) patch.dailyUSD = dailyUSD;
+                if (monthlyUSD !== undefined) patch.monthlyUSD = monthlyUSD;
+                const updated = router.getBudget().setLimits(patch);
+                return `✅ Budget limits updated — daily: $${updated.dailyUSD.toFixed(2)}, monthly: $${updated.monthlyUSD.toFixed(2)}`;
             },
         }),
     };

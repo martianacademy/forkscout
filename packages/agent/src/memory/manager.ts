@@ -35,11 +35,13 @@
 import { VectorStore } from './vector-store';
 import { KnowledgeGraph, buildExtractionPrompt, SELF_ENTITY_NAME, type ExtractedEntities } from './knowledge-graph';
 import { SkillStore } from './skills';
+import { Consolidator, type ConsolidationConfig } from './consolidator';
 import {
     classifySituation, domainBoost, observationDomainBoost,
     buildAccessContext, type LifeDomain,
 } from './situation';
 import type { EmbeddingModel } from 'ai';
+import { countTokens } from '../utils/tokens';
 
 export interface MemoryConfig {
     /** Directory for persistent storage */
@@ -50,7 +52,7 @@ export interface MemoryConfig {
     recentWindowSize?: number;
     /** Max relevant old memories to retrieve */
     relevantMemoryLimit?: number;
-    /** Max characters of context to feed into prompts */
+    /** Max tokens of context to feed into prompts (token-aware) */
     contextBudget?: number;
     /** Callback to generate summaries via LLM */
     summarizer?: (text: string) => Promise<string>;
@@ -60,12 +62,15 @@ export interface MemoryConfig {
     chunkSize?: number;
     /** Chunk overlap (chars) */
     chunkOverlap?: number;
+    /** Consolidation config overrides */
+    consolidation?: ConsolidationConfig;
 }
 
 export class MemoryManager {
     private vectorStore: VectorStore;
     private graph: KnowledgeGraph;
     private skills: SkillStore;
+    private consolidator: Consolidator;
     private config: MemoryConfig;
     private sessionId: string;
     private pendingExchange: { user: string } | null = null;
@@ -78,7 +83,7 @@ export class MemoryManager {
         this.config = {
             recentWindowSize: 6,
             relevantMemoryLimit: 5,
-            contextBudget: 8000,
+            contextBudget: 4000,
             chunkSize: 1500,
             chunkOverlap: 200,
             ...config,
@@ -96,6 +101,8 @@ export class MemoryManager {
         this.skills = new SkillStore(
             `${this.config.storagePath}/skills.json`,
         );
+
+        this.consolidator = new Consolidator(config.consolidation);
 
         this.sessionId = `session_${Date.now()}`;
     }
@@ -130,6 +137,11 @@ export class MemoryManager {
         // Summarize current session if we have enough exchanges
         if (this.exchangeCount >= 3 && this.config.summarizer) {
             await this.summarizeCurrentSession();
+        }
+
+        // Run consolidation if enough mutations have accumulated
+        if (this.consolidator.shouldRun(this.graph)) {
+            this.consolidator.consolidate(this.graph, this.skills, this.vectorStore);
         }
 
         await Promise.all([
@@ -171,6 +183,12 @@ export class MemoryManager {
 
             // Async entity extraction — don't block the response
             this.extractEntitiesAsync(exchange.user, content);
+
+            // Check if consolidation should run (lightweight check)
+            if (this.exchangeCount % 10 === 0 && this.consolidator.shouldRun(this.graph)) {
+                // Run async to not block the response
+                try { this.consolidator.consolidate(this.graph, this.skills, this.vectorStore); } catch { /* non-critical */ }
+            }
         }
     }
 
@@ -211,8 +229,8 @@ export class MemoryManager {
             situation: { primary: LifeDomain[]; goal: string };
         };
     }> {
-        const budget = this.config.contextBudget ?? 8000;
-        let remaining = budget;
+        const budgetTokens = this.config.contextBudget ?? 4000;
+        let remainingTokens = budgetTokens;
 
         // 0. Classify the current situation (domain lens)
         const recent = this.getRecentHistory();
@@ -229,14 +247,16 @@ export class MemoryManager {
         const recentStr = recent
             .map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`)
             .join('\n');
-        remaining -= recentStr.length;
+        remainingTokens -= countTokens(recentStr);
 
         // 2. Knowledge graph lookup with domain-aware re-ranking
         let graphStr = '';
         let graphEntities = 0;
-        if (remaining > 200) {
-            const graphBudget = Math.min(remaining * 0.4, 2000);
-            const graphResults = this.graph.search(currentQuery, 8); // fetch more, re-rank, then trim
+        if (remainingTokens > 50) {
+            const graphBudgetTokens = Math.min(Math.floor(remainingTokens * 0.4), 600);
+            // Approximate char budget from token budget (1 token ≈ 4 chars)
+            const graphBudgetChars = graphBudgetTokens * 4;
+            const graphResults = this.graph.search(currentQuery, 8);
 
             if (graphResults.length > 0) {
                 // Domain-aware re-ranking
@@ -262,16 +282,16 @@ export class MemoryManager {
                 graphResults.sort((a, b) => b.score - a.score);
                 const topResults = graphResults.slice(0, 5);
 
-                graphStr = '\n\n' + this.graph.formatForContext(topResults, graphBudget);
+                graphStr = '\n\n' + this.graph.formatForContext(topResults, graphBudgetChars);
                 graphEntities = topResults.length;
-                remaining -= graphStr.length;
+                remainingTokens -= countTokens(graphStr);
             }
         }
 
         // 3. Vector store search with query expansion (fuzzy — fills remaining budget)
         let relevantStr = '';
         let retrievedCount = 0;
-        if (remaining > 200) {
+        if (remainingTokens > 50) {
             const expandedQuery = this.expandQuery(currentQuery);
             const relevant = await this.searchHistory(expandedQuery);
             const filtered: string[] = [];
@@ -283,9 +303,10 @@ export class MemoryManager {
                 if (isInRecent) continue;
 
                 const entry = `[Memory (${(mem.similarity * 100).toFixed(0)}%)]: ${mem.content}`;
-                if (remaining - entry.length < 0) break;
+                const entryTokens = countTokens(entry);
+                if (remainingTokens - entryTokens < 0) break;
                 filtered.push(entry);
-                remaining -= entry.length;
+                remainingTokens -= entryTokens;
                 retrievedCount++;
             }
 
@@ -297,13 +318,14 @@ export class MemoryManager {
         // 4. Skill store lookup (procedural memory)
         let skillStr = '';
         let skillCount = 0;
-        if (remaining > 200) {
+        if (remainingTokens > 50) {
             const relevantSkills = this.skills.findByIntent(currentQuery, 3);
             if (relevantSkills.length > 0) {
-                const skillBudget = Math.min(remaining, 1000);
-                skillStr = '\n\n' + this.skills.formatForContext(relevantSkills, skillBudget);
+                // Approximate char budget from token budget
+                const skillBudgetChars = Math.min(remainingTokens * 4, 1000);
+                skillStr = '\n\n' + this.skills.formatForContext(relevantSkills, skillBudgetChars);
                 skillCount = relevantSkills.length;
-                remaining -= skillStr.length;
+                remainingTokens -= countTokens(skillStr);
             }
         }
 

@@ -1,9 +1,11 @@
-import { generateText, tool } from 'ai';
+import { tool } from 'ai';
+import { generateTextQuiet } from './llm/retry';
 import { LLMClient, type LLMConfig } from './llm/client';
+import { ModelRouter, createRouterFromEnv, type ModelPurpose } from './llm/router';
 import { MemoryManager } from './memory/manager';
 import { Scheduler, type CronAlert } from './scheduler';
-import { McpConnector, loadMcpConfig, type McpConfig } from './mcp/connector';
-import { coreTools, createSchedulerTools, createMcpTools, createMemoryTools, createSurvivalTools, createChannelAuthTools, createTelegramTools } from './tools/ai-tools';
+import { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './mcp/connector';
+import { coreTools, createSchedulerTools, createMcpTools, createMemoryTools, createSurvivalTools, createChannelAuthTools, createTelegramTools, createBudgetTools } from './tools/ai-tools';
 import { exec } from 'child_process';
 import { getShell } from './utils/shell';
 import { resolve as resolvePath } from 'path';
@@ -73,10 +75,15 @@ export class Agent {
     private survival: SurvivalMonitor;
     private channelAuth: ChannelAuthStore;
     private telegramBridge: any = null;  // Set by server.ts after bridge creation
+    private router: ModelRouter;
 
     constructor(config: AgentConfig) {
         this.config = config;
         this.llm = new LLMClient(config.llm);
+
+        // Multi-model router with budget tracking
+        const routerConfig = createRouterFromEnv();
+        this.router = new ModelRouter(routerConfig);
 
         // Resolve MCP config path early so tools can use it
         this.mcpConfigPath = typeof config.mcpConfig === 'string'
@@ -91,22 +98,20 @@ export class Agent {
             embeddingModel: this.llm.getEmbeddingModel(),
             recentWindowSize: 6,
             relevantMemoryLimit: 5,
-            contextBudget: 8000,
+            contextBudget: 4000,
             summarizer: async (text: string) => {
-                const { text: summary } = await generateText({
-                    model: this.llm.getModel(),
+                return generateTextQuiet({
+                    model: this.router.getModel('summarize').model,
                     system: 'You are a summarization assistant. Be concise and accurate.',
                     prompt: `Summarize this conversation into 2-3 concise sentences capturing the key topics, decisions, and outcomes:\n\n${text}`,
                 });
-                return summary;
             },
             entityExtractor: async (prompt: string) => {
-                const { text: json } = await generateText({
-                    model: this.llm.getModel(),
+                return generateTextQuiet({
+                    model: this.router.getModel('extract').model,
                     system: 'You are an entity extraction bot. Return ONLY valid JSON, no markdown.',
                     prompt,
                 });
-                return json;
             },
         });
 
@@ -116,7 +121,7 @@ export class Agent {
         const schedulerPersistPath = resolvePath(AGENT_ROOT, '.forkscout', 'scheduler-jobs.json');
         this.scheduler = new Scheduler(
             (command: string) => new Promise((resolve, reject) => {
-                exec(command, { timeout: 30_000, maxBuffer: 1024 * 1024, shell: getShell() }, (error, stdout, stderr) => {
+                exec(command, { timeout: 30_000, maxBuffer: 1024 * 1024, shell: getShell() }, (error: Error | null, stdout: string, stderr: string) => {
                     if (error && !stdout && !stderr) reject(error);
                     else resolve((stdout || '').trim() + (stderr ? `\n[stderr]: ${stderr.trim()}` : ''));
                 });
@@ -124,8 +129,8 @@ export class Agent {
             async (jobName: string, watchFor: string | undefined, output: string) => {
                 if (!watchFor) return 'normal';
                 try {
-                    const { text: response } = await generateText({
-                        model: this.llm.getModel(),
+                    const response = await generateTextQuiet({
+                        model: this.router.getModel('classify').model,
                         system: 'You are a classification bot. Reply with exactly one word.',
                         prompt: `A cron job named "${jobName}" just ran.\nWatch for: "${watchFor}"\n\nOutput:\n${output.slice(0, 1500)}\n\nClassify as exactly one word: normal, important, or urgent`,
                     });
@@ -181,13 +186,22 @@ export class Agent {
 
             // Channel authorization tools (list/grant/revoke channel users)
             Object.assign(this.toolSet, createChannelAuthTools(this.channelAuth));
+
+            // Budget & model tier tools (check spending, switch models)
+            Object.assign(this.toolSet, createBudgetTools(this.router));
         }
     }
 
     // ── Public API (used by server.ts) ─────────────────
 
-    /** Get the AI SDK LanguageModelV1 instance */
-    getModel() { return this.llm.getModel(); }
+    /** Get the AI SDK LanguageModelV1 instance (uses balanced tier by default) */
+    getModel() { return this.router.getModel('chat').model; }
+
+    /** Get a model for a specific purpose (respects budget) */
+    getModelForPurpose(purpose: ModelPurpose) { return this.router.getModel(purpose); }
+
+    /** Get the model router instance */
+    getRouter(): ModelRouter { return this.router; }
 
     /** Get all registered tools as an AI SDK ToolSet */
     getTools(): Record<string, any> { return { ...this.toolSet }; }
@@ -292,24 +306,28 @@ export class Agent {
         this.state.running = true;
     }
 
-    /** Stop the agent, flush memory, disconnect MCP servers, stop survival monitor */
+    /** Stop the agent, flush memory, disconnect MCP servers, stop survival monitor, save budget */
     async stop(): Promise<void> {
         this.state.running = false;
         this.scheduler.stopAll();
+        this.router.getBudget().stop();
         await this.survival.stop();
         await this.mcpConnector.disconnect();
         // Use survival's write-access guard if root (lifts immutable flags for final flush)
         await this.survival.withWriteAccess(() => this.memory.flush());
-        console.log('\nAgent stopped (memory saved)');
+        console.log('\nAgent stopped (memory + budget saved)');
     }
 
     // ── MCP ────────────────────────────────────────────
 
     /** Built-in MCP servers that are always available on startup */
-    private static readonly DEFAULT_MCP_SERVERS: Record<string, { command: string; args?: string[]; enabled?: boolean }> = {
+    private static readonly DEFAULT_MCP_SERVERS: Record<string, McpServerConfig> = {
         'sequential-thinking': {
             command: 'npx',
             args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+        },
+        'deepwiki': {
+            url: 'https://mcp.deepwiki.com/mcp',
         },
     };
 
@@ -469,12 +487,37 @@ Grants persist across restarts. Session tracking is in-memory only (resets on re
 Guests (unauthenticated) get limited tools, no memory access, no personal data.
 Trusted users get extended conversation but not full admin tools.
 
+=== COST CONTROL ===
+You use multiple model tiers to balance cost vs capability:
+- **fast**: cheap model for summaries, classifications, entity extraction (runs automatically)
+- **balanced**: your main model for conversation and tool use
+- **powerful**: expensive model for complex reasoning (auto-selected when needed)
+The router picks the right model automatically. Budget limits are enforced:
+- Daily and monthly spending caps prevent runaway costs
+- When budget is tight, the router downgrades to cheaper models automatically
+- Use check_budget to see current spending (today, this month, per-model breakdown)
+- Use set_model_tier to override a tier's model (admin only)
+Never apologize for using a cheaper model — just do your best with what's available.
+
 === GUIDELINES ===
 - Execute directly — don't explore what you already know
 - Batch independent tool calls (they run concurrently)
 - For web: web_search first, browse_web fallback
 - No dedicated tool? Use run_command or create one with safe_self_edit
 - Be concise but thorough.
+
+=== REASONING ===
+For complex, multi-step, or ambiguous requests, THINK before acting:
+1. Briefly analyze what's being asked and what you already know
+2. Identify gaps — what do you need to look up or verify?
+3. Plan your approach — which tools in what order?
+4. Execute the plan, adjusting as you go
+5. Verify the result makes sense before responding
+
+For simple questions (greetings, facts, preferences) — just answer directly.
+For complex questions (debugging, multi-tool workflows, analysis) — think first.
+When uncertain about a fact, SEARCH before guessing. Never fabricate.
+When you notice something unexpected in tool output, flag it — don't ignore the signal.
 
 === TELEGRAM / NON-STREAMING CHANNELS ===
 When interacting via Telegram or any non-streaming channel, and the request requires multiple

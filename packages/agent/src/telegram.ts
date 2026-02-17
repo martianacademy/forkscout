@@ -12,8 +12,10 @@
  * Env: TELEGRAM_BOT_TOKEN
  */
 
-import { generateText, stepCountIs, type UIMessage } from 'ai';
-import { readFile, writeFile, mkdir, stat } from 'fs/promises';
+import { stepCountIs, type UIMessage } from 'ai';
+import { generateTextWithRetry } from './llm/retry';
+import type { ModelTier } from './llm/router';
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import { resolve as resolvePath, basename } from 'path';
 import type { Agent, ChatContext } from './agent';
 import { AGENT_ROOT } from './paths';
@@ -595,10 +597,10 @@ export class TelegramBridge {
             // Refresh typing every ~4 seconds during generation
             const typingInterval = setInterval(() => this.sendTyping(chatId), 4000);
 
+            const { model: tgModel, tier: tgTier } = this.agent.getModelForPurpose('chat');
 
-
-            const { text: responseText } = await generateText({
-                model: this.agent.getModel(),
+            const { text: responseText, usage } = await generateTextWithRetry({
+                model: tgModel,
                 system: systemPrompt,
                 messages: history.map(m => {
                     // Build multi-modal content array (text + images)
@@ -638,6 +640,11 @@ export class TelegramBridge {
             });
 
             clearInterval(typingInterval);
+
+            // Record cost
+            if (usage) {
+                this.agent.getRouter().recordUsage(tgTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+            }
 
             // Save response to memory
             this.agent.saveToMemory('assistant', responseText);

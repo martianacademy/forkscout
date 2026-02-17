@@ -1,5 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel, EmbeddingModel } from 'ai';
+import { getConfig } from '../config';
 
 /**
  * LLM Configuration
@@ -56,7 +57,7 @@ export class LLMClient {
             case 'openai': {
                 const p = createOpenAI({
                     baseURL: this.config.baseURL || 'https://api.openai.com/v1',
-                    apiKey: this.config.apiKey || process.env.OPENAI_API_KEY || '',
+                    apiKey: this.config.apiKey || getConfig().secrets.openaiApiKey || '',
                 });
                 // Use .chat() for Chat Completions API (p() defaults to Responses API)
                 return p.chat(this.config.model);
@@ -73,7 +74,7 @@ export class LLMClient {
             case 'openrouter': {
                 const p = createOpenAI({
                     baseURL: 'https://openrouter.ai/api/v1',
-                    apiKey: this.config.apiKey || process.env.OPENROUTER_API_KEY || process.env.LLM_API_KEY || '',
+                    apiKey: this.config.apiKey || getConfig().secrets.openrouterApiKey || '',
                 });
                 return p.chat(this.config.model);
             }
@@ -106,7 +107,7 @@ export class LLMClient {
             case 'openrouter': {
                 const p = createOpenAI({
                     baseURL: 'https://openrouter.ai/api/v1',
-                    apiKey: this.config.apiKey || process.env.OPENROUTER_API_KEY || process.env.LLM_API_KEY || '',
+                    apiKey: this.config.apiKey || getConfig().secrets.openrouterApiKey || '',
                 });
                 return p.embedding(embeddingModelId);
             }
@@ -114,7 +115,7 @@ export class LLMClient {
             case 'openai': {
                 const p = createOpenAI({
                     baseURL: this.config.baseURL || 'https://api.openai.com/v1',
-                    apiKey: this.config.apiKey || process.env.OPENAI_API_KEY || '',
+                    apiKey: this.config.apiKey || getConfig().secrets.openaiApiKey || '',
                 });
                 return p.embedding(embeddingModelId.replace('openai/', ''));
             }

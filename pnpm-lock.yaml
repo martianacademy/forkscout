@@ -10,6 +10,12 @@ importers:
 
   packages/agent:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^3.0.44
+        version: 3.0.44(zod@3.25.76)
+      '@ai-sdk/google':
+        specifier: ^3.0.29
+        version: 3.0.29(zod@3.25.76)
       '@ai-sdk/openai':
         specifier: ^3.0.29
         version: 3.0.29(zod@3.25.76)
@@ -22,6 +28,9 @@ importers:
       dotenv:
         specifier: ^17.3.1
         version: 17.3.1
+      gpt-tokenizer:
+        specifier: ^3.4.0
+        version: 3.4.0
       playwright:
         specifier: ^1.49.1
         version: 1.58.2
@@ -44,8 +53,20 @@ importers:
 
 packages:
 
+  '@ai-sdk/anthropic@3.0.44':
+    resolution: {integrity: sha512-ke1NldgohWJ7sWLqm9Um9TVIOrtg8Y8AecWeB6PgaLt+paTPisAsyNfe8FNOVusuv58ugLBqY/78AkhUmbjXHA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/gateway@3.0.46':
     resolution: {integrity: sha512-zH1UbNRjG5woOXXFOrVCZraqZuFTtmPvLardMGcgLkzpxKV0U3tAGoyWKSZ862H+eBJfI/Hf2yj/zzGJcCkycg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/google@3.0.29':
+    resolution: {integrity: sha512-x0hcU10AA+i1ZUQHloGD5qXWsB+Y8qnxlmFUef6Ly4rB53MGVbQExkI9nOKiCO3mu2TGiiNoQMeKWSeQVLfRUA==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -855,6 +876,9 @@ packages:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
 
+  gpt-tokenizer@3.4.0:
+    resolution: {integrity: sha512-wxFLnhIXTDjYebd9A9pGl3e31ZpSypbpIJSOswbgop5jLte/AsZVDvjlbEuVFlsqZixVKqbcoNmRlFDf6pz/UQ==}
+
   graphql@16.12.0:
     resolution: {integrity: sha512-DKKrynuQRne0PNpEbzuEdHlYOMksHSUI8Zc9Unei5gTsMNA2/vMpoMz/yKba50pejK56qj98qM0SjYxAKi13gQ==}
     engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
@@ -1386,11 +1410,23 @@ packages:
 
 snapshots:
 
+  '@ai-sdk/anthropic@3.0.44(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider-utils': 4.0.15(zod@3.25.76)
+      zod: 3.25.76
+
   '@ai-sdk/gateway@3.0.46(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@ai-sdk/provider-utils': 4.0.15(zod@3.25.76)
       '@vercel/oidc': 3.1.0
+      zod: 3.25.76
+
+  '@ai-sdk/google@3.0.29(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider-utils': 4.0.15(zod@3.25.76)
       zod: 3.25.76
 
   '@ai-sdk/openai@3.0.29(zod@3.25.76)':
@@ -2084,6 +2120,8 @@ snapshots:
       resolve-pkg-maps: 1.0.0
 
   gopd@1.2.0: {}
+
+  gpt-tokenizer@3.4.0: {}
 
   graphql@16.12.0:
     optional: true

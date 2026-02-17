@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { resolveAgentPath } from '../paths';
 import { getCurrentDateTool } from './get-current-date';
 import { generatePresentationTool } from './presentation-tool';
+import { getConfig } from '../config';
 
 /**
  * File System Tool
@@ -31,7 +32,7 @@ export const webSearchTool = {
     }),
     async execute(params: { query: string; limit?: number }): Promise<any> {
         const maxResults = params.limit || 5;
-        const searxngUrl = process.env.SEARXNG_URL || 'http://localhost:8888';
+        const searxngUrl = getConfig().searxng.url;
 
         // Try SearXNG first
         try {
