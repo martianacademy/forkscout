@@ -1,0 +1,35 @@
+{
+    "$schema": "./packages/agent/src/config.schema.json",
+    "provider": "openrouter",
+    "model": "x-ai/grok-4.1-fast",
+    "baseURL": "https://openrouter.ai/api/v1",
+    "temperature": 0.7,
+    "maxTokens": 2000,
+    "router": {
+        "fast": {
+            "model": "google/gemini-2.0-flash-001",
+            "provider": "openrouter"
+        },
+        "balanced": {
+            "model": "x-ai/grok-4.1-fast",
+            "provider": "openrouter"
+        },
+        "powerful": {
+            "model": "anthropic/claude-sonnet-4.5",
+            "provider": "openrouter"
+        }
+    },
+    "budget": {
+        "dailyUSD": 5,
+        "monthlyUSD": 50,
+        "warningPct": 80
+    },
+    "agent": {
+        "maxIterations": 10,
+        "autoRegisterTools": true,
+        "port": 3210
+    },
+    "searxng": {
+        "url": "http://localhost:8888"
+    }
+}

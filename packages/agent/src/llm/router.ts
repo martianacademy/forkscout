@@ -34,6 +34,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
 import { BudgetTracker } from './budget';
+import { loadConfig, resolveApiKeyForProvider, type ProviderType } from '../config';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -99,9 +100,6 @@ const KNOWN_PRICES: Record<string, ModelPricing> = {
     'google/gemini-2.5-pro': { inputPer1M: 1.25, outputPer1M: 10.0 },
     'deepseek/deepseek-r1': { inputPer1M: 0.55, outputPer1M: 2.19 },
 };
-
-/** Supported provider types */
-export type ProviderType = 'openrouter' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'openai-compatible';
 
 export interface ModelTierConfig {
     modelId: string;
@@ -279,47 +277,15 @@ function createProviderModel(
 
 // ── Factory ────────────────────────────────────────────
 
-/** Resolve provider type from string, with sensible aliases */
-function resolveProvider(raw: string): ProviderType {
-    const lc = raw.toLowerCase().trim();
-    switch (lc) {
-        case 'openrouter': return 'openrouter';
-        case 'openai': return 'openai';
-        case 'anthropic': return 'anthropic';
-        case 'google': case 'google-ai': case 'gemini': return 'google';
-        case 'ollama': return 'ollama';
-        case 'openai-compatible': case 'custom': return 'openai-compatible';
-        default: return 'openrouter';
-    }
-}
-
-/** Build RouterConfig from environment variables */
+/** Build RouterConfig from forkscout.config.json + .env secrets */
 export function createRouterFromEnv(): RouterConfig {
-    const globalProvider = resolveProvider(process.env.MODEL_PROVIDER || process.env.LLM_PROVIDER || 'openrouter');
+    const cfg = loadConfig();
 
-    const globalApiKey = process.env.LLM_API_KEY
-        || process.env.OPENROUTER_API_KEY
-        || process.env.OPENAI_API_KEY
-        || process.env.ANTHROPIC_API_KEY
-        || process.env.GOOGLE_API_KEY
-        || '';
-    const baseURLMap: Record<string, string> = {
-        openrouter: 'https://openrouter.ai/api/v1',
-        openai: 'https://api.openai.com/v1',
-        ollama: 'http://localhost:11434/v1',
-    };
-    const globalBaseURL = process.env.LLM_BASE_URL || baseURLMap[globalProvider] || 'https://openrouter.ai/api/v1';
-
-    // Default model = whatever LLM_MODEL is (the "current" model)
-    const defaultModel = process.env.LLM_MODEL || 'x-ai/grok-4.1-fast';
-
-    // Tier models — each can be overridden individually
-    const fastModel = process.env.MODEL_FAST || 'google/gemini-2.0-flash-001';
-    const balancedModel = process.env.MODEL_BALANCED || defaultModel;
-    const powerfulModel = process.env.MODEL_POWERFUL || defaultModel;
+    const globalProvider = cfg.provider;
+    const globalBaseURL = cfg.baseURL;
 
     function getPricing(model: string, tier: string): ModelPricing {
-        // Allow env var override
+        // Allow env var override for custom pricing
         const inputEnv = process.env[`MODEL_${tier.toUpperCase()}_INPUT_PRICE`];
         const outputEnv = process.env[`MODEL_${tier.toUpperCase()}_OUTPUT_PRICE`];
         if (inputEnv && outputEnv) {
@@ -328,45 +294,21 @@ export function createRouterFromEnv(): RouterConfig {
         return KNOWN_PRICES[model] || { inputPer1M: 1.0, outputPer1M: 3.0 };
     }
 
-    /**
-     * Resolve the API key for a provider, checking provider-specific env vars.
-     * Priority: MODEL_<TIER>_API_KEY → provider-specific key → LLM_API_KEY
-     * This lets users add all their API keys once and the router picks the right one.
-     */
-    function resolveApiKey(provider: ProviderType, tierUpper: string): string {
-        // 1. Explicit per-tier key always wins
-        const tierKey = process.env[`MODEL_${tierUpper}_API_KEY`];
-        if (tierKey) return tierKey;
-
-        // 2. Provider-specific global key
-        const providerKeyMap: Record<ProviderType, string[]> = {
-            openrouter: ['OPENROUTER_API_KEY'],
-            openai: ['OPENAI_API_KEY'],
-            anthropic: ['ANTHROPIC_API_KEY'],
-            google: ['GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'],
-            ollama: [],  // Ollama doesn't need a key
-            'openai-compatible': [],
-        };
-        for (const envName of providerKeyMap[provider] || []) {
-            if (process.env[envName]) return process.env[envName]!;
-        }
-
-        // 3. Fall back to the global LLM key
-        return globalApiKey;
-    }
-
-    /** Build tier config with optional per-tier provider override */
-    function buildTierConfig(tier: string, modelId: string): ModelTierConfig {
+    /** Build tier config from the unified config */
+    function buildTierConfig(tier: 'fast' | 'balanced' | 'powerful'): ModelTierConfig {
+        const tierCfg = cfg.router[tier];
+        const tierProvider = tierCfg.provider || globalProvider;
         const tierUpper = tier.toUpperCase();
-        const tierProvider = process.env[`MODEL_${tierUpper}_PROVIDER`]
-            ? resolveProvider(process.env[`MODEL_${tierUpper}_PROVIDER`]!)
-            : globalProvider;
-        const tierApiKey = resolveApiKey(tierProvider, tierUpper);
-        const tierBaseURL = process.env[`MODEL_${tierUpper}_BASE_URL`] || (tierProvider === globalProvider ? globalBaseURL : undefined);
+
+        // Per-tier API key: explicit env override → auto-resolve from provider
+        const tierApiKey = process.env[`MODEL_${tierUpper}_API_KEY`]
+            || resolveApiKeyForProvider(tierProvider, cfg);
+        const tierBaseURL = tierCfg.baseURL
+            || (tierProvider === globalProvider ? globalBaseURL : undefined);
 
         return {
-            modelId,
-            pricing: getPricing(modelId, tier),
+            modelId: tierCfg.model,
+            pricing: getPricing(tierCfg.model, tier),
             provider: tierProvider,
             apiKey: tierApiKey,
             baseURL: tierBaseURL,
@@ -375,14 +317,14 @@ export function createRouterFromEnv(): RouterConfig {
 
     const config: RouterConfig = {
         provider: globalProvider,
-        apiKey: globalApiKey,
+        apiKey: resolveApiKeyForProvider(globalProvider, cfg),
         baseURL: globalBaseURL,
         tiers: {
-            fast: buildTierConfig('fast', fastModel),
-            balanced: buildTierConfig('balanced', balancedModel),
-            powerful: buildTierConfig('powerful', powerfulModel),
+            fast: buildTierConfig('fast'),
+            balanced: buildTierConfig('balanced'),
+            powerful: buildTierConfig('powerful'),
         },
-        budget: BudgetTracker.fromEnv(),
+        budget: BudgetTracker.fromConfig(cfg.budget),
     };
 
     // Log provider info for each tier

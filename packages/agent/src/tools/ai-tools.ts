@@ -8,6 +8,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { exec } from 'child_process';
+import { getConfig } from '../config';
 import { getShell } from '../utils/shell';
 import { readFile as fsReadFile } from 'fs/promises';
 import { basename } from 'path';
@@ -196,7 +197,7 @@ export const webSearch = tool({
     }),
     execute: async ({ query, limit }) => {
         const maxResults = limit || 5;
-        const searxngUrl = process.env.SEARXNG_URL || 'http://localhost:8888';
+        const searxngUrl = getConfig().searxng.url;
 
         // Try SearXNG first
         try {

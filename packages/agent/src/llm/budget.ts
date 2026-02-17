@@ -93,6 +93,13 @@ export class BudgetTracker {
         return new BudgetTracker(limits, path);
     }
 
+    /** Create from config object */
+    static fromConfig(budget: { dailyUSD: number; monthlyUSD: number; warningPct: number }, storagePath?: string): BudgetTracker {
+        const dir = storagePath || resolve(process.cwd(), '.forkscout');
+        const path = resolve(dir, 'budget.json');
+        return new BudgetTracker(budget, path);
+    }
+
     /** Record a spend event */
     recordSpend(cost: number, modelId: string, inputTokens: number, outputTokens: number): void {
         if (cost <= 0) return;

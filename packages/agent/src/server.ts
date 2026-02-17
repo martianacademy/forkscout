@@ -17,6 +17,7 @@ import type { ModelTier } from './llm/router';
 import { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
 import type { ChannelAuthStore } from './channel-auth';
 import { TelegramBridge } from './telegram';
+import { getConfig } from './config';
 
 
 export interface ServerOptions {
@@ -61,7 +62,7 @@ function setCors(res: ServerResponse) {
  *   3. Auto-detect from User-Agent / Referer
  */
 function detectChatContext(req: IncomingMessage, body?: any, channelAuth?: ChannelAuthStore): ChatContext {
-    const adminSecret = process.env.ADMIN_SECRET;
+    const adminSecret = getConfig().secrets.adminSecret;
 
     // ── Admin detection ──────────────────────────────
     let isAdmin = false;
@@ -198,7 +199,7 @@ function extractUserText(messages: UIMessage[]): string {
  *   GET  /api/models        — fetch available models
  */
 export async function startServer(config: AgentConfig, opts: ServerOptions = {}): Promise<void> {
-    const port = opts.port || parseInt(process.env.AGENT_PORT || '3210');
+    const port = opts.port || getConfig().agent.port;
     const host = opts.host || '0.0.0.0';
 
     const agent = new Agent(config);
@@ -467,7 +468,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                         const data: any = await r.json();
                         models = (data.models || []).map((m: any) => ({ id: m.name, name: m.name }));
                     } else if (prov === 'openai') {
-                        const apiKey = currentConfig.apiKey || process.env.OPENAI_API_KEY || '';
+                        const apiKey = currentConfig.apiKey || getConfig().secrets.openaiApiKey || '';
                         const r = await fetch('https://api.openai.com/v1/models', {
                             headers: { Authorization: `Bearer ${apiKey}` },
                         });
@@ -499,7 +500,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
 
     // ── Telegram bridge (auto-start if token is set) ──────────
     let telegramBridge: TelegramBridge | null = null;
-    const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+    const tgToken = getConfig().secrets.telegramBotToken;
     if (tgToken) {
         telegramBridge = new TelegramBridge(agent, { token: tgToken });
         agent.setTelegramBridge(telegramBridge);
