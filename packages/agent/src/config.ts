@@ -134,27 +134,28 @@ export function loadConfig(force = false): ForkscoutConfig {
     }
 
     // 2. Build config: file values → env overrides → defaults
+    //    Only DEFAULT_PROVIDER and DEFAULT_MODEL can be overridden via env.
+    //    Everything else lives in forkscout.config.json.
     const provider = resolveProvider(
-        env('MODEL_PROVIDER') || env('LLM_PROVIDER') || fileConfig.provider || DEFAULTS.provider
+        env('DEFAULT_PROVIDER') || fileConfig.provider || DEFAULTS.provider
     );
 
-    const baseURL = env('LLM_BASE_URL')
-        || fileConfig.baseURL
+    const baseURL = fileConfig.baseURL
         || PROVIDER_URLS[provider]
         || DEFAULTS.baseURL;
 
     const config: ForkscoutConfig = {
         provider,
-        model: env('LLM_MODEL') || fileConfig.model || DEFAULTS.model,
+        model: env('DEFAULT_MODEL') || fileConfig.model || DEFAULTS.model,
         baseURL,
-        temperature: floatEnv('LLM_TEMPERATURE') ?? fileConfig.temperature ?? DEFAULTS.temperature,
-        maxTokens: intEnv('LLM_MAX_TOKENS') ?? fileConfig.maxTokens ?? DEFAULTS.maxTokens,
+        temperature: fileConfig.temperature ?? DEFAULTS.temperature,
+        maxTokens: fileConfig.maxTokens ?? DEFAULTS.maxTokens,
 
         router: buildRouterConfig(fileConfig.router, provider, baseURL),
         budget: buildBudgetConfig(fileConfig.budget),
         agent: buildAgentConfig(fileConfig.agent),
         searxng: {
-            url: env('SEARXNG_URL') || fileConfig.searxng?.url || DEFAULTS.searxng.url,
+            url: fileConfig.searxng?.url || DEFAULTS.searxng.url,
         },
 
         secrets: {
@@ -214,38 +215,36 @@ function buildRouterConfig(file: any, globalProvider: ProviderType, _globalBaseU
 
     return {
         fast: {
-            model: env('MODEL_FAST') || fileFast.model || DEFAULTS.router.fast.model,
-            provider: resolveProvider(env('MODEL_FAST_PROVIDER') || fileFast.provider || globalProvider),
-            baseURL: env('MODEL_FAST_BASE_URL') || fileFast.baseURL,
+            model: fileFast.model || DEFAULTS.router.fast.model,
+            provider: resolveProvider(fileFast.provider || globalProvider),
+            baseURL: fileFast.baseURL,
         },
         balanced: {
-            model: env('MODEL_BALANCED') || fileBalanced.model || DEFAULTS.router.balanced.model,
-            provider: resolveProvider(env('MODEL_BALANCED_PROVIDER') || fileBalanced.provider || globalProvider),
-            baseURL: env('MODEL_BALANCED_BASE_URL') || fileBalanced.baseURL,
+            model: fileBalanced.model || DEFAULTS.router.balanced.model,
+            provider: resolveProvider(fileBalanced.provider || globalProvider),
+            baseURL: fileBalanced.baseURL,
         },
         powerful: {
-            model: env('MODEL_POWERFUL') || filePowerful.model || DEFAULTS.router.powerful.model,
-            provider: resolveProvider(env('MODEL_POWERFUL_PROVIDER') || filePowerful.provider || globalProvider),
-            baseURL: env('MODEL_POWERFUL_BASE_URL') || filePowerful.baseURL,
+            model: filePowerful.model || DEFAULTS.router.powerful.model,
+            provider: resolveProvider(filePowerful.provider || globalProvider),
+            baseURL: filePowerful.baseURL,
         },
     };
 }
 
 function buildBudgetConfig(file: any): BudgetConfig {
     return {
-        dailyUSD: floatEnv('BUDGET_DAILY_USD') ?? file?.dailyUSD ?? DEFAULTS.budget.dailyUSD,
-        monthlyUSD: floatEnv('BUDGET_MONTHLY_USD') ?? file?.monthlyUSD ?? DEFAULTS.budget.monthlyUSD,
-        warningPct: floatEnv('BUDGET_WARNING_PCT') ?? file?.warningPct ?? DEFAULTS.budget.warningPct,
+        dailyUSD: file?.dailyUSD ?? DEFAULTS.budget.dailyUSD,
+        monthlyUSD: file?.monthlyUSD ?? DEFAULTS.budget.monthlyUSD,
+        warningPct: file?.warningPct ?? DEFAULTS.budget.warningPct,
     };
 }
 
 function buildAgentConfig(file: any): AgentSettings {
     return {
-        maxIterations: intEnv('AGENT_MAX_ITERATIONS') ?? file?.maxIterations ?? DEFAULTS.agent.maxIterations,
-        autoRegisterTools: env('AGENT_AUTO_REGISTER_TOOLS') !== undefined
-            ? env('AGENT_AUTO_REGISTER_TOOLS') !== 'false'
-            : file?.autoRegisterTools ?? DEFAULTS.agent.autoRegisterTools,
-        port: intEnv('AGENT_PORT') ?? file?.port ?? DEFAULTS.agent.port,
+        maxIterations: file?.maxIterations ?? DEFAULTS.agent.maxIterations,
+        autoRegisterTools: file?.autoRegisterTools ?? DEFAULTS.agent.autoRegisterTools,
+        port: file?.port ?? DEFAULTS.agent.port,
     };
 }
 
@@ -280,18 +279,4 @@ function resolveProvider(raw: string): ProviderType {
 function env(key: string): string | undefined {
     const val = process.env[key];
     return val && val.trim() !== '' ? val.trim() : undefined;
-}
-
-function intEnv(key: string): number | undefined {
-    const v = env(key);
-    if (v === undefined) return undefined;
-    const n = parseInt(v, 10);
-    return isNaN(n) ? undefined : n;
-}
-
-function floatEnv(key: string): number | undefined {
-    const v = env(key);
-    if (v === undefined) return undefined;
-    const n = parseFloat(v);
-    return isNaN(n) ? undefined : n;
 }

@@ -284,13 +284,7 @@ export function createRouterFromEnv(): RouterConfig {
     const globalProvider = cfg.provider;
     const globalBaseURL = cfg.baseURL;
 
-    function getPricing(model: string, tier: string): ModelPricing {
-        // Allow env var override for custom pricing
-        const inputEnv = process.env[`MODEL_${tier.toUpperCase()}_INPUT_PRICE`];
-        const outputEnv = process.env[`MODEL_${tier.toUpperCase()}_OUTPUT_PRICE`];
-        if (inputEnv && outputEnv) {
-            return { inputPer1M: parseFloat(inputEnv), outputPer1M: parseFloat(outputEnv) };
-        }
+    function getPricing(model: string, _tier: string): ModelPricing {
         return KNOWN_PRICES[model] || { inputPer1M: 1.0, outputPer1M: 3.0 };
     }
 
@@ -298,11 +292,8 @@ export function createRouterFromEnv(): RouterConfig {
     function buildTierConfig(tier: 'fast' | 'balanced' | 'powerful'): ModelTierConfig {
         const tierCfg = cfg.router[tier];
         const tierProvider = tierCfg.provider || globalProvider;
-        const tierUpper = tier.toUpperCase();
 
-        // Per-tier API key: explicit env override → auto-resolve from provider
-        const tierApiKey = process.env[`MODEL_${tierUpper}_API_KEY`]
-            || resolveApiKeyForProvider(tierProvider, cfg);
+        const tierApiKey = resolveApiKeyForProvider(tierProvider, cfg);
         const tierBaseURL = tierCfg.baseURL
             || (tierProvider === globalProvider ? globalBaseURL : undefined);
 
