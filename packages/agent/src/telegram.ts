@@ -149,6 +149,8 @@ export class TelegramBridge {
         send_telegram_photo: '📷 Sending a photo…',
         send_telegram_file: '📎 Sending a file…',
         browser_screenshot: '📸 Taking a screenshot…',
+        list_secrets: '🔑 Checking available secrets…',
+        http_request: '🌐 Making API request…',
     };
 
     constructor(agent: Agent, config: TelegramBridgeConfig) {

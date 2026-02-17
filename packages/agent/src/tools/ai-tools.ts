@@ -8,7 +8,55 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { exec } from 'child_process';
+import { readFile as fsReadFile } from 'fs/promises';
+import { basename } from 'path';
 import { resolveAgentPath, PROJECT_ROOT, AGENT_SRC, AGENT_ROOT } from '../paths';
+
+// ─── Secret Management Helpers ──────────────────────────
+
+/** Env var name patterns considered sensitive (never expose values) */
+const SECRET_PATTERNS = /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH|PRIVATE/i;
+
+/** Get all env var names that match sensitive patterns */
+function getSecretNames(): string[] {
+    return Object.keys(process.env).filter(k => SECRET_PATTERNS.test(k));
+}
+
+/** Build a value→placeholder map for scrubbing output */
+function buildScrubMap(): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const key of getSecretNames()) {
+        const val = process.env[key];
+        if (val && val.length >= 6) { // don't scrub very short values (too many false positives)
+            map.set(val, `[REDACTED:${key}]`);
+        }
+    }
+    return map;
+}
+
+/** Scrub all known secret values from a string */
+function scrubSecrets(text: string): string {
+    const map = buildScrubMap();
+    let result = text;
+    // Sort by value length descending to replace longest matches first
+    const entries = [...map.entries()].sort((a, b) => b[0].length - a[0].length);
+    for (const [secret, placeholder] of entries) {
+        // Replace all occurrences
+        while (result.includes(secret)) {
+            result = result.replace(secret, placeholder);
+        }
+    }
+    return result;
+}
+
+/** Resolve {{SECRET_NAME}} templates in a string (returns resolved string, never exposed to LLM) */
+function resolveTemplates(text: string): string {
+    return text.replace(/\{\{([A-Z_][A-Z0-9_]*)\}\}/g, (_match, name) => {
+        const val = process.env[name];
+        if (!val) throw new Error(`Secret {{${name}}} is not set in environment`);
+        return val;
+    });
+}
 
 
 import { SELF_ENTITY_NAME } from '../memory/knowledge-graph';
@@ -113,7 +161,7 @@ export const deleteFile = tool({
 // ─── Shell Tool ─────────────────────────────────────────
 
 export const runCommand = tool({
-    description: 'Execute a shell command and return its output. Commands run with a 30-second timeout.',
+    description: 'Execute a shell command and return its output. Commands run with a 30-second timeout. Secret values in output are automatically redacted.',
     inputSchema: z.object({
         command: z.string().describe('Shell command to execute'),
         cwd: z.string().describe('Working directory (relative to project root or absolute, defaults to project root)').optional(),
@@ -127,8 +175,8 @@ export const runCommand = tool({
                 shell: '/bin/zsh',
             }, (error, stdout, stderr) => {
                 resolve({
-                    stdout: stdout?.trim().slice(0, 4000) || '',
-                    stderr: stderr?.trim().slice(0, 2000) || '',
+                    stdout: scrubSecrets(stdout?.trim().slice(0, 4000) || ''),
+                    stderr: scrubSecrets(stderr?.trim().slice(0, 2000) || ''),
                     exitCode: error?.code ?? 0,
                 });
             });
@@ -494,6 +542,116 @@ export function createMcpTools(
 
 // ─── Collect all static tools ───────────────────────────
 
+// ─── Secret-Aware HTTP Tool ─────────────────────────────
+
+export const listSecrets = tool({
+    description: `List the NAME of all available secrets/API keys in the environment. Returns only names (e.g. TELEGRAM_BOT_TOKEN, LLM_API_KEY) — never values. Use this to discover what secrets are available before making API calls with http_request.`,
+    inputSchema: z.object({}),
+    execute: async () => {
+        const names = getSecretNames();
+        return {
+            available: names,
+            usage: 'Use {{SECRET_NAME}} syntax in http_request URLs, headers, or body to inject these values securely. The actual values never enter the conversation.',
+        };
+    },
+});
+
+export const httpRequest = tool({
+    description: `Make an HTTP request with automatic secret injection. Use {{SECRET_NAME}} placeholders in the URL, headers, or body — they will be resolved from environment variables server-side, so the actual secret NEVER enters the conversation or LLM context.
+
+Examples:
+  URL: "https://api.telegram.org/bot{{TELEGRAM_BOT_TOKEN}}/sendMessage"
+  Header: { "Authorization": "Bearer {{LLM_API_KEY}}" }
+  Body: { "token": "{{MY_SECRET}}" }
+
+For file uploads, set filePath and the file will be sent as multipart/form-data.
+Use list_secrets first to discover available secret names.`,
+    inputSchema: z.object({
+        url: z.string().describe('The URL to request. Supports {{SECRET_NAME}} placeholders.'),
+        method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET').describe('HTTP method'),
+        headers: z.record(z.string()).optional().describe('Request headers. Supports {{SECRET_NAME}} placeholders in values.'),
+        body: z.string().optional().describe('Request body (JSON string or plain text). Supports {{SECRET_NAME}} placeholders.'),
+        filePath: z.string().optional().describe('Path to a file to upload as multipart/form-data. The file field name defaults to "file".'),
+        fileField: z.string().optional().describe('Form field name for the uploaded file (default: "file")'),
+        formFields: z.record(z.string()).optional().describe('Additional form fields for multipart requests. Supports {{SECRET_NAME}} placeholders in values.'),
+        timeout: z.number().optional().describe('Request timeout in milliseconds (default: 30000)'),
+    }),
+    execute: async ({ url, method, headers, body, filePath, fileField, formFields, timeout }) => {
+        try {
+            // Resolve all {{SECRET}} templates
+            const resolvedUrl = resolveTemplates(url);
+            const resolvedHeaders: Record<string, string> = {};
+            if (headers) {
+                for (const [k, v] of Object.entries(headers)) {
+                    resolvedHeaders[k] = resolveTemplates(v);
+                }
+            }
+
+            let fetchBody: any;
+            const fetchHeaders = { ...resolvedHeaders };
+
+            if (filePath) {
+                // Multipart file upload
+                const { resolve: resolvePath } = await import('path');
+                const resolved = resolvePath(filePath);
+                const fileData = await fsReadFile(resolved);
+                const fileName = basename(resolved);
+                const form = new FormData();
+                form.append(fileField || 'file', new Blob([fileData]), fileName);
+                if (formFields) {
+                    for (const [k, v] of Object.entries(formFields)) {
+                        form.append(k, resolveTemplates(v));
+                    }
+                }
+                fetchBody = form;
+                // Don't set Content-Type — fetch sets it with boundary
+            } else if (body) {
+                fetchBody = resolveTemplates(body);
+                if (!fetchHeaders['Content-Type'] && !fetchHeaders['content-type']) {
+                    fetchHeaders['Content-Type'] = 'application/json';
+                }
+            }
+
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout || 30_000);
+
+            const res = await fetch(resolvedUrl, {
+                method: method || 'GET',
+                headers: Object.keys(fetchHeaders).length > 0 ? fetchHeaders : undefined,
+                body: fetchBody,
+                signal: controller.signal,
+            });
+            clearTimeout(timer);
+
+            const contentType = res.headers.get('content-type') || '';
+            let responseBody: string;
+            if (contentType.includes('json')) {
+                const json = await res.json();
+                responseBody = JSON.stringify(json, null, 2).slice(0, 4000);
+            } else {
+                responseBody = (await res.text()).slice(0, 4000);
+            }
+
+            // Scrub any secrets that might appear in the response
+            responseBody = scrubSecrets(responseBody);
+
+            // Log the request (with scrubbed URL)
+            console.log(`[http_request]: ${method || 'GET'} ${scrubSecrets(url)} → ${res.status}`);
+
+            return {
+                status: res.status,
+                statusText: res.statusText,
+                body: responseBody,
+                // Return scrubbed URL so agent knows what was called without seeing secrets
+                url: scrubSecrets(url),
+            };
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { status: 0, error: scrubSecrets(msg) };
+        }
+    },
+});
+
 export const coreTools = {
     read_file: readFile,
     write_file: writeFile,
@@ -507,6 +665,8 @@ export const coreTools = {
     get_current_date: getCurrentDate,
     generate_presentation: generatePresentation,
     safe_self_edit: safeSelfEdit,
+    list_secrets: listSecrets,
+    http_request: httpRequest,
 };
 
 // ─── Memory Tools ───────────────────────────────────────
