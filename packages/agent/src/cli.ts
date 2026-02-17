@@ -29,7 +29,7 @@ console.log();
 
 console.log('Starting Forkscout Agent (interactive mode)...\n');
 
-import { generateText } from 'ai';
+import { generateText, stepCountIs } from 'ai';
 import * as readline from 'readline';
 
 createAgent(config)
@@ -60,6 +60,7 @@ createAgent(config)
                         system: systemPrompt,
                         prompt: input,
                         tools: agent.getTools(),
+                        stopWhen: stepCountIs(20),
                     });
                     agent.saveToMemory('assistant', text);
                     console.log(`\n[Forkscout]: ${text}\n`);

@@ -9,6 +9,7 @@ import { Readable } from 'stream';
 import {
     streamText,
     generateText,
+    stepCountIs,
     convertToModelMessages,
 
     type UIMessage,
@@ -243,6 +244,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     system: systemPrompt,
                     messages: await convertToModelMessages(messages),
                     tools: agent.getToolsForContext(ctx),
+                    stopWhen: stepCountIs(20),
                     onStepFinish: ({ toolCalls, toolResults }) => {
                         if (toolCalls && toolCalls.length > 0) {
                             console.log(`[Agent]: Step — ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
@@ -303,6 +305,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                         system: systemPrompt,
                         messages: await convertToModelMessages(messages),
                         tools: agent.getToolsForContext(ctx),
+                        stopWhen: stepCountIs(20),
                     });
 
                     agent.saveToMemory('assistant', text);

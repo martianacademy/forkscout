@@ -12,7 +12,7 @@
  * Env: TELEGRAM_BOT_TOKEN
  */
 
-import { generateText, type UIMessage } from 'ai';
+import { generateText, stepCountIs, type UIMessage } from 'ai';
 import { readFile, writeFile, mkdir, stat } from 'fs/promises';
 import { resolve as resolvePath, basename } from 'path';
 import type { Agent, ChatContext } from './agent';
@@ -617,6 +617,7 @@ export class TelegramBridge {
                     return { role: m.role as 'user' | 'assistant', content };
                 }),
                 tools: this.agent.getToolsForContext(ctx),
+                stopWhen: stepCountIs(20),
                 onStepFinish: ({ toolCalls }) => {
                     if (toolCalls?.length) {
                         console.log(`[Telegram/Agent]: ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
