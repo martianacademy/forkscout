@@ -1,6 +1,12 @@
+/**
+ * MCP Defaults — Built-in MCP servers and startup connection logic.
+ *
+ * Handles merging default servers with user config, connecting all servers,
+ * and converting MCP tools to AI SDK tool() format.
+ */
+
 import { tool } from 'ai';
-import { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from '../mcp/connector';
-import type { AgentConfig } from './types';
+import { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './connector';
 
 /** Built-in MCP servers that are always available on startup */
 export const DEFAULT_MCP_SERVERS: Record<string, McpServerConfig> = {
@@ -18,31 +24,31 @@ export const DEFAULT_MCP_SERVERS: Record<string, McpServerConfig> = {
  * Merges built-in defaults with user configuration (user config takes precedence).
  */
 export async function connectMcpServers(
-    config: AgentConfig,
+    mcpConfig: McpConfig | undefined,
     mcpConfigPath: string,
     mcpConnector: McpConnector,
     toolSet: Record<string, any>,
 ): Promise<void> {
-    let mcpConfig: McpConfig;
+    let config: McpConfig;
 
-    if (typeof config.mcpConfig === 'object') {
-        mcpConfig = config.mcpConfig;
+    if (mcpConfig && typeof mcpConfig === 'object') {
+        config = mcpConfig;
     } else {
-        mcpConfig = await loadMcpConfig(mcpConfigPath);
+        config = await loadMcpConfig(mcpConfigPath);
     }
 
     // Merge built-in defaults (user config takes precedence)
     for (const [name, cfg] of Object.entries(DEFAULT_MCP_SERVERS)) {
-        if (!(name in mcpConfig.servers)) {
-            mcpConfig.servers[name] = cfg;
+        if (!(name in config.servers)) {
+            config.servers[name] = cfg;
         }
     }
 
-    const serverCount = Object.keys(mcpConfig.servers).length;
+    const serverCount = Object.keys(config.servers).length;
     if (serverCount === 0) return;
 
     console.log(`\nConnecting to ${serverCount} MCP server(s)...`);
-    const mcpTools = await mcpConnector.connect(mcpConfig);
+    const mcpTools = await mcpConnector.connect(config);
 
     // Convert MCP tools (custom format) → AI SDK tool() format
     for (const t of mcpTools) {

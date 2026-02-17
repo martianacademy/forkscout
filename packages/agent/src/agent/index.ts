@@ -21,7 +21,7 @@ import { AGENT_ROOT } from '../paths';
 import { getConfig } from '../config';
 import { SurvivalMonitor } from '../survival';
 import { ChannelAuthStore } from '../channel-auth';
-import { connectMcpServers } from './mcp';
+import { connectMcpServers } from '../mcp/defaults';
 import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-builder';
 
 // Re-export all types from the barrel
@@ -274,7 +274,8 @@ export class Agent {
         if (this.state.running) return;
         await this.memory.init();
         await this.channelAuth.init();
-        await connectMcpServers(this.config, this.mcpConfigPath, this.mcpConnector, this.toolSet);
+        const mcpCfg = typeof this.config.mcpConfig === 'object' ? this.config.mcpConfig : undefined;
+        await connectMcpServers(mcpCfg, this.mcpConfigPath, this.mcpConnector, this.toolSet);
         await this.survival.start();
         this.state.running = true;
     }
