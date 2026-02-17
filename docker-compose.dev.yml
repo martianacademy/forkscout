@@ -1,0 +1,11 @@
+# ─── Developer Override ───
+# Use alongside docker-compose.yml for local development.
+# Replaces the named volume with a bind mount so host file changes are live.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+  agent:
+    volumes:
+      - ./packages/agent:/app/packages/agent
+      - /app/packages/agent/node_modules

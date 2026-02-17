@@ -80,18 +80,34 @@ AGENT_PORT=4000 SEARXNG_PORT=9090 docker compose up -d
 
 ### Persistence
 
-The `packages/agent` directory is bind-mounted into the container. Everything the agent creates persists on your host filesystem:
+A named Docker volume (`agent-data`) stores the entire agent package. On first run, Docker copies the image's code into the volume. After that, all agent changes persist — self-edited source code, memory, knowledge graph, cron jobs, auth, Telegram state — even across `docker compose down` + `up` or image updates.
 
 - **`.forkscout/`** — memory, knowledge graph, vector embeddings, auth, cron jobs, Telegram state
 - **`src/`** — source code (including any self-edits the agent makes)
 
-An anonymous volume keeps the Linux-compiled `node_modules` separate from your host.
+An anonymous volume keeps the Linux-compiled `node_modules` separate.
+
+To reset to a fresh image state:
+
+```bash
+docker compose down
+docker volume rm forkscout_agent-data
+docker compose up -d
+```
+
+**Developer mode** (bind mount — see host changes live):
+
+```bash
+# Override the named volume with a bind mount for local development:
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
 
 ### Updating
 
 ```bash
-git pull                              # get latest code
-docker compose up -d --build          # rebuild image & restart
+docker compose pull                   # pull latest image from ghcr.io
+docker compose up -d                  # restart with new image
+docker compose up -d --build          # or rebuild locally
 docker compose up -d --build -V       # rebuild + refresh node_modules (after dependency changes)
 ```
 
