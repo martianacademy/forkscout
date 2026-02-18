@@ -49,4 +49,5 @@ packages/agent/.forkscout-backup-*
 playwright-canary-persist/
 
 # Agent custom scripts/experiments (user-specific)
+custom/
 packages/agent/custom/
