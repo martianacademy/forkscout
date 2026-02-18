@@ -1,5 +1,5 @@
 import type { ChatContext, AgentConfig } from './types';
-import type { MemoryManager } from '../memory/manager';
+import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
 import type { CronAlert } from '../scheduler';
 import { getDefaultSystemPrompt, getPublicSystemPrompt } from './system-prompts';

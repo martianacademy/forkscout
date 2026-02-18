@@ -6,7 +6,7 @@
 import { generateTextQuiet } from '../llm/retry';
 import { LLMClient } from '../llm/client';
 import { ModelRouter } from '../llm/router';
-import { MemoryManager } from '../memory/manager';
+import { MemoryManager } from '../memory';
 import { Scheduler, type CronAlert } from '../scheduler';
 import { exec } from 'child_process';
 import { getShell, unescapeShellCommand } from '../utils/shell';
@@ -14,24 +14,15 @@ import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT } from '../paths';
 import { getConfig } from '../config';
 
-/** Create a configured MemoryManager with LLM-powered summarization + entity extraction */
-export function createMemoryManager(llm: LLMClient, router: ModelRouter): MemoryManager {
+/** Create a configured MemoryManager with LLM-powered entity extraction */
+export function createMemoryManager(_llm: LLMClient, router: ModelRouter): MemoryManager {
     const storagePath = resolvePath(AGENT_ROOT, '.forkscout');
 
     return new MemoryManager({
         storagePath,
-        embeddingModel: llm.getEmbeddingModel(),
         ownerName: getConfig().agent.owner,
         recentWindowSize: 6,
-        relevantMemoryLimit: 5,
         contextBudget: 4000,
-        summarizer: async (text: string) => {
-            return generateTextQuiet({
-                model: router.getModel('summarize').model,
-                system: 'You are a summarization assistant. Be concise and accurate.',
-                prompt: `Summarize this conversation into 2-3 concise sentences capturing the key topics, decisions, and outcomes:\n\n${text}`,
-            });
-        },
         entityExtractor: async (prompt: string) => {
             return generateTextQuiet({
                 model: router.getModel('extract').model,

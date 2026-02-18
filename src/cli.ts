@@ -37,7 +37,7 @@ import { stepCountIs } from 'ai';
 import { generateTextWithRetry } from './llm/retry';
 import type { ModelTier } from './llm/router';
 import { createReasoningContext, createPrepareStep, getReasoningSummary } from './llm/reasoning';
-import { buildFailureObservation } from './memory/failure-memory';
+import { buildFailureObservation } from './memory';
 import * as readline from 'readline';
 
 createAgent(config)

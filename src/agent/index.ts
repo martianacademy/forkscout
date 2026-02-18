@@ -1,7 +1,7 @@
 import { LLMClient } from '../llm/client';
 import { ModelRouter, createRouterFromEnv, type ModelPurpose } from '../llm/router';
 import { classifyComplexity, type ComplexityResult } from '../llm/complexity';
-import { MemoryManager } from '../memory/manager';
+import { MemoryManager } from '../memory';
 import type { Scheduler, CronAlert } from '../scheduler';
 import { McpConnector } from '../mcp/connector';
 import { createTelegramTools } from '../tools/ai-tools';

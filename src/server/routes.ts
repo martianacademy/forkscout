@@ -18,7 +18,7 @@ import {
 import { generateTextWithRetry, streamTextWithRetry } from '../llm/retry';
 import type { ModelTier } from '../llm/router';
 import { createReasoningContext, createPrepareStep, getReasoningSummary } from '../llm/reasoning';
-import { buildFailureObservation } from '../memory/failure-memory';
+import { buildFailureObservation } from '../memory';
 import type { Agent } from '../agent';
 import type { ChannelAuthStore } from '../channels/auth';
 import type { TelegramBridge } from '../channels/telegram';

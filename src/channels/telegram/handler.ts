@@ -6,7 +6,7 @@ import { stepCountIs, type UIMessage } from 'ai';
 import { generateTextWithRetry } from '../../llm/retry';
 import type { ModelTier } from '../../llm/router';
 import { createReasoningContext, createPrepareStep, getReasoningSummary } from '../../llm/reasoning';
-import { buildFailureObservation } from '../../memory/failure-memory';
+import { buildFailureObservation } from '../../memory';
 import type { Agent, ChatContext } from '../../agent';
 import type { TelegramUpdate } from './types';
 import { describeToolCall, humanTimeAgo } from './types';
