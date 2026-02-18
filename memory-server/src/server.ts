@@ -29,16 +29,16 @@ const HOST = process.env.MEMORY_HOST || '0.0.0.0';
 const STORAGE_DIR = process.env.MEMORY_STORAGE || resolve(process.cwd(), '.forkscout');
 const OWNER = process.env.MEMORY_OWNER || 'Admin';
 
-let mcpTransport: StreamableHTTPServerTransport | null = null;
+function createMcpServer(store: MemoryStore) {
+    const mcp = new McpServer({ name: 'forkscout-memory', version: '1.0.0' });
+    registerTools(mcp, store);
+    return mcp;
+}
 
 async function main() {
     // ── Init memory store ────────────────────────────
     const store = new MemoryStore(resolve(STORAGE_DIR, 'memory.json'), OWNER);
     await store.init();
-
-    // ── Init MCP server ──────────────────────────────
-    const mcp = new McpServer({ name: 'forkscout-memory', version: '1.0.0' });
-    registerTools(mcp, store);
 
     // ── Periodic flush ───────────────────────────────
     const flushInterval = setInterval(() => store.flush(), 30_000);
@@ -67,21 +67,21 @@ async function main() {
             return;
         }
 
-        // MCP endpoint
+        // MCP endpoint — stateless: fresh transport per request
         if (url.startsWith('/mcp')) {
-            if (!mcpTransport) {
-                mcpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-                await mcp.connect(mcpTransport);
-                console.log('🔗 MCP transport connected');
-            }
             try {
+                const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+                const mcp = createMcpServer(store);
+                await mcp.connect(transport);
+
                 let parsedBody: unknown;
                 if (req.method === 'POST') {
                     const chunks: Buffer[] = [];
                     for await (const chunk of req) chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
                     parsedBody = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
                 }
-                await mcpTransport.handleRequest(req, res, parsedBody);
+                await transport.handleRequest(req, res, parsedBody);
+                await mcp.close();
             } catch (err) {
                 console.error('MCP error:', err);
                 if (!res.headersSent) {
