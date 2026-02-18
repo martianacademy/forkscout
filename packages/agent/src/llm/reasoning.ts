@@ -69,24 +69,23 @@ const FAILURE_ESCALATION_THRESHOLD = 3;
 const PLANNING_INJECTION = `
 
 ━━━━ PLANNING PHASE ━━━━
-Before taking any action, you MUST first think through your approach:
+Before diving into tool calls, start your response with a brief plan:
 
 1. What is the user asking for?
 2. What information do I need to gather first?
 3. What tools should I use, and in what order?
 4. What could go wrong, and how will I verify success?
 
-Output your plan as a brief numbered list, then proceed to execute it.
-Do NOT use any tools in this response — just plan.
+Output your plan as a brief numbered list FIRST, then proceed to call tools.
 ━━━━━━━━━━━━━━━━━━━━━━━━`;
 
 const ACKNOWLEDGE_INJECTION = `
 
 ━━━━ ACKNOWLEDGE FIRST ━━━━
-Before using any tools, briefly acknowledge the user's request.
-Tell them what you understood and what you're about to do, in 1-2 natural sentences.
+Before using any tools, start your response with a brief acknowledgment.
+Tell the user what you understood and what you're about to do, in 1-2 natural sentences.
 Keep it short and conversational — no bullet lists, no formality.
-Do NOT use any tools in this response — just acknowledge.
+Then proceed to call the necessary tools.
 ━━━━━━━━━━━━━━━━━━━━━━━━`;
 
 // ── Reflection Prompt ──────────────────────────────────
@@ -174,6 +173,11 @@ export function createPrepareStep(context: ReasoningContext) {
         }
 
         // ── Phase 0: ACKNOWLEDGE / PLAN (step 0, moderate+ tasks) ──
+        // NOTE: We do NOT set toolChoice:'none' here. AI SDK terminates the
+        // step loop when there are zero tool calls in a step. Instead, we inject
+        // an acknowledgment/planning prompt into the system message and let the
+        // model produce text alongside its first tool calls. The handler sends
+        // the text part early via onStepFinish.
         if (stepNumber === 0 && context.complexity.complexity !== 'simple') {
             context.phase = 'plan';
             const modelInfo = context.router.getModelByTier(context.tier);
@@ -186,7 +190,6 @@ export function createPrepareStep(context: ReasoningContext) {
 
             return {
                 system: context.baseSystemPrompt + injection,
-                toolChoice: 'none' as const,
                 ...(providerOpts ? { providerOptions: providerOpts } : {}),
             };
         }

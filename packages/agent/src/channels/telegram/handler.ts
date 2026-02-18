@@ -186,11 +186,11 @@ export async function handleTelegramUpdate(
             onStepFinish: ({ text: stepText, toolCalls }) => {
                 const currentStep = stepCounter++;
 
-                // Send acknowledgment/plan text immediately from early text-only steps
-                // (step 0 is the PLAN/ACKNOWLEDGE phase when toolChoice='none')
+                // Send acknowledgment/plan text immediately from early steps.
+                // The model produces text alongside tool calls in step 0 thanks
+                // to the ACKNOWLEDGE/PLAN system prompt injection.
                 if (
                     stepText?.trim() &&
-                    (!toolCalls || toolCalls.length === 0) &&
                     currentStep <= 1 &&
                     !earlyTextSent
                 ) {
