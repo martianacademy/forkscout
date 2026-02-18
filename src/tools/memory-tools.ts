@@ -119,5 +119,63 @@ export function createMemoryTools(memory: MemoryManager) {
                 return ctx ? `Self-Identity (${SELF_ENTITY_NAME}):\n${ctx}` : 'No self-identity observations yet.';
             },
         }),
+
+        // ── Active task tools (executive memory) ────────
+
+        start_task: tool({
+            description: `Declare a new long-running goal. Checks for similar running tasks first — resumes them instead of duplicating. Call this BEFORE starting any multi-step work.`,
+            inputSchema: z.object({
+                title: z.string().describe('Short label (3-7 words)'),
+                goal: z.string().describe('What you are trying to accomplish'),
+                successCondition: z.string().optional().describe('How to know when the task is done'),
+            }),
+            execute: async ({ title, goal, successCondition }) => {
+                const similar = memory.findSimilarTask(title, goal);
+                if (similar && similar.status === 'running') {
+                    memory.heartbeatTask(similar.id);
+                    return `⚡ Resuming existing task "${similar.title}" (${similar.id}) — already running since ${new Date(similar.startedAt).toLocaleTimeString()}`;
+                }
+                const task = memory.createTask(title, goal, { successCondition });
+                return `✓ Task started: "${task.title}" (${task.id})`;
+            },
+        }),
+
+        complete_task: tool({
+            description: `Mark a task as completed. Always close tasks when the goal is achieved.`,
+            inputSchema: z.object({
+                taskId: z.string().describe('Task ID from start_task'),
+                result: z.string().optional().describe('Outcome summary'),
+            }),
+            execute: async ({ taskId, result }) => {
+                const task = memory.completeTask(taskId, result);
+                if (!task) return `Task ${taskId} not found.`;
+                const elapsed = Math.round((Date.now() - task.startedAt) / 60000);
+                return `✓ Completed "${task.title}" in ${elapsed}min. ${result || ''}`;
+            },
+        }),
+
+        abort_task: tool({
+            description: `Abort a task that is stuck, no longer needed, or taking too long.`,
+            inputSchema: z.object({
+                taskId: z.string().describe('Task ID'),
+                reason: z.string().describe('Why the task was stopped'),
+            }),
+            execute: async ({ taskId, reason }) => {
+                const task = memory.abortTask(taskId, reason);
+                if (!task) return `Task ${taskId} not found.`;
+                return `✗ Aborted "${task.title}": ${reason}`;
+            },
+        }),
+
+        check_tasks: tool({
+            description: `See what you're currently working on. Call this at the start of a conversation to restore temporal context.`,
+            inputSchema: z.object({}),
+            execute: async () => {
+                const summary = memory.getTaskSummary();
+                if (!summary) return 'No active tasks. You have a clean slate.';
+                const stats = memory.getStats();
+                return `${summary}\n\nTotal tracked: ${stats.totalTasks} (${stats.activeTasks} running)`;
+            },
+        }),
     };
 }
