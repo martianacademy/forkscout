@@ -1,0 +1,10 @@
+{
+  "id": "simple_math_1771435397604",
+  "archetype_id": "simple_math",
+  "prompt": "What is 11 + 23? Give only the number as answer.",
+  "params": {
+    "a": 11,
+    "b": 23
+  },
+  "timestamp": "2026-02-18T17:23:17.604Z"
+}

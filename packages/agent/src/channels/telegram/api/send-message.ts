@@ -22,6 +22,7 @@
  */
 import { callApi } from './call-api';
 import { splitMessage } from './split-message';
+import { sanitizeTelegramMarkdown } from './sanitize-markdown';
 
 export async function sendMessage(
     token: string,
@@ -30,7 +31,9 @@ export async function sendMessage(
     replyToMessageId?: number,
     maxLen = 4096,
 ): Promise<void> {
-    const chunks = splitMessage(text, maxLen);
+    // Sanitize standard Markdown → Telegram-safe Markdown before splitting
+    const sanitized = sanitizeTelegramMarkdown(text);
+    const chunks = splitMessage(sanitized, maxLen);
 
     for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];

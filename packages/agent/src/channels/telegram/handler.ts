@@ -5,6 +5,8 @@
 import { stepCountIs, type UIMessage } from 'ai';
 import { generateTextWithRetry } from '../../llm/retry';
 import type { ModelTier } from '../../llm/router';
+import { createReasoningContext, createPrepareStep, getReasoningSummary } from '../../llm/reasoning';
+import { buildFailureObservation } from '../../memory/failure-memory';
 import type { Agent, ChatContext } from '../../agent';
 import type { TelegramUpdate } from './types';
 import { TOOL_LABELS, humanTimeAgo } from './types';
@@ -145,7 +147,16 @@ export async function handleTelegramUpdate(
         // Refresh typing every ~4 seconds during generation
         const typingInterval = setInterval(() => sendTyping(token, chatId), 4000);
 
-        const { model: tgModel, tier: tgTier } = agent.getModelForPurpose('chat');
+        const { model: tgModel, tier: tgTier, complexity: tgComplexity } = agent.getModelForChat(text);
+
+        // Build reasoning context for multi-phase reasoning
+        const reasoningCtx = createReasoningContext(
+            text,
+            tgComplexity,
+            tgTier as ModelTier,
+            systemPrompt,
+            agent.getRouter(),
+        );
 
         const { text: responseText, usage } = await generateTextWithRetry({
             model: tgModel,
@@ -167,6 +178,7 @@ export async function handleTelegramUpdate(
             }),
             tools: agent.getToolsForContext(ctx),
             stopWhen: stepCountIs(20),
+            prepareStep: createPrepareStep(reasoningCtx),
             onStepFinish: ({ toolCalls }) => {
                 if (toolCalls?.length) {
                     console.log(
@@ -184,9 +196,21 @@ export async function handleTelegramUpdate(
 
         clearInterval(typingInterval);
 
-        // Record cost
+        // Log reasoning summary
+        const tgSummary = getReasoningSummary(reasoningCtx);
+        if (tgSummary.escalated || tgSummary.toolFailures > 0) {
+            console.log(`[Telegram/Reasoning]: tier=${tgSummary.finalTier}, failures=${tgSummary.toolFailures}, escalated=${tgSummary.escalated}`);
+        }
+
+        // Record cost (use final tier in case of escalation)
         if (usage) {
-            agent.getRouter().recordUsage(tgTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+            agent.getRouter().recordUsage(reasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
+        }
+
+        // Learn from failures
+        const tgFailureObs = buildFailureObservation(reasoningCtx, responseText || '');
+        if (tgFailureObs) {
+            try { agent.getMemoryManager().recordSelfObservation(tgFailureObs, 'failure-learning'); } catch { /* non-critical */ }
         }
 
         // Save response to memory

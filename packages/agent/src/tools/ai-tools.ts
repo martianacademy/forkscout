@@ -11,7 +11,9 @@ export { runCommand } from './command-tool';
 export { webSearch, browseWeb, browserScreenshot } from './web-tools';
 export { getCurrentDate, generatePresentation } from './utility-tools';
 export { safeSelfEdit } from './self-edit-tool';
+export { createSelfRebuildTool } from './self-rebuild-tool';
 export { listSecrets, httpRequest } from './secret-tools';
+export { viewActivityLog } from './activity-tool';
 
 // ── Factory function exports ────────────────────────────
 export { createSchedulerTools } from './scheduler-tools';
@@ -29,6 +31,7 @@ import { webSearch, browseWeb, browserScreenshot } from './web-tools';
 import { getCurrentDate, generatePresentation } from './utility-tools';
 import { safeSelfEdit } from './self-edit-tool';
 import { listSecrets, httpRequest } from './secret-tools';
+import { viewActivityLog } from './activity-tool';
 
 export const coreTools = {
     read_file: readFile,
@@ -45,4 +48,5 @@ export const coreTools = {
     safe_self_edit: safeSelfEdit,
     list_secrets: listSecrets,
     http_request: httpRequest,
+    view_activity_log: viewActivityLog,
 };

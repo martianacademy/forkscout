@@ -17,6 +17,8 @@ import {
 } from 'ai';
 import { generateTextWithRetry, streamTextWithRetry } from '../llm/retry';
 import type { ModelTier } from '../llm/router';
+import { createReasoningContext, createPrepareStep, getReasoningSummary } from '../llm/reasoning';
+import { buildFailureObservation } from '../memory/failure-memory';
 import type { Agent } from '../agent';
 import type { ChannelAuthStore } from '../channels/auth';
 import type { TelegramBridge } from '../channels/telegram';
@@ -48,14 +50,19 @@ export async function handleChatStream(
     const systemPrompt = await agent.buildSystemPrompt(userText, ctx);
     agent.saveToMemory('user', userText, ctx);
 
-    const { model: chatModel, tier: chatTier, modelId: chatModelId } = agent.getModelForPurpose('chat');
-    console.log(`[Router]: Using ${chatTier} tier (${chatModelId})`);
+    const { model: chatModel, tier: chatTier, modelId: chatModelId, complexity } = agent.getModelForChat(userText);
+    console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [${complexity.reason}]`);
+
+    // Create reasoning context for inner loop
+    const reasoningCtx = createReasoningContext(userText, complexity, chatTier as ModelTier, systemPrompt, agent.getRouter());
+
     const result = streamTextWithRetry({
         model: chatModel,
         system: systemPrompt,
         messages: await convertToModelMessages(messages),
         tools: agent.getToolsForContext(ctx),
         stopWhen: stepCountIs(20),
+        prepareStep: createPrepareStep(reasoningCtx),
         onStepFinish: ({ toolCalls, toolResults }) => {
             if (toolCalls && toolCalls.length > 0) {
                 console.log(`[Agent]: Step — ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
@@ -68,13 +75,19 @@ export async function handleChatStream(
             }
         },
         onFinish: ({ text, steps, usage }) => {
-            console.log(`[Agent]: Done (${steps?.length || 0} step(s))`);
+            const summary = getReasoningSummary(reasoningCtx);
+            console.log(`[Agent]: Done (${steps?.length || 0} step(s), tier: ${summary.finalTier}, failures: ${summary.toolFailures}${summary.escalated ? ', ESCALATED' : ''})`);
             if (usage) {
-                agent.getRouter().recordUsage(chatTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+                agent.getRouter().recordUsage(reasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
             }
             if (text) {
                 agent.saveToMemory('assistant', text);
                 console.log(`[Agent]: ${text.slice(0, 200)}${text.length > 200 ? '…' : ''}`);
+            }
+            // Learn from failures
+            const failureObs = buildFailureObservation(reasoningCtx, text || '');
+            if (failureObs) {
+                try { agent.getMemoryManager().recordSelfObservation(failureObs, 'failure-learning'); } catch { /* non-critical */ }
             }
         },
         onError: ({ error }) => {
@@ -119,18 +132,28 @@ export async function handleChatSync(
     agent.saveToMemory('user', userText, ctx);
 
     try {
-        const { model: syncModel, tier: syncTier, modelId: syncModelId } = agent.getModelForPurpose('chat');
+        const { model: syncModel, tier: syncTier, modelId: syncModelId } = agent.getModelForChat(userText);
         console.log(`[Router]: Sync using ${syncTier} tier (${syncModelId})`);
+
+        const syncReasoningCtx = createReasoningContext(userText, { complexity: 'moderate', tier: syncTier as ModelTier, reason: 'sync' }, syncTier as ModelTier, systemPrompt, agent.getRouter());
+
         const { text, usage } = await generateTextWithRetry({
             model: syncModel,
             system: systemPrompt,
             messages: await convertToModelMessages(messages),
             tools: agent.getToolsForContext(ctx),
             stopWhen: stepCountIs(20),
+            prepareStep: createPrepareStep(syncReasoningCtx),
         });
 
         if (usage) {
-            agent.getRouter().recordUsage(syncTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+            agent.getRouter().recordUsage(syncReasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
+        }
+
+        // Learn from failures
+        const syncFailureObs = buildFailureObservation(syncReasoningCtx, text || '');
+        if (syncFailureObs) {
+            try { agent.getMemoryManager().recordSelfObservation(syncFailureObs, 'failure-learning'); } catch { /* non-critical */ }
         }
 
         agent.saveToMemory('assistant', text);

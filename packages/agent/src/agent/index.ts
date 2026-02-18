@@ -1,12 +1,13 @@
 import { LLMClient } from '../llm/client';
 import { ModelRouter, createRouterFromEnv, type ModelPurpose } from '../llm/router';
+import { classifyComplexity, type ComplexityResult } from '../llm/complexity';
 import { MemoryManager } from '../memory/manager';
 import type { Scheduler, CronAlert } from '../scheduler';
 import { McpConnector } from '../mcp/connector';
 import { createTelegramTools } from '../tools/ai-tools';
 import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT } from '../paths';
-import { SurvivalMonitor } from '../survival';
+import { createSurvivalMonitor, type SurvivalMonitor } from '../survival';
 import { ChannelAuthStore } from '../channels/auth';
 import { connectMcpServers } from '../mcp/defaults';
 import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-builder';
@@ -61,7 +62,7 @@ export class Agent {
         });
 
         const storagePath = resolvePath(AGENT_ROOT, '.forkscout');
-        this.survival = new SurvivalMonitor({
+        this.survival = createSurvivalMonitor({
             dataDir: storagePath,
             emergencyFlush: () => this.memory.flush(),
         });
@@ -84,6 +85,23 @@ export class Agent {
 
     getModelForPurpose(purpose: ModelPurpose) {
         return this.router.getModel(purpose);
+    }
+
+    /**
+     * Smart model selection for chat — escalates to powerful tier for
+     * complex tasks (debugging, investigation, multi-step reasoning).
+     */
+    getModelForChat(userMessage: string): { model: any; tier: string; modelId: string; complexity: ComplexityResult } {
+        const complexity = classifyComplexity(userMessage);
+
+        if (complexity.tier === 'powerful') {
+            const result = this.router.getModelByTier('powerful');
+            console.log(`[Complexity]: Escalated to powerful tier — ${complexity.reason}`);
+            return { ...result, complexity };
+        }
+
+        const result = this.router.getModel('chat');
+        return { ...result, complexity };
     }
 
     getRouter(): ModelRouter {
@@ -150,7 +168,7 @@ export class Agent {
 
     async stop(): Promise<void> {
         this.state.running = false;
-        this.scheduler.stopAll();
+        this.scheduler.shutdown();
         this.router.getBudget().stop();
         await this.survival.stop();
         await this.mcpConnector.disconnect();

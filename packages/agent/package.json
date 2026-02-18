@@ -8,10 +8,11 @@
         "dev": "tsx watch --exclude '.forkscout/**' --exclude '**/*.bak' src/cli.ts",
         "start": "tsx src/cli.ts",
         "serve": "tsx src/serve.ts",
+        "serve:dist": "tsx dist/serve.js",
         "watchdog": "./watchdog.sh",
         "watchdog:dev": "./watchdog.sh --dev",
         "build": "tsc",
-        "clean": "rm -rf dist",
+        "clean": "rm -rf dist tsconfig.tsbuildinfo",
         "lint": "eslint src --ext .ts",
         "lint:fix": "eslint src --ext .ts --fix",
         "format": "prettier --write 'src/**/*.ts'",
@@ -39,5 +40,12 @@
         "tsx": "^4.19.2",
         "typescript": "^5.7.2",
         "vitest": "^2.1.8"
-    }
+    },
+    "directories": {
+        "example": "examples"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "MIT",
+    "type": "commonjs"
 }

@@ -44,13 +44,28 @@ export async function buildSystemPrompt(
         }
     }
 
-    // Surface pending urgent alerts
+    // Surface pending urgent alerts — keep them so they persist across turns
+    // until the agent addresses them. Only drain after a configurable number of
+    // exposures so the agent doesn't lose track of unresolved issues.
     let alertSection = '';
     if (urgentAlerts.length > 0) {
-        const alerts = urgentAlerts.splice(0);
         alertSection =
-            '\n\n[URGENT ALERTS — address these first]\n' +
-            alerts.map((a) => `🚨 "${a.jobName}" at ${a.timestamp}: ${a.output.slice(0, 500)}`).join('\n');
+            '\n\n[URGENT ALERTS — you MUST investigate and resolve these. Do NOT ignore them.]\n' +
+            urgentAlerts.map((a) => `🚨 "${a.jobName}" at ${a.timestamp}: ${a.output.slice(0, 1000)}`).join('\n') +
+            '\n\nFor each alert: 1) Read the error, 2) Run the command manually, 3) Fix the root cause, 4) Verify the fix works.';
+
+        // Mark alerts as "shown" — drain after 3 exposures (3 chat turns)
+        for (const a of urgentAlerts) {
+            (a as any)._exposures = ((a as any)._exposures || 0) + 1;
+        }
+        // Remove alerts that have been shown 3+ times (agent had enough chances)
+        const stale = urgentAlerts.filter((a) => ((a as any)._exposures || 0) >= 3);
+        if (stale.length > 0) {
+            for (const s of stale) {
+                const idx = urgentAlerts.indexOf(s);
+                if (idx >= 0) urgentAlerts.splice(idx, 1);
+            }
+        }
     }
 
     // Survival alerts (battery, disk, integrity, etc.)

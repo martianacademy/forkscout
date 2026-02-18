@@ -10,7 +10,9 @@ import {
     createSurvivalTools,
     createChannelAuthTools,
     createBudgetTools,
+    createSelfRebuildTool,
 } from '../tools/ai-tools';
+import { enhanceToolSet } from '../tools/error-enhancer';
 import type { Scheduler } from '../scheduler';
 import type { McpConnector } from '../mcp/connector';
 import type { MemoryManager } from '../memory/manager';
@@ -59,4 +61,11 @@ export function registerDefaultTools(
 
     // Budget & model tier tools (check spending, switch models)
     Object.assign(toolSet, createBudgetTools(router));
+
+    // Self-rebuild tool (build from source + graceful restart)
+    toolSet.self_rebuild = createSelfRebuildTool(() => memory.flush());
+
+    // Wrap all tools with error enhancement — produces helpful diagnostics
+    // instead of raw stack traces when tools fail
+    enhanceToolSet(toolSet);
 }

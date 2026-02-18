@@ -11,7 +11,9 @@
         "build": "pnpm -r build",
         "clean": "pnpm -r clean",
         "lint": "pnpm -r lint",
-        "test": "pnpm -r test"
+        "test": "pnpm -r test",
+        "serve": "pnpm --filter @forkscout/agent serve",
+        "watchdog": "pnpm --filter @forkscout/agent watchdog"
     },
     "keywords": [
         "ai",

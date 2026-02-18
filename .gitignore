@@ -44,3 +44,9 @@ temp-*.ts
 *.bak
 *.bak2
 packages/agent/.forkscout-backup-*
+
+# Playwright persistent browser profiles
+playwright-canary-persist/
+
+# Agent custom scripts/experiments (user-specific)
+packages/agent/custom/

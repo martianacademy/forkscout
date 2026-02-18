@@ -55,3 +55,21 @@ export function getShell(): string | undefined {
 
     return _cachedShell;
 }
+
+/**
+ * Unescape common HTML entities that LLMs sometimes inject into
+ * shell commands (e.g. `&amp;&amp;` instead of `&&`).
+ */
+const HTML_ENTITIES: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&apos;': "'",
+};
+const ENTITY_RE = new RegExp(Object.keys(HTML_ENTITIES).join('|'), 'g');
+
+export function unescapeShellCommand(cmd: string): string {
+    return cmd.replace(ENTITY_RE, (m) => HTML_ENTITIES[m] ?? m);
+}

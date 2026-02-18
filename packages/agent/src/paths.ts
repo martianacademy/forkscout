@@ -2,19 +2,33 @@
  * Canonical path constants for the Forkscout agent.
  *
  * All paths are absolute, derived from __dirname so they're
- * correct regardless of process.cwd().
+ * correct regardless of process.cwd(). Auto-detects whether
+ * running from src/ (via tsx) or dist/ (compiled build).
+ *
+ * @module paths
  */
 
 import { resolve } from 'path';
 
+/**
+ * True when running from dist/ (compiled build).
+ * When __dirname ends in /dist or /dist/..., we know we're in the build output.
+ */
+const IS_DIST = __dirname.includes('/dist');
+
+/** Absolute path to the agent package root (packages/agent) */
+export const AGENT_ROOT = IS_DIST
+    ? resolve(__dirname, '..')   // dist/  → packages/agent
+    : resolve(__dirname, '..');  // src/   → packages/agent
+
 /** Absolute path to the monorepo root (contains pnpm-workspace.yaml, .git) */
-export const PROJECT_ROOT = resolve(__dirname, '..', '..', '..');
+export const PROJECT_ROOT = resolve(AGENT_ROOT, '..', '..');
 
-/** Absolute path to the agent package root */
-export const AGENT_ROOT = resolve(__dirname, '..');
+/** Absolute path to the agent source directory (always src/, even when running from dist/) */
+export const AGENT_SRC = resolve(AGENT_ROOT, 'src');
 
-/** Absolute path to the agent source directory */
-export const AGENT_SRC = resolve(__dirname);
+/** Absolute path to the agent dist directory */
+export const AGENT_DIST = resolve(AGENT_ROOT, 'dist');
 
 /**
  * Resolve a path the agent provides.

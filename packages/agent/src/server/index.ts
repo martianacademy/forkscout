@@ -133,7 +133,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
     });
 
     // Graceful shutdown — survival monitor handles signal trapping & emergency flush.
-    agent.getSurvival().on('shutdown', async () => {
+    agent.getSurvival().onShutdown(async () => {
         console.log('\nSurvival monitor triggered shutdown...');
         if (telegramBridge) await telegramBridge.stop();
         await agent.stop();

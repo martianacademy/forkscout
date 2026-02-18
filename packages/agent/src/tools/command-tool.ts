@@ -4,7 +4,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { exec, type ExecException } from 'child_process';
-import { getShell } from '../utils/shell';
+import { getShell, unescapeShellCommand } from '../utils/shell';
 import { resolveAgentPath, PROJECT_ROOT } from '../paths';
 import { scrubSecrets } from './_helpers';
 
@@ -15,8 +15,9 @@ export const runCommand = tool({
         cwd: z.string().describe('Working directory (relative to project root or absolute, defaults to project root)').optional(),
     }),
     execute: async ({ command, cwd }) => {
+        const safeCmd = unescapeShellCommand(command);
         return new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
-            exec(command, {
+            exec(safeCmd, {
                 cwd: cwd ? resolveAgentPath(cwd) : PROJECT_ROOT,
                 timeout: 30_000,
                 maxBuffer: 1024 * 1024,

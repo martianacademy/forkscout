@@ -9,7 +9,7 @@ import { ModelRouter } from '../llm/router';
 import { MemoryManager } from '../memory/manager';
 import { Scheduler, type CronAlert } from '../scheduler';
 import { exec } from 'child_process';
-import { getShell } from '../utils/shell';
+import { getShell, unescapeShellCommand } from '../utils/shell';
 import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT } from '../paths';
 import { getConfig } from '../config';
@@ -50,11 +50,12 @@ export function createScheduler(
     const persistPath = resolvePath(AGENT_ROOT, '.forkscout', 'scheduler-jobs.json');
 
     const scheduler = new Scheduler(
-        // Command runner
+        // Command runner — unescape HTML entities LLMs may inject
         (command: string) =>
             new Promise((resolve, reject) => {
+                const safeCmd = unescapeShellCommand(command);
                 exec(
-                    command,
+                    safeCmd,
                     { timeout: 30_000, maxBuffer: 1024 * 1024, shell: getShell() },
                     (error: Error | null, stdout: string, stderr: string) => {
                         if (error && !stdout && !stderr) reject(error);

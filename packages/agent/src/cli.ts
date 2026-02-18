@@ -3,9 +3,10 @@
  */
 import { resolve } from 'path';
 import { config as loadEnv } from 'dotenv';
+import { PROJECT_ROOT } from './paths';
 
 // Load .env from repo root (secrets only)
-loadEnv({ path: resolve(__dirname, '../../../.env') });
+loadEnv({ path: resolve(PROJECT_ROOT, '.env') });
 
 import { createAgent, type AgentConfig } from './index';
 import { loadConfig, resolveApiKeyForProvider } from './config';
@@ -35,6 +36,8 @@ console.log('Starting Forkscout Agent (interactive mode)...\n');
 import { stepCountIs } from 'ai';
 import { generateTextWithRetry } from './llm/retry';
 import type { ModelTier } from './llm/router';
+import { createReasoningContext, createPrepareStep, getReasoningSummary } from './llm/reasoning';
+import { buildFailureObservation } from './memory/failure-memory';
 import * as readline from 'readline';
 
 createAgent(config)
@@ -60,18 +63,42 @@ createAgent(config)
                 try {
                     const systemPrompt = await agent.buildSystemPrompt(input);
                     agent.saveToMemory('user', input);
-                    const { model: cliModel, tier: cliTier } = agent.getModelForPurpose('chat');
+                    const { model: cliModel, tier: cliTier, complexity: cliComplexity } = agent.getModelForChat(input);
+
+                    const cliReasoningCtx = createReasoningContext(
+                        input,
+                        cliComplexity,
+                        cliTier as ModelTier,
+                        systemPrompt,
+                        agent.getRouter(),
+                    );
+
                     const { text, usage } = await generateTextWithRetry({
                         model: cliModel,
                         system: systemPrompt,
                         prompt: input,
                         tools: agent.getTools(),
                         stopWhen: stepCountIs(20),
+                        prepareStep: createPrepareStep(cliReasoningCtx),
                     });
-                    // Record cost
-                    if (usage) {
-                        agent.getRouter().recordUsage(cliTier as ModelTier, usage.inputTokens || 0, usage.outputTokens || 0);
+
+                    // Log reasoning summary
+                    const cliSummary = getReasoningSummary(cliReasoningCtx);
+                    if (cliSummary.escalated || cliSummary.toolFailures > 0) {
+                        console.log(`[Reasoning]: tier=${cliSummary.finalTier}, failures=${cliSummary.toolFailures}, escalated=${cliSummary.escalated}`);
                     }
+
+                    // Record cost (use final tier in case of escalation)
+                    if (usage) {
+                        agent.getRouter().recordUsage(cliReasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
+                    }
+
+                    // Learn from failures
+                    const cliFailureObs = buildFailureObservation(cliReasoningCtx, text || '');
+                    if (cliFailureObs) {
+                        try { agent.getMemoryManager().recordSelfObservation(cliFailureObs, 'failure-learning'); } catch { /* non-critical */ }
+                    }
+
                     agent.saveToMemory('assistant', text);
                     console.log(`\n[Forkscout]: ${text}\n`);
                 } catch (error) {

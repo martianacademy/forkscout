@@ -44,7 +44,7 @@ export { ModelRouter, createRouterFromEnv, getModelPricing, type ModelPurpose, t
 export { loadConfig, getConfig, resolveApiKeyForProvider, resolveApiUrlForProvider, type ForkscoutConfig, type ProviderType, type TierConfig, type BudgetConfig, type AgentSettings, type SearxngConfig } from './config';
 export { BudgetTracker, type BudgetData, type BudgetLimits, type BudgetStatus, type SpendRecord } from './llm/budget';
 export { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './mcp/connector';
-export { SurvivalMonitor, type SurvivalStatus, type SurvivalConfig, type VitalSign, type ThreatEvent, type ThreatLevel } from './survival';
+export { createSurvivalMonitor, type SurvivalMonitor, type SurvivalStatus, type SurvivalConfig, type VitalSign, type ThreatEvent, type ThreatLevel } from './survival';
 export { ChannelAuthStore, type ChannelGrant, type ChannelSession, type ChannelType } from './channels/auth';
 export { TelegramBridge, type TelegramBridgeConfig } from './channels/telegram';
 export { startServer, type ServerOptions } from './server';

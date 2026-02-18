@@ -9,6 +9,7 @@
 
 import { existsSync } from 'fs';
 import { resolve } from 'path';
+import { PROJECT_ROOT } from '../paths';
 import type { ProviderType, RouterConfig, BudgetConfig, AgentSettings } from './types';
 import { DEFAULTS } from './types';
 
@@ -123,8 +124,7 @@ export function intEnv(key: string): number | undefined {
 export function findConfigFile(): string | null {
     const candidates = [
         resolve(process.cwd(), 'forkscout.config.json'),
-        resolve(__dirname, '../../../../forkscout.config.json'),  // packages/agent/src/config → root
-        resolve(__dirname, '../../../forkscout.config.json'),     // if in dist/
+        resolve(PROJECT_ROOT, 'forkscout.config.json'),
     ];
     for (const p of candidates) {
         if (existsSync(p)) return p;

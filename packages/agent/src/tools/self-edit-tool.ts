@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { exec } from 'child_process';
 import { getShell } from '../utils/shell';
 import { resolveAgentPath, AGENT_SRC, AGENT_ROOT } from '../paths';
+import { logSelfEdit } from '../activity-log';
 
 export const safeSelfEdit = tool({
     description: 'Safely edit the agent\'s own source files. Creates a backup, writes the change, validates it compiles with TypeScript, and auto-rolls back if compilation fails.',
@@ -37,7 +38,7 @@ export const safeSelfEdit = tool({
         const tsconfigPath = resolvePath(AGENT_ROOT, 'tsconfig.json');
         const compileResult = await new Promise<{ success: boolean; errors: string }>((resolve) => {
             exec(
-                `npx tsc -p "${tsconfigPath}" --noEmit 2>&1 | head -20`,
+                `node_modules/.bin/tsc -p "${tsconfigPath}" --noEmit 2>&1 | head -20`,
                 { timeout: 30_000, shell: getShell(), maxBuffer: 1024 * 1024, cwd: AGENT_ROOT },
                 (_error: Error | null, stdout: string) => {
                     const output = (stdout || '').trim();
@@ -54,11 +55,13 @@ export const safeSelfEdit = tool({
                 await fs.rm(absPath).catch(() => { });
             }
             await fs.rm(backupPath).catch(() => { });
+            logSelfEdit(path, reason, content.length, false);
             return `ROLLED BACK: Edit to "${path}" failed TypeScript validation.\n\nErrors:\n${compileResult.errors}`;
         }
 
         await fs.rm(backupPath).catch(() => { });
         console.log(`\n✅ SELF-EDIT APPLIED: ${path} — ${reason}`);
+        logSelfEdit(path, reason, content.length, true);
 
         // Log the edit to .forkscout/edit-log.json
         try {

@@ -45,6 +45,13 @@ export class Scheduler extends EventEmitter {
             const raw = await readFile(this.persistPath, 'utf-8');
             const saved: SerializedJob[] = JSON.parse(raw);
             let restored = 0;
+
+            // Restore idCounter so new jobs don't collide with old IDs
+            for (const j of saved) {
+                const m = j.id.match(/^cron_(\d+)$/);
+                if (m) this.idCounter = Math.max(this.idCounter, parseInt(m[1]));
+            }
+
             for (const j of saved) {
                 try {
                     this.addJob(j.name, j.schedule, j.command, j.watchFor);
@@ -177,6 +184,23 @@ export class Scheduler extends EventEmitter {
         return rest;
     }
 
+    /**
+     * Graceful shutdown — clears all timers but preserves the on-disk job list
+     * so jobs are restored on next startup. Use this in agent.stop().
+     */
+    shutdown(): void {
+        for (const job of this.jobs.values()) {
+            if (job._timer) clearInterval(job._timer);
+            job._timer = undefined;
+            job.active = false;
+        }
+        console.log(`🛑 Scheduler shut down (${this.jobs.size} job(s) preserved on disk)`);
+    }
+
+    /**
+     * Remove ALL jobs permanently (clears timers AND wipes persisted file).
+     * Only use when the user explicitly wants to delete everything.
+     */
     stopAll(): void {
         for (const [id] of this.jobs) {
             this.removeJob(id);

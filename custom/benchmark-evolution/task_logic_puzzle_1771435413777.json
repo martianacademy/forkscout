@@ -1,0 +1,12 @@
+{
+  "id": "logic_puzzle_1771435413777",
+  "archetype_id": "logic_puzzle",
+  "prompt": "If cat has 4 legs and dog has 4 legs, how many legs total? Give only the number.",
+  "params": {
+    "animal1": "cat",
+    "animal2": "dog",
+    "num1": 4,
+    "num2": 4
+  },
+  "timestamp": "2026-02-18T17:23:33.777Z"
+}

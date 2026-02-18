@@ -75,3 +75,26 @@ export interface BatteryParseResult {
     /** Whether emergency flush should fire */
     shouldEmergencyFlush: boolean;
 }
+
+// ── SurvivalMonitor public API (returned by createSurvivalMonitor) ──
+
+export interface SurvivalMonitor {
+    /** Start monitoring. Call once after agent.init(). */
+    start(): Promise<void>;
+    /** Stop monitoring gracefully. */
+    stop(): Promise<void>;
+    /** Whether we have effective root access (UID 0 or passwordless sudo). */
+    hasRootAccess(): boolean;
+    /** Trigger a manual memory backup (public API for tools). */
+    backupMemory(): Promise<void>;
+    /** Get full survival status snapshot. */
+    getStatus(): SurvivalStatus;
+    /** Get pending critical/emergency alerts for system prompt injection. */
+    getPendingAlerts(): ThreatEvent[];
+    /** Format alerts for system prompt injection. */
+    formatAlerts(): string;
+    /** Temporarily lift immutable flags for a write operation, then re-set. */
+    withWriteAccess<T>(fn: () => Promise<T>): Promise<T>;
+    /** Register a callback for graceful shutdown (replaces EventEmitter 'shutdown'). */
+    onShutdown(cb: () => Promise<void> | void): void;
+}
