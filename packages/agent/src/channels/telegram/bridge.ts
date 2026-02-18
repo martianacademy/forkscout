@@ -215,16 +215,46 @@ export class TelegramBridge {
                     return text;
                 }).join('\n\n');
 
+                // Extract working context: directories and files the agent was
+                // operating on in the last few steps, so the model knows WHERE
+                // it was, not just WHAT it did.
+                const workingPaths = new Set<string>();
+                const recentCheckpoints = checkpoints.slice(-5); // last 5 steps
+                for (const cp of recentCheckpoints) {
+                    const text = (cp.parts?.[0] as any)?.text || '';
+                    // Extract paths from Args JSON
+                    const pathMatch = text.match(/"(?:path|cwd|file|directory)":\s*"([^"]+)"/g);
+                    if (pathMatch) {
+                        for (const m of pathMatch) {
+                            const val = m.match(/":\s*"([^"]+)"/)?.[1];
+                            if (val) workingPaths.add(val);
+                        }
+                    }
+                    // Extract cd paths from commands
+                    const cdMatch = text.match(/cd\s+(\/[^\s&|;]+)/g);
+                    if (cdMatch) {
+                        for (const m of cdMatch) {
+                            workingPaths.add(m.replace('cd ', ''));
+                        }
+                    }
+                }
+
+                const workingCtx = workingPaths.size > 0
+                    ? `\nWORKING CONTEXT — You were operating in/on these paths:\n${[...workingPaths].map(p => `  • ${p}`).join('\n')}\n`
+                    : '';
+
                 resumeContext = [
                     '⚠️ CONTINUATION AFTER RESTART:',
                     'You were previously working on this task but the process was restarted',
                     '(possibly because your own code changes triggered a rebuild).',
+                    workingCtx,
                     'Here are the steps you already completed before the restart:',
                     '',
                     summaries,
                     '',
                     'IMPORTANT: Continue from where you left off. Do NOT repeat steps that already succeeded.',
                     'If a step partially failed or was interrupted, you may retry it.',
+                    'Pay attention to the WORKING CONTEXT paths above — that is where you were focused.',
                 ].join('\n');
 
                 // Remove checkpoints from history so the user message is last

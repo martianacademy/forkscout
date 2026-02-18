@@ -253,9 +253,9 @@ export async function handleTelegramUpdate(
                 if (toolCalls?.length) {
                     const stepSummaries = toolCalls.map((tc: any, i: number) => {
                         const tr = (toolResults as any)?.[i];
-                        const argsStr = JSON.stringify(tc.input || {}).slice(0, 300);
+                        const argsStr = JSON.stringify(tc.input || {}).slice(0, 500);
                         const outputStr = tr?.output != null
-                            ? String(typeof tr.output === 'object' ? JSON.stringify(tr.output) : tr.output).slice(0, 500)
+                            ? String(typeof tr.output === 'object' ? JSON.stringify(tr.output) : tr.output).slice(0, 800)
                             : '(no result)';
                         return `  Tool: ${tc.toolName}\n  Args: ${argsStr}\n  Result: ${outputStr}`;
                     }).join('\n---\n');
