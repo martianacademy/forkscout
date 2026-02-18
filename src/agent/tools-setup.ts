@@ -6,7 +6,6 @@ import {
     coreTools,
     createSchedulerTools,
     createMcpTools,
-    createMemoryTools,
     createSurvivalTools,
     createChannelAuthTools,
     createBudgetTools,
@@ -30,7 +29,6 @@ export function registerDefaultTools(
     survival: SurvivalMonitor,
     channelAuth: ChannelAuthStore,
     router: ModelRouter,
-    opts?: { memoryIsRemote?: boolean },
 ): void {
     // Core tools (file, shell, web, utility)
     Object.assign(toolSet, coreTools);
@@ -51,12 +49,9 @@ export function registerDefaultTools(
         ),
     );
 
-    // Memory tools — when remote, the MCP connector auto-bridges all memory
-    // tools from the Memory MCP Server (prefixed as memory_*).
-    // Only register local memory tools when NOT using the remote server.
-    if (!opts?.memoryIsRemote) {
-        Object.assign(toolSet, createMemoryTools(memory));
-    }
+    // Memory tools — auto-bridged from the forkscout-memory MCP server
+    // via the MCP connector (prefixed as forkscout-memory_*).
+    // No local memory tools needed.
 
     // Survival tools (vitals, backup, status)
     Object.assign(toolSet, createSurvivalTools(survival));

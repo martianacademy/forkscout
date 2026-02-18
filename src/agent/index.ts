@@ -10,7 +10,6 @@ import { AGENT_ROOT } from '../paths';
 import { createSurvivalMonitor, type SurvivalMonitor } from '../survival';
 import { ChannelAuthStore } from '../channels/auth';
 import { connectMcpServers } from '../mcp/defaults';
-import { getConfig } from '../config';
 import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-builder';
 import { createMemoryManager, createScheduler } from './factories';
 import { registerDefaultTools } from './tools-setup';
@@ -71,11 +70,9 @@ export class Agent {
 
         // Register tools
         if (config.autoRegisterDefaultTools !== false) {
-            const memoryIsRemote = !!(getConfig().agent.memoryMcpUrl || process.env.MEMORY_MCP_URL);
             registerDefaultTools(
                 this.toolSet, this.scheduler, this.mcpConnector, this.mcpConfigPath,
                 this.memory, this.survival, this.channelAuth, this.router,
-                { memoryIsRemote },
             );
         }
     }

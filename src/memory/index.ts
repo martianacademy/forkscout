@@ -1,45 +1,47 @@
 /**
- * MemoryManager — thin facade over MemoryStore.
- * Maintains API compatibility with callers (agent, tools, prompt-builder).
+ * MemoryManager — remote-only facade over the Forkscout Memory MCP Server.
+ * All reads/writes are delegated to the MCP server (single source of truth).
  * @module memory/index
  */
 
-import { resolve } from 'path';
-import { MemoryStore } from './store';
 import { RemoteMemoryStore } from './remote-store';
-import { buildContext, searchKnowledge, buildFailureObservation } from './context';
 import type { MemoryConfig, ContextResult, SearchResult, Entity, EntityType, Relation, RelationType, ActiveTask, TaskStatus } from './types';
 import { SELF_ENTITY_NAME, RELATION_TYPES } from './types';
 
 export { SELF_ENTITY_NAME, RELATION_TYPES };
 export type { MemoryConfig, ContextResult, SearchResult, Entity, EntityType, Relation, RelationType, ActiveTask, TaskStatus };
-export { buildFailureObservation };
+
+/** Build a failure observation string from a reasoning context + response. */
+export function buildFailureObservation(
+    ctx: { toolFailures: Array<{ toolName: string; error: string }>; userMessage: string },
+    finalText: string,
+): string | null {
+    if (!ctx.toolFailures || ctx.toolFailures.length === 0) return null;
+    const resolved = finalText.length > 50;
+    const failures = ctx.toolFailures.slice(0, 5).map(f => `${f.toolName}: ${f.error.slice(0, 100)}`).join('; ');
+    return resolved
+        ? `[FAILURE→RESOLVED] "${ctx.userMessage.slice(0, 100)}": ${failures}. Fix: ${finalText.slice(0, 150)}`
+        : `[FAILURE→UNRESOLVED] "${ctx.userMessage.slice(0, 100)}": ${failures}`;
+}
 
 interface RecentMsg { role: 'user' | 'assistant'; content: string; timestamp: Date }
 
 export class MemoryManager {
-    private store: MemoryStore | RemoteMemoryStore;
+    private store: RemoteMemoryStore;
     private config: MemoryConfig;
-    private remote: boolean;
     private sessionId = `session_${Date.now()}`;
     private recentMessages: RecentMsg[] = [];
     private pendingUser: string | null = null;
-    private entityExtractor?: (prompt: string) => Promise<string>;
 
     constructor(config: MemoryConfig) {
         this.config = { recentWindowSize: 6, contextBudget: 4000, ...config };
-        this.remote = !!config.mcpUrl;
 
-        if (config.mcpUrl) {
-            console.log(`🧠 Memory: remote mode → ${config.mcpUrl}`);
-            this.store = new RemoteMemoryStore(config.mcpUrl);
-        } else {
-            this.store = new MemoryStore(
-                resolve(config.storagePath, 'memory.json'),
-                config.ownerName,
-            );
+        if (!config.mcpUrl) {
+            throw new Error('MemoryManager requires mcpUrl — set agent.forkscoutMemoryMcpUrl in config or MEMORY_MCP_URL env');
         }
-        this.entityExtractor = config.entityExtractor;
+
+        console.log(`🧠 Memory: remote mode → ${config.mcpUrl}`);
+        this.store = new RemoteMemoryStore(config.mcpUrl);
     }
 
     // ── Lifecycle ────────────────────────────────────
@@ -68,7 +70,6 @@ export class MemoryManager {
             this.pendingUser = content;
         } else if (role === 'assistant' && this.pendingUser) {
             this.store.addExchange(this.pendingUser, content, this.sessionId);
-            this.extractEntitiesAsync(this.pendingUser, content);
             this.pendingUser = null;
         }
     }
@@ -88,68 +89,47 @@ export class MemoryManager {
     async buildContext(query: string): Promise<ContextResult> {
         const windowSize = this.config.recentWindowSize ?? 6;
         const recent = this.recentMessages.slice(-windowSize);
+        const recentStr = recent
+            .map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`)
+            .join('\n');
 
-        if (this.remote) {
-            // Remote mode: build context from local recent window + MCP search
-            const remote = this.store as RemoteMemoryStore;
-            const recentStr = recent
-                .map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`)
-                .join('\n');
+        let graphContext = '';
+        let relevantMemories = '';
+        let retrievedCount = 0;
+        let graphEntities = 0;
 
-            let graphContext = '';
-            let relevantMemories = '';
-            let retrievedCount = 0;
-            let graphEntities = 0;
+        try {
+            const results = await this.store.searchKnowledgeAsync(query, 10);
+            const graphLines: string[] = [];
+            const exchangeLines: string[] = [];
+            for (const r of results) {
+                if (r.source === 'graph') { graphLines.push(`• ${r.content}`); graphEntities++; }
+                else { exchangeLines.push(`[Past] ${r.content}`); retrievedCount++; }
+            }
+            if (graphLines.length) graphContext = '\n\n[Knowledge Graph]\n' + graphLines.join('\n');
+            if (exchangeLines.length) relevantMemories = '\n\nRelevant memories from past conversations:\n' + exchangeLines.join('\n\n');
+        } catch { /* MCP unreachable — use local recent only */ }
 
-            try {
-                const results = await remote.searchKnowledgeAsync(query, 10);
-                const graphLines: string[] = [];
-                const exchangeLines: string[] = [];
-                for (const r of results) {
-                    if (r.source === 'graph') { graphLines.push(`• ${r.content}`); graphEntities++; }
-                    else { exchangeLines.push(`[Past] ${r.content}`); retrievedCount++; }
-                }
-                if (graphLines.length) graphContext = '\n\n[Knowledge Graph]\n' + graphLines.join('\n');
-                if (exchangeLines.length) relevantMemories = '\n\nRelevant memories from past conversations:\n' + exchangeLines.join('\n\n');
-            } catch { /* MCP unreachable — use local recent only */ }
-
-            return {
-                recentHistory: recentStr,
-                relevantMemories,
-                graphContext,
-                skillContext: '',
-                stats: { recentCount: recent.length, retrievedCount, graphEntities, totalChunks: 0, skillCount: 0, situation: { primary: [], goal: '' } },
-            };
-        }
-
-        return buildContext(query, this.store as MemoryStore, recent, this.sessionId, (this.config.contextBudget ?? 4000) * 4);
+        return {
+            recentHistory: recentStr,
+            relevantMemories,
+            graphContext,
+            skillContext: '',
+            stats: { recentCount: recent.length, retrievedCount, graphEntities, totalChunks: 0, skillCount: 0, situation: { primary: [], goal: '' } },
+        };
     }
 
     // ── Knowledge operations ─────────────────────────
 
     async saveKnowledge(fact: string, category?: string): Promise<void> {
-        if (this.remote) {
-            const remote = this.store as RemoteMemoryStore;
-            await remote.callTool('save_knowledge', { fact, category });
-            return;
-        }
-        const tagged = category ? `[${category}] ${fact}` : fact;
-        const entities = this.store.searchEntities(fact, 1);
-        if (entities.length > 0) {
-            this.store.addEntity(entities[0].name, entities[0].type, [tagged]);
-        } else {
-            this.store.addEntity(category || 'knowledge', 'concept', [tagged]);
-        }
+        await this.store.callTool('save_knowledge', { fact, category });
     }
 
     async searchKnowledge(query: string, limit = 5): Promise<SearchResult[]> {
-        if (this.remote) {
-            return (this.store as RemoteMemoryStore).searchKnowledgeAsync(query, limit);
-        }
-        return searchKnowledge(this.store as MemoryStore, query, limit);
+        return this.store.searchKnowledgeAsync(query, limit);
     }
 
-    // ── Entity operations (for memory tools) ─────────
+    // ── Entity operations ────────────────────────────
 
     addEntity(name: string, type: EntityType, facts: string[]): Entity {
         return this.store.addEntity(name, type, facts);
@@ -162,9 +142,8 @@ export class MemoryManager {
     // ── Self-identity ────────────────────────────────
 
     getSelfContext(): string {
-        const self = this.store.getSelfEntity();
-        if (self.facts.length <= 2) return ''; // only seed facts
-        return self.facts.map(f => `• ${f}`).join('\n');
+        // Remote mode — sync access not available. MCP tools handle self-entity.
+        return '';
     }
 
     recordSelfObservation(content: string, _category?: string): void { this.store.addSelfObservation(content); }
@@ -174,9 +153,7 @@ export class MemoryManager {
         _exchanges: Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }>,
         _channel?: string,
     ): void {
-        const entity = this.store.getEntity(entityName);
-        if (entity) { entity.lastSeen = Date.now(); entity.accessCount++; }
-        else { this.store.addEntity(entityName, 'person', [`Active conversation partner`]); }
+        this.store.addEntity(entityName, 'person', [`Active conversation partner`]);
     }
 
     // ── Stats ────────────────────────────────────────
@@ -191,7 +168,7 @@ export class MemoryManager {
         };
     }
 
-    getStore(): MemoryStore | RemoteMemoryStore { return this.store; }
+    getStore(): RemoteMemoryStore { return this.store; }
 
     // ── Active tasks (executive memory) ──────────────
 
@@ -213,24 +190,4 @@ export class MemoryManager {
     heartbeatTask(id: string) { this.store.tasks.heartbeat(id); }
     findSimilarTask(title: string, goal: string) { return this.store.tasks.findSimilar(title, goal); }
     getTaskSummary(): string { return this.store.tasks.summary(); }
-
-    // ── Async entity extraction (non-blocking) ───────
-
-    private extractEntitiesAsync(user: string, assistant: string): void {
-        if (!this.entityExtractor) return;
-        const prompt = `Extract entities from this exchange. Return JSON: {"entities":[{"name":"...","type":"person|project|technology|preference|concept","facts":["..."]}]}
-User: ${user.slice(0, 500)}
-Assistant: ${assistant.slice(0, 500)}`;
-
-        this.entityExtractor(prompt).then(raw => {
-            try {
-                const { entities } = JSON.parse(raw);
-                for (const e of entities) {
-                    if (e.name && e.type && Array.isArray(e.facts)) {
-                        this.store.addEntity(e.name, e.type, e.facts);
-                    }
-                }
-            } catch { /* extraction failed — non-critical */ }
-        }).catch(() => { /* non-critical */ });
-    }
 }

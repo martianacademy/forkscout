@@ -21,7 +21,6 @@ import type { ChannelAuthStore } from './channels/auth';
 import { TelegramBridge } from './channels/telegram';
 import { getConfig } from './config';
 import { logToolCall, logLLMCall, logChat, logShutdown, readRecentActivity, getActivitySummary, type ActivityEventType } from './activity-log';
-import { createMemoryMcpServer, handleMcpRequest } from './mcp/memory-server';
 
 
 export interface ServerOptions {
@@ -209,9 +208,6 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
     const agent = new Agent(config);
     await agent.init();
 
-    // Initialize Memory MCP server (shares in-process MemoryStore)
-    createMemoryMcpServer(agent.getMemoryManager());
-
     // Log router configuration
     const routerStatus = agent.getRouter().getStatus();
     console.log(`\n📊 Model Router:`);
@@ -235,12 +231,6 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
         const url = req.url || '';
 
         try {
-            // ── MCP endpoint (memory server for external clients) ──
-            if (url.startsWith('/mcp')) {
-                const handled = await handleMcpRequest(req, res);
-                if (handled) return;
-            }
-
             // ── POST /api/chat — AI SDK UIMessage stream ──
             if (req.method === 'POST' && url === '/api/chat') {
                 const body = JSON.parse(await readBody(req));
@@ -603,8 +593,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
         console.log(`   POST /api/memory/clear — clear memory`);
         console.log(`   GET  /api/status       — agent status`);
         console.log(`   GET  /api/tools        — list tools`);
-        console.log(`   GET  /api/activity     — activity log`);
-        console.log(`   POST /mcp              — Memory MCP server (for Cursor, Claude Desktop, etc.)\n`);
+        console.log(`   GET  /api/activity     — activity log\n`);
 
         // Start Telegram bridge after server is ready
         if (telegramBridge) {

@@ -10,7 +10,6 @@
         "dev": "tsx watch --exclude '.forkscout/**' --exclude '**/*.bak' src/cli.ts",
         "start": "tsx src/cli.ts",
         "serve": "tsx src/serve.ts",
-        "serve:memory": "tsx src/serve-memory.ts",
         "serve:dist": "tsx dist/serve.js",
         "serve:dist:watch": "node scripts/watch-dist.mjs",
         "watchdog": "./watchdog.sh",

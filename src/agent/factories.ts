@@ -14,13 +14,11 @@ import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT } from '../paths';
 import { getConfig } from '../config';
 
-/** Create a configured MemoryManager with LLM-powered entity extraction */
-export function createMemoryManager(_llm: LLMClient, router: ModelRouter): MemoryManager {
+/** Create a configured MemoryManager connected to the Forkscout Memory MCP Server */
+export function createMemoryManager(_llm: LLMClient, _router: ModelRouter): MemoryManager {
     const storagePath = resolvePath(AGENT_ROOT, '.forkscout');
     const config = getConfig();
-
-    // If a memory MCP URL is configured, delegate all reads/writes there
-    const mcpUrl = config.agent.memoryMcpUrl || process.env.MEMORY_MCP_URL;
+    const mcpUrl = config.agent.forkscoutMemoryMcpUrl || process.env.MEMORY_MCP_URL;
 
     return new MemoryManager({
         storagePath,
@@ -28,21 +26,11 @@ export function createMemoryManager(_llm: LLMClient, router: ModelRouter): Memor
         recentWindowSize: 6,
         contextBudget: 4000,
         mcpUrl,
-        entityExtractor: mcpUrl ? undefined : async (prompt: string) => {
-            return generateTextQuiet({
-                model: router.getModel('extract').model,
-                system: 'You are an entity extraction bot. Return ONLY valid JSON, no markdown.',
-                prompt,
-            });
-        },
     });
 }
 
 /** Create a Scheduler with shell command runner + LLM urgency evaluator */
-export function createScheduler(
-    router: ModelRouter,
-    onUrgent: (alert: CronAlert) => void,
-): Scheduler {
+export function createScheduler(router: ModelRouter, onUrgent: (alert: CronAlert) => void): Scheduler {
     const persistPath = resolvePath(AGENT_ROOT, '.forkscout', 'scheduler-jobs.json');
 
     const scheduler = new Scheduler(

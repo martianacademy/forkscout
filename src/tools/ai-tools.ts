@@ -18,7 +18,6 @@ export { viewActivityLog } from './activity-tool';
 // ── Factory function exports ────────────────────────────
 export { createSchedulerTools } from './scheduler-tools';
 export { createMcpTools } from './mcp-tools';
-export { createMemoryTools } from './memory-tools';
 export { createSurvivalTools } from './survival-tools';
 export { createChannelAuthTools } from './channel-tools';
 export { createTelegramTools } from './telegram-tools';

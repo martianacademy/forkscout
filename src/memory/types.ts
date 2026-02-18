@@ -78,8 +78,7 @@ export interface MemoryConfig {
     ownerName?: string;
     recentWindowSize?: number;
     contextBudget?: number;
-    entityExtractor?: (prompt: string) => Promise<string>;
-    /** If set, delegates all memory reads/writes to the remote MCP server (single source of truth). */
+    /** URL to the Forkscout Memory MCP server (required). */
     mcpUrl?: string;
 }
 
