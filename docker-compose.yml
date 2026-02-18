@@ -10,47 +10,69 @@
 # Copy .env.example → .env and fill in your keys before starting.
 
 services:
-  agent:
-    image: ghcr.io/martianacademy/forkscout:latest
-    build: .
-    container_name: forkscout-agent
-    restart: unless-stopped
-    ports:
-      - "${AGENT_PORT:-3210}:3210"
-    env_file:
-      - .env
-    environment:
-      - AGENT_PORT=3210
-      # Point SearXNG to the compose service
-      - SEARXNG_URL=http://searxng:8080
-    volumes:
-      # Named volume at /app: on first run Docker copies everything from the image.
-      # All agent changes persist — source code, node_modules, memory, cron jobs, auth.
-      # System-level packages (OS libs, Playwright browsers) stay in the image layer.
-      # To reset to a fresh image state: docker volume rm forkscout_app-data
-      - app-data:/app
-    depends_on:
-      searxng:
-        condition: service_healthy
+    agent:
+        image: ghcr.io/martianacademy/forkscout:latest
+        build: .
+        container_name: forkscout-agent
+        restart: unless-stopped
+        ports:
+            - '${AGENT_PORT:-3210}:3210'
+        env_file:
+            - .env
+        environment:
+            - AGENT_PORT=3210
+            # Point SearXNG to the compose service
+            - SEARXNG_URL=http://searxng:8080
+        volumes:
+            # Named volume at /app: on first run Docker copies everything from the image.
+            # All agent changes persist — source code, node_modules, memory, cron jobs, auth.
+            # System-level packages (OS libs, Playwright browsers) stay in the image layer.
+            # To reset to a fresh image state: docker volume rm forkscout_app-data
+            - app-data:/app
+        depends_on:
+            searxng:
+                condition: service_healthy
 
-  # SearXNG — private search engine (used by web_search tool)
-  searxng:
-    image: searxng/searxng:latest
-    container_name: forkscout-searxng
-    restart: unless-stopped
-    ports:
-      - "${SEARXNG_PORT:-8888}:8080"
-    environment:
-      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
-    volumes:
-      - searxng-data:/etc/searxng
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
-      interval: 10s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
+    # SearXNG — private search engine (used by web_search tool)
+    searxng:
+        image: searxng/searxng:latest
+        container_name: forkscout-searxng
+        restart: unless-stopped
+        ports:
+            - '${SEARXNG_PORT:-8888}:8080'
+        environment:
+            - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
+        volumes:
+            - searxng-data:/etc/searxng
+        healthcheck:
+            test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:8080/healthz']
+            interval: 10s
+            timeout: 5s
+            start_period: 15s
+            retries: 3
+
+    # Memory MCP Server — standalone shared memory for external AI clients
+    memory:
+        image: ghcr.io/martianacademy/forkscout:latest
+        build: .
+        container_name: forkscout-memory
+        restart: unless-stopped
+        command: ['npx', 'tsx', 'src/serve-memory.ts']
+        ports:
+            - '${MEMORY_PORT:-3211}:3211'
+        environment:
+            - MEMORY_PORT=3211
+            - MEMORY_STORAGE=/app/.forkscout
+        volumes:
+            # Share the same data volume as the agent
+            - app-data:/app
+        healthcheck:
+            test: ['CMD', 'curl', '-sf', 'http://localhost:3211/health']
+            interval: 15s
+            timeout: 5s
+            start_period: 10s
+            retries: 3
 
 volumes:
-  app-data:
-  searxng-data:
+    app-data:
+    searxng-data:
