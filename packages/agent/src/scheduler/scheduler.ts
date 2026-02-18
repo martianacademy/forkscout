@@ -1,99 +1,18 @@
-import { z } from 'zod';
+/**
+ * Scheduler — manages background cron jobs the agent can create and monitor.
+ *
+ * The scheduler runs commands on intervals and evaluates their output
+ * for urgency. Urgent results get injected into the next chat turn.
+ * Jobs persist to disk so they survive restarts.
+ *
+ * @module scheduler/scheduler
+ */
+
 import { EventEmitter } from 'events';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
-
-/**
- * A scheduled job definition
- */
-export interface CronJob {
-    id: string;
-    name: string;
-    /** Cron expression or interval in seconds */
-    schedule: string;
-    /** The command/action to perform */
-    command: string;
-    /** What to watch for - the agent uses this to decide urgency */
-    watchFor?: string;
-    /** Whether the job is currently active */
-    active: boolean;
-    /** Last run info */
-    lastRun?: {
-        at: string;
-        output: string;
-        urgent: boolean;
-    };
-    /** Internal timer handle */
-    _timer?: ReturnType<typeof setInterval>;
-}
-
-/**
- * Urgency levels for cron alerts
- */
-export type UrgencyLevel = 'normal' | 'important' | 'urgent';
-
-/**
- * Cron alert emitted when a job has results
- */
-export interface CronAlert {
-    jobId: string;
-    jobName: string;
-    output: string;
-    urgency: UrgencyLevel;
-    timestamp: string;
-}
-
-/**
- * Simple cron expression parser - supports:
- * - "every Xs" / "every Xm" / "every Xh" (interval-based)
- * - "every X seconds/minutes/hours"
- */
-function parseIntervalSeconds(schedule: string): number {
-    const s = schedule.toLowerCase().trim();
-
-    // "every 30s", "every 5m", "every 1h"
-    const shortMatch = s.match(/^every\s+(\d+)\s*(s|m|h)$/);
-    if (shortMatch) {
-        const val = parseInt(shortMatch[1]);
-        switch (shortMatch[2]) {
-            case 's': return val;
-            case 'm': return val * 60;
-            case 'h': return val * 3600;
-        }
-    }
-
-    // "every 30 seconds", "every 5 minutes", "every 1 hour(s)"
-    const longMatch = s.match(/^every\s+(\d+)\s+(second|minute|hour)s?$/);
-    if (longMatch) {
-        const val = parseInt(longMatch[1]);
-        switch (longMatch[2]) {
-            case 'second': return val;
-            case 'minute': return val * 60;
-            case 'hour': return val * 3600;
-        }
-    }
-
-    // Plain number = seconds
-    const plain = parseInt(s);
-    if (!isNaN(plain)) return plain;
-
-    throw new Error(`Cannot parse schedule: "${schedule}". Use format like "every 30s", "every 5m", "every 1h", or a number of seconds.`);
-}
-
-/**
- * Scheduler - manages background cron jobs that the agent can create and monitor
- */
-/**
- * Serializable job definition (no timer handle) — used for disk persistence.
- */
-export interface SerializedJob {
-    id: string;
-    name: string;
-    schedule: string;
-    command: string;
-    watchFor?: string;
-    active: boolean;
-}
+import type { CronJob, CronAlert, UrgencyLevel, SerializedJob } from './types';
+import { parseIntervalSeconds } from './types';
 
 export class Scheduler extends EventEmitter {
     private jobs = new Map<string, CronJob>();
@@ -263,83 +182,4 @@ export class Scheduler extends EventEmitter {
             this.removeJob(id);
         }
     }
-}
-
-// ── Cron Tools for the agent ──
-
-export function createCronTools(scheduler: Scheduler) {
-    const scheduleJobTool = {
-        name: 'schedule_job',
-        description: 'Schedule a recurring cron job. The job runs a shell command on a schedule and the agent monitors its output for urgency. Use formats like "every 30s", "every 5m", "every 1h".',
-        parameters: z.object({
-            name: z.string().describe('Human-readable name for the job'),
-            schedule: z.string().describe('Schedule expression, e.g. "every 30s", "every 5m", "every 1h"'),
-            command: z.string().describe('Shell command to run on each tick'),
-            watchFor: z.string().describe('What to watch for in the output to flag as urgent, e.g. "error", "price above 100000", "disk usage above 90%"').optional(),
-        }),
-        async execute(params: {
-            name: string;
-            schedule: string;
-            command: string;
-            watchFor?: string;
-        }): Promise<string> {
-            const job = scheduler.addJob(params.name, params.schedule, params.command, params.watchFor);
-            return `Cron job created: id=${job.id}, name="${job.name}", schedule="${job.schedule}", command="${job.command}"${job.watchFor ? `, watching for: "${job.watchFor}"` : ''}`;
-        },
-    };
-
-    const listJobsTool = {
-        name: 'list_jobs',
-        description: 'List all scheduled cron jobs and their status.',
-        parameters: z.object({}),
-        async execute(): Promise<any> {
-            const jobs = scheduler.listJobs();
-            if (jobs.length === 0) return 'No scheduled jobs.';
-            return jobs.map(j => ({
-                id: j.id,
-                name: j.name,
-                schedule: j.schedule,
-                command: j.command,
-                active: j.active,
-                watchFor: j.watchFor,
-                lastRun: j.lastRun,
-            }));
-        },
-    };
-
-    const removeJobTool = {
-        name: 'remove_job',
-        description: 'Remove a scheduled cron job by its ID.',
-        parameters: z.object({
-            jobId: z.string().describe('The job ID to remove (e.g. "cron_1")'),
-        }),
-        async execute(params: { jobId: string }): Promise<string> {
-            const removed = scheduler.removeJob(params.jobId);
-            return removed ? `Job ${params.jobId} removed.` : `Job ${params.jobId} not found.`;
-        },
-    };
-
-    const pauseJobTool = {
-        name: 'pause_job',
-        description: 'Pause a scheduled cron job without deleting it.',
-        parameters: z.object({
-            jobId: z.string().describe('The job ID to pause'),
-        }),
-        async execute(params: { jobId: string }): Promise<string> {
-            return scheduler.pauseJob(params.jobId) ? `Job ${params.jobId} paused.` : `Job ${params.jobId} not found.`;
-        },
-    };
-
-    const resumeJobTool = {
-        name: 'resume_job',
-        description: 'Resume a paused cron job.',
-        parameters: z.object({
-            jobId: z.string().describe('The job ID to resume'),
-        }),
-        async execute(params: { jobId: string }): Promise<string> {
-            return scheduler.resumeJob(params.jobId) ? `Job ${params.jobId} resumed.` : `Job ${params.jobId} not found.`;
-        },
-    };
-
-    return [scheduleJobTool, listJobsTool, removeJobTool, pauseJobTool, resumeJobTool];
 }

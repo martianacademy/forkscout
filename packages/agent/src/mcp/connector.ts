@@ -1,5 +1,5 @@
 /**
- * MCP Connector — Bridges external MCP servers into the agent's tool registry.
+ * MCP Connector — bridges external MCP servers into the agent's tool registry.
  *
  * Supports:
  *   - stdio transport (spawn a local process)
@@ -7,48 +7,22 @@
  *   - Auto-discovers tools from each connected server
  *   - Converts MCP tools to agent Tool format (with Zod schemas)
  *   - Graceful connect/disconnect lifecycle
+ *
+ * @module mcp/connector
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { z } from 'zod';
 import type { Tool } from '../tools/registry';
+import type { McpServerConfig, McpConfig, ConnectedServer } from './types';
+import { jsonSchemaToZod } from './schema';
 
-// ─── Config types ───────────────────────────────────────
+// Re-export types and I/O for backward compatibility
+export type { McpServerConfig, McpConfig } from './types';
+export { loadMcpConfig, saveMcpConfig } from './config-io';
 
-export interface McpServerConfig {
-    /** The executable to spawn (e.g. "npx", "node", "python") — for local stdio */
-    command?: string;
-    /** Arguments passed to the command */
-    args?: string[];
-    /** Extra environment variables */
-    env?: Record<string, string>;
-    /** Remote server URL (e.g. "https://mcp.deepwiki.com/mcp") — for Streamable HTTP */
-    url?: string;
-    /** HTTP headers for remote auth (e.g. { Authorization: 'Bearer {{TOKEN}}' }) */
-    headers?: Record<string, string>;
-    /** Only register tools matching these names (if omitted, all tools) */
-    toolFilter?: string[];
-    /** Whether this server is enabled (default true) */
-    enabled?: boolean;
-}
-
-export interface McpConfig {
-    /** Named MCP servers */
-    servers: Record<string, McpServerConfig>;
-}
-
-// ─── Connected server state ─────────────────────────────
-
-interface ConnectedServer {
-    name: string;
-    client: Client;
-    transport: StdioClientTransport | StreamableHTTPClientTransport;
-    tools: Tool[];
-}
-
-// ─── Connector ──────────────────────────────────────────
+// ── Connector class ─────────────────────────────────────
 
 export class McpConnector {
     private servers: ConnectedServer[] = [];
@@ -152,10 +126,7 @@ export class McpConnector {
         mcpTool: { name: string; description?: string; inputSchema?: any },
         client: Client,
     ): Tool {
-        // Build a Zod schema from the MCP JSON schema
-        const zodSchema = this.jsonSchemaToZod(mcpTool.inputSchema);
-
-        // Prefix tool name with server name to avoid collisions
+        const zodSchema = jsonSchemaToZod(mcpTool.inputSchema);
         const toolName = `${serverName}_${mcpTool.name}`;
 
         return {
@@ -186,78 +157,6 @@ export class McpConnector {
     }
 
     /**
-     * Convert a JSON Schema (from MCP) into a Zod schema.
-     * Handles common types; falls back to z.any() for complex schemas.
-     */
-    private jsonSchemaToZod(schema?: any): z.ZodObject<any> {
-        if (!schema || !schema.properties) {
-            return z.object({});
-        }
-
-        const shape: Record<string, z.ZodTypeAny> = {};
-        const required = new Set(schema.required || []);
-
-        for (const [key, prop] of Object.entries(schema.properties as Record<string, any>)) {
-            let field: z.ZodTypeAny;
-
-            switch (prop.type) {
-                case 'string':
-                    field = z.string();
-                    if (prop.enum) field = z.enum(prop.enum);
-                    break;
-                case 'number':
-                case 'integer':
-                    field = z.number();
-                    break;
-                case 'boolean':
-                    field = z.boolean();
-                    break;
-                case 'array':
-                    field = z.array(this.jsonSchemaTypeToZod(prop.items));
-                    break;
-                case 'object':
-                    if (prop.properties) {
-                        field = this.jsonSchemaToZod(prop);
-                    } else {
-                        field = z.record(z.any());
-                    }
-                    break;
-                default:
-                    field = z.any();
-            }
-
-            if (prop.description) {
-                field = field.describe(prop.description);
-            }
-
-            if (!required.has(key)) {
-                field = field.optional();
-            }
-
-            shape[key] = field;
-        }
-
-        return z.object(shape);
-    }
-
-    /**
-     * Convert a single JSON schema type to a Zod type (for array items, etc.)
-     */
-    private jsonSchemaTypeToZod(schema?: any): z.ZodTypeAny {
-        if (!schema) return z.any();
-
-        switch (schema.type) {
-            case 'string': return z.string();
-            case 'number':
-            case 'integer': return z.number();
-            case 'boolean': return z.boolean();
-            case 'object': return schema.properties ? this.jsonSchemaToZod(schema) : z.record(z.any());
-            case 'array': return z.array(this.jsonSchemaTypeToZod(schema.items));
-            default: return z.any();
-        }
-    }
-
-    /**
      * Disconnect a single MCP server by name.
      * Returns the tool names that were unregistered.
      */
@@ -281,9 +180,7 @@ export class McpConnector {
         return toolNames;
     }
 
-    /**
-     * Disconnect all connected MCP servers.
-     */
+    /** Disconnect all connected MCP servers. */
     async disconnect(): Promise<void> {
         for (const server of this.servers) {
             try {
@@ -296,16 +193,12 @@ export class McpConnector {
         this.servers = [];
     }
 
-    /**
-     * Get all connected server names.
-     */
+    /** Get all connected server names. */
     getConnectedServers(): string[] {
         return this.servers.map(s => s.name);
     }
 
-    /**
-     * Get detailed info about connected servers.
-     */
+    /** Get detailed info about connected servers. */
     getServerInfo(): Array<{ name: string; tools: string[] }> {
         return this.servers.map(s => ({
             name: s.name,
@@ -313,34 +206,8 @@ export class McpConnector {
         }));
     }
 
-    /**
-     * Get all tools from connected servers.
-     */
+    /** Get all tools from connected servers. */
     getAllTools(): Tool[] {
         return this.servers.flatMap(s => s.tools);
     }
-}
-
-/**
- * Load MCP configuration from a JSON file.
- * Falls back to an empty config if the file doesn't exist.
- */
-export async function loadMcpConfig(configPath: string): Promise<McpConfig> {
-    try {
-        const fs = await import('fs/promises');
-        const raw = await fs.readFile(configPath, 'utf-8');
-        return JSON.parse(raw) as McpConfig;
-    } catch {
-        return { servers: {} };
-    }
-}
-
-/**
- * Save MCP configuration to a JSON file.
- */
-export async function saveMcpConfig(configPath: string, config: McpConfig): Promise<void> {
-    const fs = await import('fs/promises');
-    const { dirname } = await import('path');
-    await fs.mkdir(dirname(configPath), { recursive: true });
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
