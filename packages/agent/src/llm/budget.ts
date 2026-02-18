@@ -121,37 +121,15 @@ export class BudgetTracker {
             console.log(`[Budget]: $${cost.toFixed(4)} (${modelId}) | Today: $${status.todayUSD.toFixed(2)}/$${status.dailyLimitUSD} | Month: $${status.monthUSD.toFixed(2)}/$${status.monthlyLimitUSD}`);
         }
 
-        // Warning check
+        // Warning check (logged for observability, no downgrade)
         const status = this.getStatus();
-        if (status.isWarning && !status.isDailyExceeded && !status.isMonthlyExceeded) {
-            console.warn(`[Budget]: ⚠️  Approaching limit — daily ${status.dailyPct.toFixed(0)}%, monthly ${status.monthlyPct.toFixed(0)}%`);
-        }
-        if (status.isDailyExceeded) {
-            console.warn(`[Budget]: 🛑 Daily limit exceeded ($${status.todayUSD.toFixed(2)}/$${status.dailyLimitUSD})! Downgrading to cheaper models.`);
-        }
-        if (status.isMonthlyExceeded) {
-            console.warn(`[Budget]: 🛑 Monthly limit exceeded ($${status.monthUSD.toFixed(2)}/$${status.monthlyLimitUSD})! Downgrading to cheapest model.`);
+        if (status.isDailyExceeded || status.isMonthlyExceeded) {
+            // Tracked in status but no console warnings — user disabled downgrade behavior
         }
     }
 
-    /** Given a desired tier, downgrade if budget is exceeded */
+    /** Given a desired tier, always return it (downgrade disabled) */
     adjustTier(desired: ModelTier): ModelTier {
-        const status = this.getStatus();
-
-        // Monthly exceeded → force fast only
-        if (status.isMonthlyExceeded) return 'fast';
-
-        // Daily exceeded → cap at balanced (no powerful)
-        if (status.isDailyExceeded) {
-            if (desired === 'powerful') return 'balanced';
-            return desired;
-        }
-
-        // Warning zone (>80% daily) → cap powerful→balanced
-        if (status.dailyPct > this.limits.warningPct && desired === 'powerful') {
-            return 'balanced';
-        }
-
         return desired;
     }
 

@@ -18,8 +18,11 @@
  * Runs automatically after N mutations or during memory flush.
  */
 
-import type { KnowledgeGraph } from './knowledge-graph';
-import { computeConfidence, STAGE_WEIGHTS, type MemoryStage, type Observation } from './knowledge-graph';
+import type { GraphState } from './knowledge-graph';
+import {
+    computeConfidence, STAGE_WEIGHTS, type MemoryStage, type Observation,
+    getAllEntities, getAllRelations, getEntity, markConsolidated, getMeta,
+} from './knowledge-graph';
 import type { SkillStore } from './skills';
 import type { VectorStore } from './vector-store';
 
@@ -81,7 +84,7 @@ export class Consolidator {
      * Run a full consolidation pass on the knowledge graph.
      * Returns a summary of what was changed.
      */
-    consolidate(graph: KnowledgeGraph, skills?: SkillStore, vectorStore?: VectorStore): ConsolidationResult {
+    consolidate(graph: GraphState, skills?: SkillStore, vectorStore?: VectorStore): ConsolidationResult {
         const start = Date.now();
         let promoted = 0;
         let pruned = 0;
@@ -89,7 +92,7 @@ export class Consolidator {
         let skillsSynthesized = 0;
 
         const now = Date.now();
-        const entities = graph.getAllEntities();
+        const entities = getAllEntities(graph);
 
         for (const entity of entities) {
             const obsToRemove: number[] = [];
@@ -127,7 +130,7 @@ export class Consolidator {
         }
 
         // ── Update relation weights after stage changes ──
-        const relations = graph.getAllRelations();
+        const relations = getAllRelations(graph);
         for (const rel of relations) {
             const newWeight = computeConfidence(rel.evidence) * STAGE_WEIGHTS[rel.stage];
             if (Math.abs(rel.weight - newWeight) > 0.01) {
@@ -135,8 +138,8 @@ export class Consolidator {
             }
 
             // Promote relation stages if the connected entities have been promoted
-            const fromEntity = graph.getEntity(rel.from);
-            const toEntity = graph.getEntity(rel.to);
+            const fromEntity = getEntity(graph, rel.from);
+            const toEntity = getEntity(graph, rel.to);
             if (fromEntity && toEntity) {
                 const avgConfirmations = (rel.evidence.confirmations +
                     this.avgConfirmations(fromEntity.observations) +
@@ -158,7 +161,7 @@ export class Consolidator {
         }
 
         // Mark consolidation in graph metadata
-        graph.markConsolidated();
+        markConsolidated(graph);
 
         const duration = Date.now() - start;
 
@@ -174,8 +177,8 @@ export class Consolidator {
     /**
      * Check if consolidation should run (based on mutation count).
      */
-    shouldRun(graph: KnowledgeGraph): boolean {
-        const meta = graph.getMeta();
+    shouldRun(graph: GraphState): boolean {
+        const meta = getMeta(graph);
         return meta.mutationsSinceConsolidation >= this.config.mutationThreshold;
     }
 

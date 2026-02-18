@@ -4,7 +4,12 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { MemoryManager } from '../memory/manager';
-import { SELF_ENTITY_NAME, type EntityType, RELATION_TYPES } from '../memory/knowledge-graph';
+import {
+    SELF_ENTITY_NAME, type EntityType, RELATION_TYPES,
+    addEntity, getEntity, addRelation,
+    searchGraph, formatForContext,
+    getAllEntities, getAllRelations, getMeta,
+} from '../memory/knowledge-graph';
 
 /**
  * Create memory tools that let the agent explicitly save/search knowledge.
@@ -51,7 +56,7 @@ export function createMemoryTools(memory: MemoryManager) {
             }),
             execute: async ({ name, type, observations }) => {
                 const graph = memory.getGraph();
-                const entity = graph.addEntity(name, type as EntityType, observations, 'explicit');
+                const entity = addEntity(graph, name, type as EntityType, observations, 'explicit');
                 return `Entity "${entity.name}" (${entity.type}): ${entity.observations.length} observations`;
             },
         }),
@@ -65,9 +70,9 @@ export function createMemoryTools(memory: MemoryManager) {
             }),
             execute: async ({ from, to, type }) => {
                 const graph = memory.getGraph();
-                if (!graph.getEntity(from)) graph.addEntity(from, 'other', [], 'explicit');
-                if (!graph.getEntity(to)) graph.addEntity(to, 'other', [], 'explicit');
-                const rel = graph.addRelation(from, to, type, undefined, 'explicit');
+                if (!getEntity(graph, from)) addEntity(graph, from, 'other', [], 'explicit');
+                if (!getEntity(graph, to)) addEntity(graph, to, 'other', [], 'explicit');
+                const rel = addRelation(graph, from, to, type, undefined, 'explicit');
                 return `Relation: ${from} → ${rel.type} → ${to} (weight: ${rel.weight.toFixed(2)}, stage: ${rel.stage})`;
             },
         }),
@@ -80,9 +85,9 @@ export function createMemoryTools(memory: MemoryManager) {
             }),
             execute: async ({ query, limit }) => {
                 const graph = memory.getGraph();
-                const results = graph.search(query, limit || 5);
+                const results = searchGraph(graph, query, limit || 5);
                 if (results.length === 0) return 'No matching entities found in the knowledge graph.';
-                return graph.formatForContext(results, 3000);
+                return formatForContext(results, 3000);
             },
         }),
 
@@ -91,9 +96,9 @@ export function createMemoryTools(memory: MemoryManager) {
             inputSchema: z.object({}),
             execute: async () => {
                 const graph = memory.getGraph();
-                const entities = graph.getAllEntities();
-                const relations = graph.getAllRelations();
-                const meta = graph.getMeta();
+                const entities = getAllEntities(graph);
+                const relations = getAllRelations(graph);
+                const meta = getMeta(graph);
                 const skills = memory.getSkills();
 
                 const typeCounts = new Map<string, number>();

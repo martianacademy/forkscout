@@ -12,11 +12,22 @@ export { LLMClient, type LLMConfig } from './llm/client';
 export { MemoryManager, type MemoryConfig } from './memory/manager';
 export { VectorStore, type MemoryChunk } from './memory/vector-store';
 export {
-    KnowledgeGraph,
+    type GraphState, createGraphState,
     type Entity, type Relation, type GraphData, type EntityType,
     type MemoryStage, type Evidence, type Observation, type RelationType,
     RELATION_TYPES, STAGE_WEIGHTS, SELF_ENTITY_NAME,
     computeConfidence, computeWeight, freshEvidence, normalizeRelationType,
+    initGraph, flushGraph, clearGraph,
+    addEntity, getEntity, addObservations, updateSessionContext, deleteEntity,
+    getSelfEntity, addSelfObservation,
+    addRelation, deleteRelation,
+    searchGraph, getNeighbors, traverseGraph,
+    mergeExtracted, formatForContext,
+    getAllEntities, getAllRelations, getMeta,
+    entityCount, relationCount,
+    setEntity, setRelations,
+    markConsolidated, needsConsolidation,
+    buildExtractionPrompt,
 } from './memory/knowledge-graph';
 export { SkillStore, type Skill, type SkillData } from './memory/skills';
 export { Consolidator, type ConsolidationConfig, type ConsolidationResult } from './memory/consolidator';

@@ -33,7 +33,19 @@
  */
 
 import { VectorStore } from './vector-store';
-import { KnowledgeGraph, buildExtractionPrompt, SELF_ENTITY_NAME, type ExtractedEntities } from './knowledge-graph';
+import {
+    type GraphState, createGraphState,
+    initGraph, flushGraph, clearGraph,
+    addEntity,
+    updateSessionContext,
+    getSelfEntity, addSelfObservation,
+    addRelation,
+    searchGraph,
+    mergeExtracted, formatForContext,
+    getAllRelations,
+    buildExtractionPrompt, SELF_ENTITY_NAME,
+    type ExtractedEntities,
+} from './knowledge-graph';
 import { SkillStore } from './skills';
 import { Consolidator, type ConsolidationConfig } from './consolidator';
 import {
@@ -70,7 +82,7 @@ export interface MemoryConfig {
 
 export class MemoryManager {
     private vectorStore: VectorStore;
-    private graph: KnowledgeGraph;
+    private graph: GraphState;
     private skills: SkillStore;
     private consolidator: Consolidator;
     private config: MemoryConfig;
@@ -96,7 +108,7 @@ export class MemoryManager {
             config.embeddingModel,
         );
 
-        this.graph = new KnowledgeGraph(
+        this.graph = createGraphState(
             `${this.config.storagePath}/knowledge-graph.json`,
             config.ownerName,
         );
@@ -114,12 +126,12 @@ export class MemoryManager {
     async init(): Promise<void> {
         await Promise.all([
             this.vectorStore.init(),
-            this.graph.init(),
+            initGraph(this.graph),
             this.skills.init(),
         ]);
 
         // Seed self-identity entity (idempotent — creates only if missing)
-        this.graph.getSelfEntity();
+        getSelfEntity(this.graph);
     }
 
     /** Flush to disk */
@@ -149,7 +161,7 @@ export class MemoryManager {
 
         await Promise.all([
             this.vectorStore.flush(),
-            this.graph.flush(),
+            flushGraph(this.graph),
             this.skills.flush(),
         ]);
     }
@@ -246,7 +258,7 @@ export class MemoryManager {
         const recentTexts = recent.map(r => r.content);
 
         // Gather active entity types from recent graph hits
-        const preflightHits = this.graph.search(currentQuery, 3);
+        const preflightHits = searchGraph(this.graph, currentQuery, 3);
         const activeEntityTypes = preflightHits.map(h => h.entity.type);
 
         const situation = classifySituation(currentQuery, recentTexts, activeEntityTypes);
@@ -265,7 +277,7 @@ export class MemoryManager {
             const graphBudgetTokens = Math.min(Math.floor(remainingTokens * 0.4), 600);
             // Approximate char budget from token budget (1 token ≈ 4 chars)
             const graphBudgetChars = graphBudgetTokens * 4;
-            const graphResults = this.graph.search(currentQuery, 8);
+            const graphResults = searchGraph(this.graph, currentQuery, 8);
 
             if (graphResults.length > 0) {
                 // Domain-aware re-ranking
@@ -291,7 +303,7 @@ export class MemoryManager {
                 graphResults.sort((a, b) => b.score - a.score);
                 const topResults = graphResults.slice(0, 5);
 
-                graphStr = '\n\n' + this.graph.formatForContext(topResults, graphBudgetChars);
+                graphStr = '\n\n' + formatForContext(topResults, graphBudgetChars);
                 graphEntities = topResults.length;
                 remainingTokens -= countTokens(graphStr);
             }
@@ -385,7 +397,7 @@ export class MemoryManager {
     async searchKnowledge(query: string, limit = 5): Promise<Array<{ content: string; relevance: number; source: 'vector' | 'graph' }>> {
         const [vectorResults, graphResults] = await Promise.all([
             this.vectorStore.search(query, limit),
-            Promise.resolve(this.graph.search(query, limit)),
+            Promise.resolve(searchGraph(this.graph, query, limit)),
         ]);
 
         const results: Array<{ content: string; relevance: number; source: 'vector' | 'graph' }> = [];
@@ -420,8 +432,8 @@ export class MemoryManager {
 
     // ── Knowledge Graph Direct Access ─────────────────
 
-    /** Get the knowledge graph instance (for graph-specific tools) */
-    getGraph(): KnowledgeGraph { return this.graph; }
+    /** Get the knowledge graph state (for graph-specific tools) */
+    getGraph(): GraphState { return this.graph; }
 
     /** Get the skill store instance (for consolidator) */
     getSkills(): SkillStore { return this.skills; }
@@ -429,31 +441,56 @@ export class MemoryManager {
     /**
      * Get self-identity context — the agent's observations about itself.
      * Injected into every system prompt so the agent remembers who it is.
+     *
+     * Categorized by tag prefix for clarity and priority:
+     *   RULES (user-preference-about-me) — highest priority, always included
+     *   MISTAKES — things to avoid
+     *   IMPROVEMENTS — things to do more of
+     *   IDENTITY — promoted observations (trait/belief/fact) about self
+     *   RELATIONS — self-relations
+     *
+     * Filters out noise (short extracted observations, XML leaks).
+     * Caps output at 3000 chars to prevent prompt bloat.
      */
     getSelfContext(): string {
-        const self = this.graph.getSelfEntity();
+        const self = getSelfEntity(this.graph);
         if (self.observations.length === 0) return '';
 
-        // Group by stage for priority display (traits > beliefs > facts > observations)
-        const byStage = new Map<string, string[]>();
+        const CAP = 3000;
+        const rules: string[] = [];
+        const mistakes: string[] = [];
+        const improvements: string[] = [];
+        const identity: string[] = [];
+
         for (const obs of self.observations) {
-            const list = byStage.get(obs.stage) || [];
-            list.push(obs.content);
-            byStage.set(obs.stage, list);
+            const c = obs.content;
+
+            // Filter noise: short extracted observations and XML leaks
+            if (obs.evidence.sources.includes('extracted') && c.length < 60) continue;
+            if (c.includes('</') || c.includes('/>')) continue;
+
+            // Categorize by tag prefix
+            if (c.includes('[user-preference-about-me]')) {
+                rules.push(c);
+            } else if (c.includes('[mistake]')) {
+                mistakes.push(c);
+            } else if (c.includes('[improvement]')) {
+                improvements.push(c);
+            } else if (['trait', 'belief', 'fact'].includes(obs.stage)) {
+                identity.push(c);
+            }
+            // Everything else (raw observations, interaction-patterns, capabilities)
+            // is intentionally dropped unless promoted to fact+
         }
 
-        const lines: string[] = [];
-        for (const stage of ['trait', 'belief', 'fact', 'episode', 'observation'] as const) {
-            const items = byStage.get(stage);
-            if (items) {
-                for (const item of items) {
-                    lines.push(`- ${item}`);
-                }
-            }
-        }
+        const sections: string[] = [];
+        if (rules.length > 0) sections.push('RULES (follow strictly):\n' + rules.map(r => `- ${r}`).join('\n'));
+        if (mistakes.length > 0) sections.push('MISTAKES (never repeat):\n' + mistakes.map(m => `- ${m}`).join('\n'));
+        if (improvements.length > 0) sections.push('IMPROVEMENTS:\n' + improvements.map(i => `- ${i}`).join('\n'));
+        if (identity.length > 0) sections.push('IDENTITY:\n' + identity.map(i => `- ${i}`).join('\n'));
 
         // Include self-relations
-        const selfRelations = this.graph.getAllRelations()
+        const selfRelations = getAllRelations(this.graph)
             .filter(r => r.from.toLowerCase() === SELF_ENTITY_NAME.toLowerCase()
                 || r.to.toLowerCase() === SELF_ENTITY_NAME.toLowerCase());
 
@@ -463,15 +500,17 @@ export class MemoryManager {
                     ? `- I ${r.type} ${r.to}`
                     : `- ${r.from} ${r.type} me`
             );
-            lines.push(...relLines);
+            sections.push('RELATIONS:\n' + relLines.join('\n'));
         }
 
-        return lines.join('\n');
+        let result = sections.join('\n\n');
+        if (result.length > CAP) result = result.slice(0, CAP) + '\n…(truncated)';
+        return result;
     }
 
     /** Record an observation about the agent itself */
     recordSelfObservation(content: string, source: string = 'self-reflect'): void {
-        this.graph.addSelfObservation(content, source);
+        addSelfObservation(this.graph, content, source);
     }
 
     /**
@@ -503,7 +542,7 @@ export class MemoryManager {
             lines.push(`[${ts}] ${prefix}: ${preview}${msg.content.length > 200 ? '…' : ''}`);
         }
 
-        this.graph.updateSessionContext(entityName, lines.join('\n'));
+        updateSessionContext(this.graph, entityName, lines.join('\n'));
     }
 
     // ── Entity Extraction ─────────────────────────────
@@ -527,7 +566,7 @@ export class MemoryManager {
                     const extracted: ExtractedEntities = JSON.parse(cleaned);
 
                     if (extracted.entities.length > 0 || extracted.relations.length > 0) {
-                        const { newEntities, newRelations } = this.graph.mergeExtracted(extracted);
+                        const { newEntities, newRelations } = mergeExtracted(this.graph, extracted);
                         if (newEntities > 0 || newRelations > 0) {
                             console.log(`🔗 Graph updated: +${newEntities} entities, +${newRelations} relations`);
                         }
@@ -549,9 +588,9 @@ export class MemoryManager {
         // Pattern: "User prefers X over Y"
         const prefersMatch = fact.match(/(?:user|i)\s+prefers?\s+(.+?)\s+(?:over|instead of|rather than)\s+(.+)/i);
         if (prefersMatch) {
-            this.graph.addEntity(prefersMatch[1].trim(), 'preference', [fact]);
-            this.graph.addEntity(prefersMatch[2].trim(), 'technology', [`Not preferred: ${fact}`]);
-            this.graph.addRelation(prefersMatch[1].trim(), prefersMatch[2].trim(), 'preferred_over');
+            addEntity(this.graph, prefersMatch[1].trim(), 'preference', [fact]);
+            addEntity(this.graph, prefersMatch[2].trim(), 'technology', [`Not preferred: ${fact}`]);
+            addRelation(this.graph, prefersMatch[1].trim(), prefersMatch[2].trim(), 'preferred_over');
             return;
         }
 
@@ -559,7 +598,7 @@ export class MemoryManager {
         const usesMatch = fact.match(/(?:project|app|system|codebase)\s+uses?\s+(.+)/i);
         if (usesMatch) {
             const tech = usesMatch[1].replace(/[.!]+$/, '').trim();
-            this.graph.addEntity(tech, 'technology', [fact]);
+            addEntity(this.graph, tech, 'technology', [fact]);
             return;
         }
 
@@ -570,7 +609,7 @@ export class MemoryManager {
                 : category === 'project-context' ? 'project'
                     : category === 'technical-note' ? 'technology'
                         : 'other';
-            this.graph.addEntity(isMatch[1].trim(), entityType as any, [fact]);
+            addEntity(this.graph, isMatch[1].trim(), entityType as any, [fact]);
             return;
         }
 
@@ -582,7 +621,7 @@ export class MemoryManager {
                         : 'other';
             const name = fact.split(/[,.:;!?]/)[0].trim().slice(0, 50);
             if (name.length > 3) {
-                this.graph.addEntity(name, entityType as any, [fact]);
+                addEntity(this.graph, name, entityType as any, [fact]);
             }
         }
     }
@@ -684,7 +723,7 @@ export class MemoryManager {
         this.exchangeCount = 0;
         await Promise.all([
             this.vectorStore.clear(),
-            this.graph.clear(),
+            clearGraph(this.graph),
             this.skills.clear(),
         ]);
     }

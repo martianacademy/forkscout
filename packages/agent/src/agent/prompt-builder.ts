@@ -65,7 +65,7 @@ export async function buildSystemPrompt(
             // Self-identity — who am I?
             const selfCtx = memory.getSelfContext();
             if (selfCtx) {
-                selfSection = '\n\n[Self-Identity — Who I Am]\n' + selfCtx;
+                selfSection = '\n\n[LEARNED BEHAVIORS — follow these rigorously, they come from your own experience and owner directives]\n' + selfCtx;
             }
 
             const { recentHistory, relevantMemories, graphContext, skillContext, stats } =
