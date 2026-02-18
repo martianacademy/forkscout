@@ -70,6 +70,9 @@ export class TelegramBridge {
         // Process any missed messages from Telegram's queue
         await this.processMissedMessages();
 
+        // Resume any conversations interrupted by a restart
+        await this.resumeInterruptedChats();
+
         this.poll(); // fire and forget — runs forever
     }
 
@@ -151,13 +154,78 @@ export class TelegramBridge {
 
     /** Delegate to the handler with injected dependencies */
     private async handleUpdate(update: TelegramUpdate, isMissed: boolean): Promise<void> {
-        return handleTelegramUpdate(update, isMissed, {
+        return handleTelegramUpdate(update, isMissed, this.getHandlerDeps());
+    }
+
+    /** Build the deps object passed to the handler */
+    private getHandlerDeps(): import('./handler').TelegramHandlerDeps {
+        return {
             agent: this.agent,
             token: this.token,
             state: this.state,
             getOrCreateHistory: (chatId) => this.getOrCreateHistory(chatId),
             trimHistory: (chatId) => this.trimHistory(chatId),
-        });
+            flushHistory: () => this.saveHistoriesForce(),
+        };
+    }
+
+    // ── Interrupted chat resume ──────────────────────
+
+    /**
+     * After startup, detect conversations where the last message is role='user'
+     * with no assistant reply (= the agent was killed mid-generation).
+     * Pop the orphan, notify the user, and re-run through the normal handler.
+     */
+    private async resumeInterruptedChats(): Promise<void> {
+        const interrupted: number[] = [];
+
+        for (const [chatId, history] of this.chatHistories) {
+            if (history.length > 0 && history[history.length - 1].role === 'user') {
+                interrupted.push(chatId);
+            }
+        }
+
+        if (interrupted.length === 0) return;
+
+        console.log(`[Telegram]: Found ${interrupted.length} interrupted conversation(s) — resuming…`);
+
+        for (const chatId of interrupted) {
+            const history = this.chatHistories.get(chatId)!;
+            const orphan = history[history.length - 1];
+
+            // Extract the raw Telegram message JSON from the stored user parts
+            const textPart = (orphan.parts || []).find(
+                (p: any) => p.type === 'text' && typeof p.text === 'string' && p.text.startsWith('[Telegram Message]'),
+            ) as { type: string; text: string } | undefined;
+
+            if (!textPart) {
+                console.log(`[Telegram]: Can't resume chat ${chatId} — no raw message in history`);
+                continue;
+            }
+
+            try {
+                const rawJson = textPart.text.replace('[Telegram Message]\n', '');
+                const originalMsg = JSON.parse(rawJson);
+
+                // Pop the orphan — the handler will re-push it normally
+                history.pop();
+
+                // Notify user we're resuming
+                await sendMessage(this.token, chatId, '🔄 I was interrupted mid-task — resuming where I left off…');
+
+                // Re-process through the normal handler
+                const syntheticUpdate: TelegramUpdate = {
+                    update_id: 0,
+                    message: originalMsg,
+                };
+
+                await handleTelegramUpdate(syntheticUpdate, false, this.getHandlerDeps());
+                console.log(`[Telegram]: Successfully resumed chat ${chatId}`);
+            } catch (err) {
+                console.error(`[Telegram]: Failed to resume chat ${chatId}:`, err instanceof Error ? err.message : err);
+                await sendMessage(this.token, chatId, "I was interrupted and couldn't resume. Could you send your message again?").catch(() => { });
+            }
+        }
     }
 
     // ── Chat history management ───────────────────────
@@ -221,6 +289,11 @@ export class TelegramBridge {
     /** Save chat histories to disk (strip binary data to keep file small) */
     private async saveHistories(): Promise<void> {
         if (!this.historyDirty) return;
+        return this.saveHistoriesForce();
+    }
+
+    /** Save chat histories unconditionally (called by handler after pushing userMsg) */
+    private async saveHistoriesForce(): Promise<void> {
         try {
             const dir = resolvePath(this.historyPath, '..');
             await mkdir(dir, { recursive: true });

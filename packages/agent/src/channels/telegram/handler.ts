@@ -21,6 +21,8 @@ export interface TelegramHandlerDeps {
     state: TelegramStateManager;
     getOrCreateHistory(chatId: number): UIMessage[];
     trimHistory(chatId: number): void;
+    /** Flush history to disk immediately (called after pushing userMsg so it survives restarts) */
+    flushHistory(): Promise<void>;
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -149,6 +151,10 @@ export async function handleTelegramUpdate(
         parts,
     };
     history.push(userMsg);
+
+    // Flush immediately so this message survives a mid-task restart.
+    // On restart, the orphaned user message (no assistant reply) triggers auto-resume.
+    await deps.flushHistory();
 
     try {
         // Build enriched system prompt — include missed-message context
