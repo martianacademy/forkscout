@@ -281,7 +281,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                                 const tc = toolCalls[i] as any;
                                 const tr = toolResults?.[i] as any;
                                 const resultStr = tr?.output ? (typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output)) : undefined;
-                                logToolCall(tc.toolName, tc.args, resultStr);
+                                logToolCall(tc.toolName, tc.input, resultStr);
                             }
                         }
                     },

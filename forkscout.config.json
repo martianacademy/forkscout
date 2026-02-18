@@ -7,7 +7,7 @@
     "maxTokens": 2000,
     "router": {
         "fast": {
-            "model": "x-ai/grok-4.1-fast",
+            "model": "qwen/qwen3.5-397b-a17b",
             "provider": "openrouter"
         },
         "balanced": {
@@ -15,7 +15,7 @@
             "provider": "openrouter"
         },
         "powerful": {
-            "model": "minimax/minimax-m2.5",
+            "model": "moonshotai/kimi-k2.5",
             "provider": "openrouter"
         }
     },

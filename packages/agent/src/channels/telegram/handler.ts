@@ -225,7 +225,8 @@ export async function handleTelegramUpdate(
                         `[Telegram/Agent]: ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`,
                     );
                     const descriptions = toolCalls.map(
-                        (tc: any) => describeToolCall(tc.toolName, tc.args),
+                        // AI SDK v6 uses `input` not `args` for tool call parameters
+                        (tc: any) => describeToolCall(tc.toolName, tc.input),
                     );
                     const unique = [...new Set(descriptions)];
                     sendMessage(token, chatId, unique.join('\n')).catch(() => { });
