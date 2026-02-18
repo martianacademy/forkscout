@@ -250,20 +250,34 @@ export async function handleTelegramUpdate(
                 // Save step checkpoint for mid-task crash recovery.
                 // If the process restarts (e.g. agent edited its own code → rebuild),
                 // these checkpoints let the model know what it already accomplished.
-                if (toolCalls?.length) {
-                    const stepSummaries = toolCalls.map((tc: any, i: number) => {
-                        const tr = (toolResults as any)?.[i];
-                        const argsStr = JSON.stringify(tc.input || {}).slice(0, 500);
-                        const outputStr = tr?.output != null
-                            ? String(typeof tr.output === 'object' ? JSON.stringify(tr.output) : tr.output).slice(0, 800)
-                            : '(no result)';
-                        return `  Tool: ${tc.toolName}\n  Args: ${argsStr}\n  Result: ${outputStr}`;
-                    }).join('\n---\n');
+                const hasTools = toolCalls && toolCalls.length > 0;
+                const hasText = stepText?.trim();
+
+                if (hasTools || hasText) {
+                    const cpParts: string[] = [];
+
+                    // Include the model's reasoning/plan text — this is crucial
+                    // so the agent remembers WHY it was doing these steps.
+                    if (hasText) {
+                        cpParts.push(`  Reasoning: ${stepText!.trim().slice(0, 600)}`);
+                    }
+
+                    if (hasTools) {
+                        const stepSummaries = toolCalls!.map((tc: any, i: number) => {
+                            const tr = (toolResults as any)?.[i];
+                            const argsStr = JSON.stringify(tc.input || {}).slice(0, 500);
+                            const outputStr = tr?.output != null
+                                ? String(typeof tr.output === 'object' ? JSON.stringify(tr.output) : tr.output).slice(0, 800)
+                                : '(no result)';
+                            return `  Tool: ${tc.toolName}\n  Args: ${argsStr}\n  Result: ${outputStr}`;
+                        }).join('\n---\n');
+                        cpParts.push(stepSummaries);
+                    }
 
                     const checkpoint: UIMessage = {
                         id: `checkpoint-${msg.message_id}-step${currentStep}`,
                         role: 'assistant' as const,
-                        parts: [{ type: 'text' as const, text: `[STEP_CHECKPOINT step=${currentStep}]\n${stepSummaries}` }],
+                        parts: [{ type: 'text' as const, text: `[STEP_CHECKPOINT step=${currentStep}]\n${cpParts.join('\n')}` }],
                     };
                     history.push(checkpoint);
                     await deps.flushHistory();

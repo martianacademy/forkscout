@@ -243,18 +243,35 @@ export class TelegramBridge {
                     ? `\nWORKING CONTEXT — You were operating in/on these paths:\n${[...workingPaths].map(p => `  • ${p}`).join('\n')}\n`
                     : '';
 
+                // Extract reasoning/plan text from checkpoints so the model
+                // remembers its high-level intent, not just individual tool calls.
+                const reasoningLines: string[] = [];
+                for (const cp of checkpoints) {
+                    const text = (cp.parts?.[0] as any)?.text || '';
+                    const reasoningMatch = text.match(/Reasoning: (.+?)(?:\n  Tool:|$)/s);
+                    if (reasoningMatch?.[1]?.trim()) {
+                        reasoningLines.push(reasoningMatch[1].trim());
+                    }
+                }
+                // Deduplicate and take the most meaningful reasoning snippets
+                const uniqueReasoning = [...new Set(reasoningLines)].slice(0, 5);
+                const taskPlan = uniqueReasoning.length > 0
+                    ? `\nYOUR PLAN/REASONING before the restart:\n${uniqueReasoning.map(r => `  > ${r.slice(0, 300)}`).join('\n')}\n`
+                    : '';
+
                 resumeContext = [
                     '⚠️ CONTINUATION AFTER RESTART:',
                     'You were previously working on this task but the process was restarted',
                     '(possibly because your own code changes triggered a rebuild).',
                     workingCtx,
+                    taskPlan,
                     'Here are the steps you already completed before the restart:',
                     '',
                     summaries,
                     '',
                     'IMPORTANT: Continue from where you left off. Do NOT repeat steps that already succeeded.',
                     'If a step partially failed or was interrupted, you may retry it.',
-                    'Pay attention to the WORKING CONTEXT paths above — that is where you were focused.',
+                    'Pay attention to the WORKING CONTEXT and YOUR PLAN above — that is what you were doing and where.',
                 ].join('\n');
 
                 // Remove checkpoints from history so the user message is last
