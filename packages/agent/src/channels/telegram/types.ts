@@ -41,6 +41,30 @@ export interface TelegramMessage {
     caption?: string;
     photo?: TelegramPhotoSize[];
     reply_to_message?: TelegramMessage;
+    // Document / file attachments
+    document?: { file_id: string; file_unique_id: string; file_name?: string; mime_type?: string; file_size?: number };
+    video?: { file_id: string; file_unique_id: string; width: number; height: number; duration: number; file_name?: string; mime_type?: string; file_size?: number };
+    audio?: { file_id: string; file_unique_id: string; duration: number; performer?: string; title?: string; file_name?: string; mime_type?: string; file_size?: number };
+    voice?: { file_id: string; file_unique_id: string; duration: number; mime_type?: string; file_size?: number };
+    video_note?: { file_id: string; file_unique_id: string; length: number; duration: number; file_size?: number };
+    sticker?: { file_id: string; file_unique_id: string; width: number; height: number; is_animated: boolean; emoji?: string; set_name?: string };
+    // Location & contact
+    location?: { latitude: number; longitude: number; horizontal_accuracy?: number };
+    contact?: { phone_number: string; first_name: string; last_name?: string; user_id?: number };
+    // Forwarded message info
+    forward_from?: TelegramUser;
+    forward_from_chat?: TelegramChat;
+    forward_date?: number;
+    forward_sender_name?: string;
+    // Message entities (links, mentions, hashtags, etc.)
+    entities?: { type: string; offset: number; length: number; url?: string; user?: TelegramUser }[];
+    caption_entities?: { type: string; offset: number; length: number; url?: string; user?: TelegramUser }[];
+    // Poll
+    poll?: { id: string; question: string; options: { text: string; voter_count: number }[]; is_anonymous: boolean; type: string; total_voter_count: number };
+    // Edit tracking
+    edit_date?: number;
+    // Catch-all for future Telegram API additions
+    [key: string]: any;
 }
 
 export interface TelegramUpdate {

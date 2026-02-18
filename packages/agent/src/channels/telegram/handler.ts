@@ -23,6 +23,23 @@ export interface TelegramHandlerDeps {
     trimHistory(chatId: number): void;
 }
 
+// ── Helpers ──────────────────────────────────────────
+
+/** Produce a short text description for non-text messages (used for complexity detection & system prompt). */
+function describeMessageType(msg: { sticker?: any; document?: any; audio?: any; voice?: any; video?: any; video_note?: any; location?: any; contact?: any; poll?: any; photo?: any }): string {
+    if (msg.sticker) return `Sticker: ${msg.sticker.emoji || 'unknown'}`;
+    if (msg.document) return `File: ${msg.document.file_name || 'document'}`;
+    if (msg.audio) return `Audio: ${msg.audio.title || msg.audio.file_name || 'audio'}`;
+    if (msg.voice) return 'Voice message';
+    if (msg.video) return 'Video';
+    if (msg.video_note) return 'Video note';
+    if (msg.location) return `Location: ${msg.location.latitude}, ${msg.location.longitude}`;
+    if (msg.contact) return `Contact: ${msg.contact.first_name}`;
+    if (msg.poll) return `Poll: ${msg.poll.question}`;
+    if (msg.photo) return 'Photo';
+    return 'Message';
+}
+
 // ── Main handler ─────────────────────────────────────
 
 /**
@@ -40,10 +57,9 @@ export async function handleTelegramUpdate(
     const msg = update.message;
     if (!msg || msg.from?.is_bot) return; // skip bot messages
 
-    // Accept text messages and photo messages (with optional caption)
-    const hasText = !!msg.text?.trim();
+    // Accept all message types — the raw message JSON is forwarded to the LLM
+    // so it can understand replies, forwards, stickers, documents, locations, etc.
     const hasPhoto = !!(msg.photo && msg.photo.length > 0);
-    if (!hasText && !hasPhoto) return; // skip unsupported message types
 
     const chatId = msg.chat.id;
     const user = msg.from!;
@@ -117,12 +133,14 @@ export async function handleTelegramUpdate(
     await sendTyping(token, chatId);
     const history = deps.getOrCreateHistory(chatId);
 
-    // Build parts array — text + optional image
+    // Pass the raw Telegram message as JSON — LLMs can extract all context
+    // (reply chains, forwards, file metadata, stickers, locations, polls, etc.)
     const parts: any[] = [];
-    if (text) parts.push({ type: 'text' as const, text });
+    const rawMsgJson = JSON.stringify(msg, null, 2);
+    parts.push({ type: 'text' as const, text: `[Telegram Message]\n${rawMsgJson}` });
+    // Include image binary for vision models (they need actual pixel data, not file_id)
     if (imageData) {
         parts.push({ type: 'image' as const, image: imageData.base64, mediaType: imageData.mediaType });
-        if (!text) parts.unshift({ type: 'text' as const, text: 'What is in this image?' });
     }
 
     const userMsg: UIMessage = {
@@ -134,24 +152,26 @@ export async function handleTelegramUpdate(
 
     try {
         // Build enriched system prompt — include missed-message context
-        let queryForPrompt = text;
+        // Use text for prompt query; fall back to a type description for non-text messages
+        const queryText = text || describeMessageType(msg);
+        let queryForPrompt = queryText;
         if (isMissed) {
             const msgTime = new Date(msg.date * 1000);
             const ago = humanTimeAgo(msgTime);
-            queryForPrompt = `[This message was sent ${ago} while you were offline. Acknowledge that you were away and respond helpfully.]\n\n${text}`;
+            queryForPrompt = `[This message was sent ${ago} while you were offline. Acknowledge that you were away and respond helpfully.]\n\n${queryText}`;
         }
 
         const systemPrompt = await agent.buildSystemPrompt(queryForPrompt, ctx);
-        agent.saveToMemory('user', text, ctx);
+        agent.saveToMemory('user', queryText, ctx);
 
         // Refresh typing every ~4 seconds during generation
         const typingInterval = setInterval(() => sendTyping(token, chatId), 4000);
 
-        const { model: tgModel, tier: tgTier, complexity: tgComplexity } = agent.getModelForChat(text);
+        const { model: tgModel, tier: tgTier, complexity: tgComplexity } = agent.getModelForChat(queryText);
 
         // Build reasoning context for multi-phase reasoning
         const reasoningCtx = createReasoningContext(
-            text,
+            queryText,
             tgComplexity,
             tgTier as ModelTier,
             systemPrompt,

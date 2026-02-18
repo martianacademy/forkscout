@@ -7,7 +7,7 @@
     "maxTokens": 2000,
     "router": {
         "fast": {
-            "model": "x-ai/grok-4.1-fast",
+            "model": "google/gemini-2.5-flash",
             "provider": "openrouter"
         },
         "balanced": {
@@ -15,7 +15,7 @@
             "provider": "openrouter"
         },
         "powerful": {
-            "model": "anthropic/claude-sonnet-4.5",
+            "model": "minimax/minimax-m2.5",
             "provider": "openrouter"
         }
     },

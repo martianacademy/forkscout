@@ -9,11 +9,19 @@ interface Task {
   timestamp: string;
 }
 
-const archetypesPath = path.join(__dirname, 'archetypes.json');
-const archetypesData: {archetypes: Archetype[]} = JSON.parse(fs.readFileSync(archetypesPath, 'utf8'));
-const archetypes = archetypesData.archetypes.find(a => a.id === task.archetype_id);
+interface Archetype {
+  id: string;
+  verify: string;
+}
+
+interface ArchetypesData {
+  archetypes: Archetype[];
+}
 
 const tasksDir = __dirname;
+const archetypesPath = path.join(__dirname, 'archetypes.json');
+const archetypesData: ArchetypesData = JSON.parse(fs.readFileSync(archetypesPath, 'utf8'));
+
 const solveFiles = fs.readdirSync(tasksDir).filter(f => f.startsWith('solve_') && f.endsWith('.json')).sort().slice(-1);
 
 if (solveFiles.length === 0) {
@@ -32,7 +40,6 @@ if (!archetype) {
   process.exit(1);
 }
 
-// Eval verify expression (secure context)
 const verifyFn = new Function('agent_answer', 'params', `return ${archetype.verify};`);
 const passed = verifyFn(solveData.agent_answer, task.params);
 
@@ -41,7 +48,8 @@ fs.writeFileSync(reportFile, JSON.stringify({
   task_id: solveData.task_id,
   passed,
   agent_answer: solveData.agent_answer,
-  params: task.params
+  params: task.params,
+  prompt: task.prompt
 }, null, 2));
 
 console.log(JSON.stringify({
