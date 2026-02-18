@@ -51,23 +51,21 @@ services:
             start_period: 15s
             retries: 3
 
-    # Memory MCP Server — standalone shared memory for external AI clients
+    # Memory MCP Server — lightweight standalone container (~30 MB)
     memory:
-        image: ghcr.io/martianacademy/forkscout:latest
-        build: .
+        build: ./memory-server
         container_name: forkscout-memory
         restart: unless-stopped
-        command: ['npx', 'tsx', 'src/serve-memory.ts']
         ports:
             - '${MEMORY_PORT:-3211}:3211'
         environment:
             - MEMORY_PORT=3211
-            - MEMORY_STORAGE=/app/.forkscout
+            - MEMORY_STORAGE=/data
         volumes:
-            # Share the same data volume as the agent
-            - app-data:/app
+            # Share memory.json with the agent via a named volume
+            - memory-data:/data
         healthcheck:
-            test: ['CMD', 'curl', '-sf', 'http://localhost:3211/health']
+            test: ['CMD', 'wget', '-qO-', 'http://localhost:3211/health']
             interval: 15s
             timeout: 5s
             start_period: 10s
@@ -76,3 +74,4 @@ services:
 volumes:
     app-data:
     searxng-data:
+    memory-data:
