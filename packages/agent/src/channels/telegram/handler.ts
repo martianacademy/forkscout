@@ -158,6 +158,10 @@ export async function handleTelegramUpdate(
             agent.getRouter(),
         );
 
+        // Track early text sent during generation so we don't double-send
+        let earlyTextSent = '';
+        let stepCounter = 0;
+
         const { text: responseText, usage } = await generateTextWithRetry({
             model: tgModel,
             system: systemPrompt,
@@ -179,7 +183,23 @@ export async function handleTelegramUpdate(
             tools: agent.getToolsForContext(ctx),
             stopWhen: stepCountIs(20),
             prepareStep: createPrepareStep(reasoningCtx),
-            onStepFinish: ({ toolCalls }) => {
+            onStepFinish: ({ text: stepText, toolCalls }) => {
+                const currentStep = stepCounter++;
+
+                // Send acknowledgment/plan text immediately from early text-only steps
+                // (step 0 is the PLAN/ACKNOWLEDGE phase when toolChoice='none')
+                if (
+                    stepText?.trim() &&
+                    (!toolCalls || toolCalls.length === 0) &&
+                    currentStep <= 1 &&
+                    !earlyTextSent
+                ) {
+                    earlyTextSent = stepText.trim();
+                    sendMessage(token, chatId, earlyTextSent).catch(() => { });
+                    console.log(`[Telegram/Agent → early]: ${earlyTextSent.slice(0, 150)}`);
+                }
+
+                // Send tool call labels
                 if (toolCalls?.length) {
                     console.log(
                         `[Telegram/Agent]: ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`,
@@ -228,10 +248,24 @@ export async function handleTelegramUpdate(
         history.push(asstMsg);
         deps.trimHistory(chatId);
 
-        // Send response
+        // Send response — skip text that was already sent as early acknowledgment
         if (responseText.trim()) {
-            await sendMessage(token, chatId, responseText);
-            console.log(`[Telegram/Agent → ${who}]: ${responseText.slice(0, 200)}${responseText.length > 200 ? '…' : ''}`);
+            let finalText = responseText.trim();
+            // If the response starts with the early text, strip it to avoid double-sending
+            if (earlyTextSent && finalText.startsWith(earlyTextSent)) {
+                finalText = finalText.slice(earlyTextSent.length).trim();
+            }
+            // Also handle the case where final response IS the early text (simple answers)
+            if (finalText && finalText !== earlyTextSent) {
+                await sendMessage(token, chatId, finalText);
+                console.log(`[Telegram/Agent → ${who}]: ${finalText.slice(0, 200)}${finalText.length > 200 ? '…' : ''}`);
+            } else if (!earlyTextSent) {
+                // Nothing was sent at all — send the full response
+                await sendMessage(token, chatId, responseText);
+                console.log(`[Telegram/Agent → ${who}]: ${responseText.slice(0, 200)}${responseText.length > 200 ? '…' : ''}`);
+            } else {
+                console.log(`[Telegram/Agent → ${who}]: (response already sent as early acknowledgment)`);
+            }
         } else {
             console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
         }

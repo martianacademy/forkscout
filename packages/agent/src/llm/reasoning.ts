@@ -80,6 +80,15 @@ Output your plan as a brief numbered list, then proceed to execute it.
 Do NOT use any tools in this response — just plan.
 ━━━━━━━━━━━━━━━━━━━━━━━━`;
 
+const ACKNOWLEDGE_INJECTION = `
+
+━━━━ ACKNOWLEDGE FIRST ━━━━
+Before using any tools, briefly acknowledge the user's request.
+Tell them what you understood and what you're about to do, in 1-2 natural sentences.
+Keep it short and conversational — no bullet lists, no formality.
+Do NOT use any tools in this response — just acknowledge.
+━━━━━━━━━━━━━━━━━━━━━━━━`;
+
 // ── Reflection Prompt ──────────────────────────────────
 
 const REFLECTION_INJECTION = `
@@ -164,14 +173,19 @@ export function createPrepareStep(context: ReasoningContext) {
             }
         }
 
-        // ── Phase 0: PLAN (step 0, complex tasks only) ──
-        if (stepNumber === 0 && context.complexity.complexity === 'complex') {
+        // ── Phase 0: ACKNOWLEDGE / PLAN (step 0, moderate+ tasks) ──
+        if (stepNumber === 0 && context.complexity.complexity !== 'simple') {
             context.phase = 'plan';
             const modelInfo = context.router.getModelByTier(context.tier);
             const providerOpts = getThinkingOptions(context.tier, context.complexity, modelInfo.modelId);
 
+            // Complex: detailed planning. Moderate: quick acknowledgment.
+            const injection = context.complexity.complexity === 'complex'
+                ? PLANNING_INJECTION
+                : ACKNOWLEDGE_INJECTION;
+
             return {
-                system: context.baseSystemPrompt + PLANNING_INJECTION,
+                system: context.baseSystemPrompt + injection,
                 toolChoice: 'none' as const,
                 ...(providerOpts ? { providerOptions: providerOpts } : {}),
             };
