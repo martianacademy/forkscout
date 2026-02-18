@@ -2,26 +2,18 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Copy package manifests first (cache layer)
 COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install --frozen-lockfile
 
-# Install deps — production only
-RUN pnpm install --frozen-lockfile --prod=false
-
-# Copy source
 COPY tsconfig.json ./
 COPY src/ ./src/
-
-# Build TypeScript
 RUN pnpm build
 
-# Prune dev deps
-RUN pnpm prune --prod
+# Remove everything except production output
+RUN pnpm prune --prod && rm -rf src tsconfig.json
 
-# ── Runtime ───────────────────────────────────
 ENV NODE_ENV=production
 ENV MEMORY_PORT=3211
 ENV MEMORY_HOST=0.0.0.0
