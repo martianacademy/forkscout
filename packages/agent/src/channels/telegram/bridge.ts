@@ -172,16 +172,30 @@ export class TelegramBridge {
     // ── Interrupted chat resume ──────────────────────
 
     /**
-     * After startup, detect conversations where the last message is role='user'
-     * with no assistant reply (= the agent was killed mid-generation).
-     * Pop the orphan, notify the user, and re-run through the normal handler.
+     * After startup, detect conversations interrupted by a restart.
+     * Two cases:
+     *   1. Last message is role='user' — agent hadn't started any tool calls yet
+     *   2. History contains checkpoint messages — agent was mid-task with progress
+     * In both cases: pop the orphan user message, reconstruct the update,
+     * and re-run through the handler (with resume context if checkpoints exist).
      */
     private async resumeInterruptedChats(): Promise<void> {
-        const interrupted: number[] = [];
+        const interrupted: Array<{ chatId: number; hasCheckpoints: boolean }> = [];
 
         for (const [chatId, history] of this.chatHistories) {
-            if (history.length > 0 && history[history.length - 1].role === 'user') {
-                interrupted.push(chatId);
+            if (history.length === 0) continue;
+
+            const lastMsg = history[history.length - 1];
+
+            // Case 1: Last message is user (no steps completed before restart)
+            if (lastMsg.role === 'user') {
+                interrupted.push({ chatId, hasCheckpoints: false });
+                continue;
+            }
+
+            // Case 2: Has checkpoint messages (agent was mid-task with progress)
+            if (history.some(m => m.id.startsWith('checkpoint-'))) {
+                interrupted.push({ chatId, hasCheckpoints: true });
             }
         }
 
@@ -189,12 +203,47 @@ export class TelegramBridge {
 
         console.log(`[Telegram]: Found ${interrupted.length} interrupted conversation(s) — resuming…`);
 
-        for (const chatId of interrupted) {
+        for (const { chatId, hasCheckpoints } of interrupted) {
             const history = this.chatHistories.get(chatId)!;
-            const orphan = history[history.length - 1];
+
+            // Build resume context from checkpoints if the agent had made progress
+            let resumeContext: string | undefined;
+            if (hasCheckpoints) {
+                const checkpoints = history.filter(m => m.id.startsWith('checkpoint-'));
+                const summaries = checkpoints.map(cp => {
+                    const text = (cp.parts?.[0] as any)?.text || '';
+                    return text;
+                }).join('\n\n');
+
+                resumeContext = [
+                    '⚠️ CONTINUATION AFTER RESTART:',
+                    'You were previously working on this task but the process was restarted',
+                    '(possibly because your own code changes triggered a rebuild).',
+                    'Here are the steps you already completed before the restart:',
+                    '',
+                    summaries,
+                    '',
+                    'IMPORTANT: Continue from where you left off. Do NOT repeat steps that already succeeded.',
+                    'If a step partially failed or was interrupted, you may retry it.',
+                ].join('\n');
+
+                // Remove checkpoints from history so the user message is last
+                for (let i = history.length - 1; i >= 0; i--) {
+                    if (history[i].id.startsWith('checkpoint-')) {
+                        history.splice(i, 1);
+                    }
+                }
+            }
+
+            // The last message should now be the user message
+            const lastMsg = history[history.length - 1];
+            if (!lastMsg || lastMsg.role !== 'user') {
+                console.log(`[Telegram]: Can't resume chat ${chatId} — unexpected history state`);
+                continue;
+            }
 
             // Extract the raw Telegram message JSON from the stored user parts
-            const textPart = (orphan.parts || []).find(
+            const textPart = (lastMsg.parts || []).find(
                 (p: any) => p.type === 'text' && typeof p.text === 'string' && p.text.startsWith('[Telegram Message]'),
             ) as { type: string; text: string } | undefined;
 
@@ -211,16 +260,19 @@ export class TelegramBridge {
                 history.pop();
 
                 // Notify user we're resuming
-                await sendMessage(this.token, chatId, '🔄 I was interrupted mid-task — resuming where I left off…');
+                const resumeMsg = hasCheckpoints
+                    ? '🔄 I was interrupted mid-task — resuming where I left off…'
+                    : '🔄 I was interrupted — picking up your message…';
+                await sendMessage(this.token, chatId, resumeMsg);
 
-                // Re-process through the normal handler
+                // Re-process through the normal handler (with resume context if available)
                 const syntheticUpdate: TelegramUpdate = {
                     update_id: 0,
                     message: originalMsg,
                 };
 
-                await handleTelegramUpdate(syntheticUpdate, false, this.getHandlerDeps());
-                console.log(`[Telegram]: Successfully resumed chat ${chatId}`);
+                await handleTelegramUpdate(syntheticUpdate, false, this.getHandlerDeps(), resumeContext);
+                console.log(`[Telegram]: Successfully resumed chat ${chatId}${hasCheckpoints ? ' (with progress context)' : ''}`);
             } catch (err) {
                 console.error(`[Telegram]: Failed to resume chat ${chatId}:`, err instanceof Error ? err.message : err);
                 await sendMessage(this.token, chatId, "I was interrupted and couldn't resume. Could you send your message again?").catch(() => { });

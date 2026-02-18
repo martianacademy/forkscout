@@ -49,11 +49,13 @@ function describeMessageType(msg: { sticker?: any; document?: any; audio?: any; 
  * @param update   The Telegram update
  * @param isMissed True if this message was received while the bot was offline
  * @param deps     Injected dependencies (agent, api, state, history helpers)
+ * @param resumeContext  If set, this is a resumed conversation — inject as context so the model knows what it already did
  */
 export async function handleTelegramUpdate(
     update: TelegramUpdate,
     isMissed: boolean,
     deps: TelegramHandlerDeps,
+    resumeContext?: string,
 ): Promise<void> {
     const { agent, token, state } = deps;
     const msg = update.message;
@@ -167,7 +169,13 @@ export async function handleTelegramUpdate(
             queryForPrompt = `[This message was sent ${ago} while you were offline. Acknowledge that you were away and respond helpfully.]\n\n${queryText}`;
         }
 
-        const systemPrompt = await agent.buildSystemPrompt(queryForPrompt, ctx);
+        let systemPrompt = await agent.buildSystemPrompt(queryForPrompt, ctx);
+
+        // If resuming after a restart, inject context about already-completed steps
+        if (resumeContext) {
+            systemPrompt += '\n\n' + resumeContext;
+        }
+
         agent.saveToMemory('user', queryText, ctx);
 
         // Refresh typing every ~4 seconds during generation
@@ -209,7 +217,7 @@ export async function handleTelegramUpdate(
             tools: agent.getToolsForContext(ctx),
             stopWhen: stepCountIs(20),
             prepareStep: createPrepareStep(reasoningCtx),
-            onStepFinish: ({ text: stepText, toolCalls }) => {
+            onStepFinish: async ({ text: stepText, toolCalls, toolResults }) => {
                 const currentStep = stepCounter++;
 
                 // Send acknowledgment/plan text immediately from early steps.
@@ -238,10 +246,40 @@ export async function handleTelegramUpdate(
                     sendMessage(token, chatId, unique.join('\n')).catch(() => { });
                     sendTyping(token, chatId);
                 }
+
+                // Save step checkpoint for mid-task crash recovery.
+                // If the process restarts (e.g. agent edited its own code → rebuild),
+                // these checkpoints let the model know what it already accomplished.
+                if (toolCalls?.length) {
+                    const stepSummaries = toolCalls.map((tc: any, i: number) => {
+                        const tr = (toolResults as any)?.[i];
+                        const argsStr = JSON.stringify(tc.input || {}).slice(0, 300);
+                        const outputStr = tr?.output != null
+                            ? String(typeof tr.output === 'object' ? JSON.stringify(tr.output) : tr.output).slice(0, 500)
+                            : '(no result)';
+                        return `  Tool: ${tc.toolName}\n  Args: ${argsStr}\n  Result: ${outputStr}`;
+                    }).join('\n---\n');
+
+                    const checkpoint: UIMessage = {
+                        id: `checkpoint-${msg.message_id}-step${currentStep}`,
+                        role: 'assistant' as const,
+                        parts: [{ type: 'text' as const, text: `[STEP_CHECKPOINT step=${currentStep}]\n${stepSummaries}` }],
+                    };
+                    history.push(checkpoint);
+                    await deps.flushHistory();
+                }
             },
         });
 
         clearInterval(typingInterval);
+
+        // Remove step checkpoints from history — they were only for crash recovery.
+        // On a clean completion, the final assistant message replaces them.
+        for (let i = history.length - 1; i >= 0; i--) {
+            if (history[i].id.startsWith('checkpoint-')) {
+                history.splice(i, 1);
+            }
+        }
 
         // Log reasoning summary
         const tgSummary = getReasoningSummary(reasoningCtx);
