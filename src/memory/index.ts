@@ -32,6 +32,9 @@ export class MemoryManager {
     private sessionId = `session_${Date.now()}`;
     private recentMessages: RecentMsg[] = [];
     private pendingUser: string | null = null;
+    private selfContextCache: string | null = null;
+    private selfContextLastFetch = 0;
+    private static readonly SELF_CACHE_TTL_MS = 60_000; // refresh self-entity every 60s
 
     constructor(config: MemoryConfig) {
         this.config = { recentWindowSize: 6, contextBudget: 4000, ...config };
@@ -46,7 +49,26 @@ export class MemoryManager {
 
     // ── Lifecycle ────────────────────────────────────
 
-    async init(): Promise<void> { await this.store.init(); }
+    async init(): Promise<void> {
+        await this.store.init();
+
+        // Restore recent conversation history from MCP so we have context after restart
+        try {
+            const restored = await this.store.getRecentExchangesAsync(this.config.recentWindowSize ?? 6);
+            if (restored.length > 0) {
+                for (const ex of restored) {
+                    if (ex.user) this.recentMessages.push({ role: 'user', content: ex.user, timestamp: new Date(ex.timestamp || Date.now()) });
+                    if (ex.assistant) this.recentMessages.push({ role: 'assistant', content: ex.assistant, timestamp: new Date(ex.timestamp || Date.now()) });
+                }
+                console.log(`🧠 Restored ${restored.length} exchange(s) from previous sessions`);
+            }
+        } catch {
+            /* MCP unreachable or no history — start fresh */
+        }
+
+        // Pre-fetch self-entity so it's warm for first prompt
+        try { await this.refreshSelfContext(); } catch { /* non-critical */ }
+    }
 
     async flush(): Promise<void> {
         if (this.pendingUser) {
@@ -142,8 +164,33 @@ export class MemoryManager {
     // ── Self-identity ────────────────────────────────
 
     getSelfContext(): string {
-        // Remote mode — sync access not available. MCP tools handle self-entity.
-        return '';
+        // Return cached self-context (refreshed async by getSelfContextAsync)
+        return this.selfContextCache || '';
+    }
+
+    /** Fetch self-entity from MCP and format as context string. Cached with TTL. */
+    async getSelfContextAsync(): Promise<string> {
+        const now = Date.now();
+        if (this.selfContextCache !== null && now - this.selfContextLastFetch < MemoryManager.SELF_CACHE_TTL_MS) {
+            return this.selfContextCache;
+        }
+        return this.refreshSelfContext();
+    }
+
+    private async refreshSelfContext(): Promise<string> {
+        try {
+            const selfEntity = await this.store.getSelfEntityAsync();
+            if (selfEntity && selfEntity.facts && selfEntity.facts.length > 0) {
+                this.selfContextCache = selfEntity.facts.map(f => `• ${f}`).join('\n');
+            } else {
+                this.selfContextCache = '';
+            }
+        } catch {
+            // Keep existing cache on failure
+            if (this.selfContextCache === null) this.selfContextCache = '';
+        }
+        this.selfContextLastFetch = Date.now();
+        return this.selfContextCache;
     }
 
     recordSelfObservation(content: string, _category?: string): void { this.store.addSelfObservation(content); }

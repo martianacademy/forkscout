@@ -5,6 +5,44 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { getConfig } from '../config';
 
+// ── Reusable Browser Pool ──────────────────────────────
+
+let _browser: any = null;
+let _browserCloseTimer: ReturnType<typeof setTimeout> | null = null;
+const BROWSER_IDLE_MS = 60_000; // close browser after 60s of inactivity
+
+/** Get a shared Chromium browser instance (lazy-launched, auto-closed after idle) */
+async function getBrowser(): Promise<any> {
+    if (_browserCloseTimer) {
+        clearTimeout(_browserCloseTimer);
+        _browserCloseTimer = null;
+    }
+
+    if (!_browser || !_browser.isConnected()) {
+        const { chromium } = await import('playwright');
+        _browser = await chromium.launch({ headless: true });
+        _browser.on('disconnected', () => { _browser = null; });
+    }
+
+    // Schedule auto-close after idle period
+    _browserCloseTimer = setTimeout(async () => {
+        if (_browser) {
+            try { await _browser.close(); } catch { /* already closed */ }
+            _browser = null;
+        }
+        _browserCloseTimer = null;
+    }, BROWSER_IDLE_MS);
+
+    return _browser;
+}
+
+/** Create a fresh page in the shared browser. Caller must close the page when done. */
+async function createPage(viewport?: { width: number; height: number }): Promise<any> {
+    const browser = await getBrowser();
+    const context = await browser.newContext(viewport ? { viewport } : {});
+    return context.newPage();
+}
+
 export const webSearch = tool({
     description: 'Search the web for information. Uses SearXNG if available, otherwise falls back to scraping a search engine with Chromium.',
     inputSchema: z.object({
@@ -37,11 +75,8 @@ export const webSearch = tool({
 
         // Fallback: Chromium scraping
         console.log('    ⚡ SearXNG unavailable, falling back to Chromium...');
-        const { chromium } = await import('playwright');
-        const browser = await chromium.launch({ headless: true });
+        const page = await createPage();
         try {
-            const page = await browser.newPage();
-
             const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
             await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
@@ -66,7 +101,7 @@ export const webSearch = tool({
 
             return results.length > 0 ? results : [{ title: 'No results', url: '', snippet: `No results found for "${query}"` }];
         } finally {
-            await browser.close();
+            await page.context().close();
         }
     },
 });
@@ -78,11 +113,8 @@ export const browseWeb = tool({
         selector: z.string().describe('Optional CSS selector to extract specific content').optional(),
     }),
     execute: async ({ url, selector }) => {
-        const { chromium } = await import('playwright');
-        const browser = await chromium.launch({ headless: true });
+        const page = await createPage();
         try {
-            const page = await browser.newPage();
-
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
             let content: string;
@@ -104,7 +136,7 @@ export const browseWeb = tool({
 
             return content;
         } finally {
-            await browser.close();
+            await page.context().close();
         }
     },
 });
@@ -117,15 +149,13 @@ export const browserScreenshot = tool({
         viewport: z.object({ width: z.number(), height: z.number() }).describe('Viewport size').optional(),
     }),
     execute: async ({ url, outputPath, viewport }) => {
-        const { chromium } = await import('playwright');
-        const browser = await chromium.launch({ headless: true });
+        const page = await createPage(viewport || { width: 1280, height: 720 });
         try {
-            const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 720 } });
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
             await page.screenshot({ path: outputPath });
             return `Screenshot saved to ${outputPath}`;
         } finally {
-            await browser.close();
+            await page.context().close();
         }
     },
 });

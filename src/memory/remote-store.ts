@@ -32,6 +32,9 @@ export class RemoteMemoryStore {
     private _entityCount = 0;
     private _relationCount = 0;
     private _exchangeCount = 0;
+    private _healthy = true;
+    private static readonly RETRY_ATTEMPTS = 2;
+    private static readonly RETRY_DELAY_MS = 500;
     readonly tasks: RemoteTaskManager;
 
     constructor(mcpUrl: string) {
@@ -43,28 +46,46 @@ export class RemoteMemoryStore {
     // ── MCP RPC helper ───────────────────────────────
 
     async callTool(name: string, args: Record<string, any> = {}): Promise<string> {
-        const res = await fetch(this.mcpUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json, text/event-stream',
-            },
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: ++this.requestId,
-                method: 'tools/call',
-                params: { name, arguments: args },
-            }),
-        });
-        const text = await res.text();
-        // SSE format: "event: message\ndata: {json}\n\n"
-        const match = text.match(/^data: (.+)$/m);
-        if (!match) throw new Error(`MCP call failed for ${name}: ${text.slice(0, 200)}`);
-        const parsed = JSON.parse(match[1]);
-        if (parsed.error) throw new Error(parsed.error.message);
-        const content = parsed.result?.content;
-        if (Array.isArray(content) && content.length > 0) return content[0].text ?? '';
-        return '';
+        let lastError: Error | null = null;
+
+        for (let attempt = 0; attempt <= RemoteMemoryStore.RETRY_ATTEMPTS; attempt++) {
+            try {
+                const res = await fetch(this.mcpUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json, text/event-stream',
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: ++this.requestId,
+                        method: 'tools/call',
+                        params: { name, arguments: args },
+                    }),
+                    signal: AbortSignal.timeout(10_000),
+                });
+                const text = await res.text();
+                // SSE format: "event: message\ndata: {json}\n\n"
+                const match = text.match(/^data: (.+)$/m);
+                if (!match) throw new Error(`MCP call failed for ${name}: ${text.slice(0, 200)}`);
+                const parsed = JSON.parse(match[1]);
+                if (parsed.error) throw new Error(parsed.error.message);
+                const content = parsed.result?.content;
+                this._healthy = true;
+                if (Array.isArray(content) && content.length > 0) return content[0].text ?? '';
+                return '';
+            } catch (err) {
+                lastError = err instanceof Error ? err : new Error(String(err));
+                if (attempt < RemoteMemoryStore.RETRY_ATTEMPTS) {
+                    const delay = RemoteMemoryStore.RETRY_DELAY_MS * (attempt + 1);
+                    await new Promise(r => setTimeout(r, delay));
+                }
+            }
+        }
+
+        this._healthy = false;
+        console.error(`[Memory]: MCP call '${name}' failed after ${RemoteMemoryStore.RETRY_ATTEMPTS + 1} attempts: ${lastError?.message}`);
+        throw lastError!;
     }
 
     async callToolJson<T>(name: string, args: Record<string, any> = {}): Promise<T> {
@@ -85,6 +106,9 @@ export class RemoteMemoryStore {
     async clear(): Promise<void> {
         await this.callTool('clear_all', { reason: 'Agent requested clear' });
     }
+
+    /** Whether the MCP server is reachable */
+    get isHealthy(): boolean { return this._healthy; }
 
     private async refreshStats(): Promise<void> {
         const text = await this.callTool('memory_stats');
@@ -148,6 +172,22 @@ export class RemoteMemoryStore {
     }
 
     getExchanges(): Exchange[] { return []; }
+
+    /** Fetch recent exchanges from MCP for conversation restoration */
+    async getRecentExchangesAsync(limit = 6): Promise<Array<{ user: string; assistant: string; timestamp?: number }>> {
+        try {
+            const text = await this.callTool('search_exchanges', { query: '*', limit });
+            if (text.includes('No ') || !text.trim()) return [];
+            // Try JSON parse first (Rust server returns JSON)
+            try {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed)) return parsed;
+            } catch {
+                // TS server returns formatted text — parse it
+            }
+            return [];
+        } catch { return []; }
+    }
 
     // ── Search ───────────────────────────────────────
 

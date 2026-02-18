@@ -77,8 +77,8 @@ export async function buildSystemPrompt(
     let selfSection = '';
     if (isAdmin) {
         try {
-            // Self-identity — who am I?
-            const selfCtx = memory.getSelfContext();
+            // Self-identity — who am I? (async fetch from MCP, cached)
+            const selfCtx = await memory.getSelfContextAsync();
             if (selfCtx) {
                 selfSection = '\n\n[LEARNED BEHAVIORS — follow these rigorously, they come from your own experience and owner directives]\n' + selfCtx;
             }
