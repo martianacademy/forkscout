@@ -8,10 +8,9 @@ From the project root, run:
 ./chat.sh
 ```
 
-Or cd to the agent directory and run:
+Or run directly:
 
 ```bash
-cd packages/agent
 pnpm start
 ```
 
@@ -104,20 +103,20 @@ Type `exit` or press Ctrl+C to quit.
 
 1. **Check Ollama is running:**
 
-   ```bash
-   ollama list
-   ```
+    ```bash
+    ollama list
+    ```
 
 2. **Check Ollama API:**
 
-   ```bash
-   curl http://localhost:11434/api/tags
-   ```
+    ```bash
+    curl http://localhost:11434/api/tags
+    ```
 
 3. **Start Ollama if needed:**
-   ```bash
-   ollama serve
-   ```
+    ```bash
+    ollama serve
+    ```
 
 ### "Model not found"
 
@@ -142,7 +141,6 @@ LLM_BASE_URL=http://localhost:YOUR_PORT/v1
 For development with auto-restart on file changes:
 
 ```bash
-cd packages/agent
 pnpm dev
 ```
 
@@ -151,18 +149,18 @@ pnpm dev
 You can also use the agent in your own code:
 
 ```typescript
-import { createAgent } from "@forkscout/agent";
+import { createAgent } from '@forkscout/agent';
 
 const agent = await createAgent({
-  llm: {
-    provider: "ollama",
-    model: "deepseek-r1:1.5b",
-    baseURL: "http://localhost:11434/v1"
-  }
+    llm: {
+        provider: 'ollama',
+        model: 'deepseek-r1:1.5b',
+        baseURL: 'http://localhost:11434/v1',
+    },
 });
 
 // Single message
-const response = await agent.processMessage("Hello!");
+const response = await agent.processMessage('Hello!');
 console.log(response);
 
 // Interactive mode
@@ -181,4 +179,4 @@ LLM_BASE_URL=http://host.docker.internal:11434/v1
 
 - Check [QUICKSTART.md](QUICKSTART.md) for setup details
 - Read [PROJECT_STATUS.md](PROJECT_STATUS.md) for feature overview
-- See [packages/agent/README.md](packages/agent/README.md) for API docs
+- See [README.md](README.md) for API docs

@@ -8,29 +8,23 @@ Forkscout is now set up as a modern AI agent system with the following structure
 
 ```
 forkscout/
-├── packages/
-│   ├── agent/              # ✅ Core agent engine (TypeScript, compiled)
-│   │   ├── src/
-│   │   │   ├── agent.ts          # Main agent loop
-│   │   │   ├── cli.ts            # Interactive CLI
-│   │   │   ├── index.ts          # Public API
-│   │   │   ├── llm/
-│   │   │   │   └── client.ts     # LLM integration (Vercel AI SDK)
-│   │   │   ├── memory/
-│   │   │   │   └── manager.ts    # Memory & RAG system
-│   │   │   └── tools/
-│   │   │       ├── registry.ts   # Tool management
-│   │   │       └── default-tools.ts  # Built-in tools
-│   │   ├── examples/
-│   │   │   ├── basic.ts          # Basic usage example
-│   │   │   └── custom-tools.ts   # Custom tool example
-│   │   ├── dist/                 # ✅ Compiled JavaScript
-│   │   └── README.md
-│   │
-│
-├── package.json            # Root workspace config
-├── pnpm-workspace.yaml     # Workspace definition
-├── tsconfig.base.json      # Shared TypeScript config
+├── src/                    # ✅ Core agent engine (TypeScript, compiled)
+│   ├── agent.ts            # Main agent loop
+│   ├── cli.ts              # Interactive CLI
+│   ├── index.ts            # Public API
+│   ├── llm/
+│   │   └── client.ts       # LLM integration (Vercel AI SDK)
+│   ├── memory/
+│   │   └── manager.ts      # Memory & RAG system
+│   └── tools/
+│       ├── registry.ts     # Tool management
+│       └── default-tools.ts  # Built-in tools
+├── examples/
+│   ├── basic.ts            # Basic usage example
+│   └── custom-tools.ts     # Custom tool example
+├── dist/                   # ✅ Compiled JavaScript
+├── package.json            # Project config
+├── tsconfig.json           # TypeScript config
 ├── .env.example            # Environment template
 ├── .gitignore
 ├── README.md               # Main documentation
@@ -73,7 +67,6 @@ forkscout/
 ### 1. Run the Agent (CLI)
 
 ```bash
-cd packages/agent
 pnpm dev
 ```
 
@@ -83,16 +76,15 @@ This starts an interactive CLI where you can chat with the agent.
 
 ```bash
 # Basic usage
-tsx packages/agent/examples/basic.ts
+tsx examples/basic.ts
 
 # Custom tools
-tsx packages/agent/examples/custom-tools.ts
+tsx examples/custom-tools.ts
 ```
 
 ### 3. Run Agent Server
 
 ```bash
-cd packages/agent
 pnpm serve
 ```
 
@@ -101,17 +93,17 @@ API at http://localhost:3210. Telegram bridge auto-starts if `TELEGRAM_BOT_TOKEN
 ### 4. Use Programmatically
 
 ```typescript
-import { createAgent } from "@forkscout/agent";
+import { createAgent } from '@forkscout/agent';
 
 const agent = await createAgent({
-  llm: {
-    provider: "ollama",
-    model: "qwen2.5-coder:32b",
-    baseURL: "http://localhost:11434/v1"
-  }
+    llm: {
+        provider: 'ollama',
+        model: 'qwen2.5-coder:32b',
+        baseURL: 'http://localhost:11434/v1',
+    },
 });
 
-await agent.processMessage("Search for crypto news");
+await agent.processMessage('Search for crypto news');
 ```
 
 ## Configuration
@@ -170,8 +162,6 @@ LLM_API_KEY=your-key-here
 Since you have Ollama running on your host at port 11434, you can test right away:
 
 ```bash
-cd packages/agent
-
 # Interactive mode
 pnpm dev
 # Try: "Hello! What can you do?"
@@ -185,17 +175,17 @@ To use in your OpenClaw Docker environment, mount the forkscout directory:
 ```yaml
 # docker-compose.yml
 volumes:
-  - ./forkscout:/workspace/forkscout
+    - ./forkscout:/workspace/forkscout
 
 environment:
-  - LLM_BASE_URL=http://host.docker.internal:11434/v1
+    - LLM_BASE_URL=http://host.docker.internal:11434/v1
 ```
 
 ## Documentation
 
 - [README.md](README.md) - Main project documentation
 - [QUICKSTART.md](QUICKSTART.md) - Detailed setup guide
-- [packages/agent/README.md](packages/agent/README.md) - Agent API docs
+- [README.md](README.md) - Agent API docs
 
 ## Build Status
 

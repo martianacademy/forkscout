@@ -23,7 +23,7 @@ const entry = mode === 'cli' ? 'dist/cli.js' : 'dist/serve.js';
 // Read port from config (default 3210)
 let PORT = 3210;
 try {
-    const cfg = JSON.parse(readFileSync(resolve(ROOT, '..', '..', 'forkscout.config.json'), 'utf-8'));
+    const cfg = JSON.parse(readFileSync(resolve(ROOT, 'forkscout.config.json'), 'utf-8'));
     PORT = cfg?.agent?.port || 3210;
 } catch {
     /* use default */

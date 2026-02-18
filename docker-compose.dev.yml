@@ -5,9 +5,9 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 services:
-  agent:
-    volumes:
-      - ./packages/agent:/app/packages/agent
-      # Anonymous volume keeps Linux-compiled node_modules from the image,
-      # preventing macOS host node_modules from overriding them.
-      - /app/packages/agent/node_modules
+    agent:
+        volumes:
+            - .:/app
+            # Anonymous volume keeps Linux-compiled node_modules from the image,
+            # preventing macOS host node_modules from overriding them.
+            - /app/node_modules

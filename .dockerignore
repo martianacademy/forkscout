@@ -48,4 +48,3 @@ docker-compose.yml
 
 # Docs (not needed at runtime)
 *.md
-!packages/agent/package.json

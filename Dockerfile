@@ -15,9 +15,8 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
-# Copy workspace config first (better layer caching)
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages/agent/package.json ./packages/agent/package.json
+# Copy package files (better layer caching)
+COPY package.json pnpm-lock.yaml ./
 
 # Install all deps (including devDependencies for tsx)
 RUN pnpm install --frozen-lockfile
@@ -56,14 +55,12 @@ WORKDIR /app
 
 # Copy node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/agent/node_modules ./packages/agent/node_modules
 
 # Copy source code
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
-COPY packages/agent ./packages/agent
+COPY . .
 
 # Install Playwright Chromium browser
-RUN cd packages/agent && npx playwright install chromium
+RUN npx playwright install chromium
 
 # Default port
 EXPOSE 3210
@@ -73,5 +70,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -sf http://localhost:3210/api/status || exit 1
 
 # Run the agent server
-WORKDIR /app/packages/agent
 CMD ["npx", "tsx", "src/serve.ts"]

@@ -12,4 +12,4 @@ echo "💬 You can now chat with the agent!"
 echo "   Type 'exit' to quit"
 echo ""
 
-cd packages/agent && pnpm start
+pnpm start

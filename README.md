@@ -289,7 +289,6 @@ All non-secret settings (model, temperature, router tiers, budget) live in `fork
 ### Run the Agent
 
 ```bash
-cd packages/agent
 pnpm serve
 ```
 
@@ -325,33 +324,33 @@ Forkscout uses a **two-layer config system**:
 
 ```json
 {
-  "provider": "openrouter",
-  "model": "x-ai/grok-4.1-fast",
-  "temperature": 0.7,
-  "maxTokens": 2000,
-  "router": {
-    "fast": {
-      "model": "google/gemini-2.0-flash-001",
-      "provider": "openrouter"
+    "provider": "openrouter",
+    "model": "x-ai/grok-4.1-fast",
+    "temperature": 0.7,
+    "maxTokens": 2000,
+    "router": {
+        "fast": {
+            "model": "google/gemini-2.0-flash-001",
+            "provider": "openrouter"
+        },
+        "balanced": { "model": "x-ai/grok-4.1-fast", "provider": "openrouter" },
+        "powerful": {
+            "model": "anthropic/claude-sonnet-4.5",
+            "provider": "openrouter"
+        }
     },
-    "balanced": { "model": "x-ai/grok-4.1-fast", "provider": "openrouter" },
-    "powerful": {
-      "model": "anthropic/claude-sonnet-4.5",
-      "provider": "openrouter"
+    "budget": {
+        "dailyUSD": 5,
+        "monthlyUSD": 50,
+        "warningPct": 80
+    },
+    "agent": {
+        "maxIterations": 10,
+        "port": 3210
+    },
+    "searxng": {
+        "url": "http://localhost:8888"
     }
-  },
-  "budget": {
-    "dailyUSD": 5,
-    "monthlyUSD": 50,
-    "warningPct": 80
-  },
-  "agent": {
-    "maxIterations": 10,
-    "port": 3210
-  },
-  "searxng": {
-    "url": "http://localhost:8888"
-  }
 }
 ```
 
@@ -413,13 +412,13 @@ curl -X POST http://localhost:3210/api/config \
 
 ```json
 {
-  "messages": [
-    {
-      "id": "1",
-      "role": "user",
-      "parts": [{ "type": "text", "text": "Your message here" }]
-    }
-  ]
+    "messages": [
+        {
+            "id": "1",
+            "role": "user",
+            "parts": [{ "type": "text", "text": "Your message here" }]
+        }
+    ]
 }
 ```
 
@@ -678,8 +677,8 @@ All memory data is stored in `.forkscout/`:
 ### Admin Authentication (3 Layers)
 
 1. **Admin Secret** — set `ADMIN_SECRET` in `.env`. Authenticate via:
-   - Request body: `{ "adminSecret": "xxx" }`
-   - Header: `Authorization: Bearer xxx`
+    - Request body: `{ "adminSecret": "xxx" }`
+    - Header: `Authorization: Bearer xxx`
 
 2. **Channel Grants** — grant admin role to specific users on external channels. Persists across restarts.
 
@@ -697,7 +696,7 @@ All memory data is stored in `.forkscout/`:
 The agent autonomously refuses to delete:
 
 - `.forkscout/` — memory data
-- `packages/agent/src/` — own source code (use `safe_self_edit` instead)
+- `src/` — own source code (use `safe_self_edit` instead)
 - `.env` — secrets
 - `.git/` — git history
 
@@ -737,18 +736,18 @@ Via config file (`.forkscout/mcp.json`):
 
 ```json
 {
-  "servers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@context7/mcp@latest"],
-      "enabled": true
-    },
-    "my-remote-server": {
-      "url": "https://my-mcp-server.example.com/mcp",
-      "headers": { "Authorization": "Bearer my-token" },
-      "enabled": true
+    "servers": {
+        "context7": {
+            "command": "npx",
+            "args": ["-y", "@context7/mcp@latest"],
+            "enabled": true
+        },
+        "my-remote-server": {
+            "url": "https://my-mcp-server.example.com/mcp",
+            "headers": { "Authorization": "Bearer my-token" },
+            "enabled": true
+        }
     }
-  }
 }
 ```
 
@@ -815,52 +814,48 @@ forkscout/
 ├── .env.example              # Environment template (secrets only)
 ├── forkscout.config.json      # All non-secret settings (models, router, budget)
 ├── .gitignore
-├── package.json              # Workspace root
-├── pnpm-workspace.yaml       # pnpm workspace config
-├── tsconfig.base.json        # Shared TypeScript config
+├── package.json              # Project config
+├── tsconfig.json             # TypeScript config
 ├── README.md
 ├── QUICKSTART.md
 ├── PROJECT_STATUS.md
 │
-└── packages/agent/           # Agent package
-    ├── package.json
-    ├── tsconfig.json
-    └── src/
-        ├── serve.ts           # Entry point (starts server)
-        ├── server.ts          # HTTP API server
-        ├── agent.ts           # Agent core (tools, memory, prompts)
-        ├── config.ts          # Centralized config loader (forkscout.config.json + .env)
-        ├── telegram.ts        # Telegram bridge (long polling)
-        ├── channel-auth.ts    # Channel authorization store
-        ├── scheduler.ts       # Cron job scheduler
-        ├── survival.ts        # Survival monitor
-        ├── paths.ts           # Path resolution utilities
-        ├── cli.ts             # CLI interface
-        ├── index.ts           # Package exports
-        ├── llm/
-        │   ├── client.ts      # LLM client (provider-agnostic)
-        │   ├── router.ts      # Multi-model router (fast/balanced/powerful tiers)
-        │   ├── budget.ts      # Budget tracker (daily/monthly spending limits)
-        │   └── retry.ts       # Retry/failover with exponential backoff
-        ├── mcp/
-        │   ├── connector.ts   # MCP server connector (stdio + remote HTTP)
-        │   └── tools.ts       # MCP management tools
-        ├── memory/
-        │   ├── manager.ts     # Memory manager (orchestrates all layers)
-        │   ├── vector-store.ts# Vector store with embeddings
-        │   ├── knowledge-graph.ts # Knowledge graph with cognitive dynamics
-        │   ├── skills.ts      # Skill store (procedural memory)
-        │   ├── situation.ts   # Situation classifier
-        │   └── consolidator.ts# LLM-powered memory consolidation
-        ├── utils/
-        │   ├── shell.ts       # Cross-platform shell utilities
-        │   └── tokens.ts      # Token counting & budget utilities
-        └── tools/
-            ├── ai-tools.ts    # All AI SDK tool definitions
-            ├── default-tools.ts # File, shell, web, utility tools
-            ├── shell-tools.ts # Shell command tools
-            ├── self-edit-tools.ts # Self-evolution tools
-            └── registry.ts    # Tool registry types
+└── src/
+    ├── serve.ts               # Entry point (starts server)
+    ├── server.ts              # HTTP API server
+    ├── agent.ts               # Agent core (tools, memory, prompts)
+    ├── config.ts              # Centralized config loader (forkscout.config.json + .env)
+    ├── telegram.ts            # Telegram bridge (long polling)
+    ├── channel-auth.ts        # Channel authorization store
+    ├── scheduler.ts           # Cron job scheduler
+    ├── survival.ts            # Survival monitor
+    ├── paths.ts               # Path resolution utilities
+    ├── cli.ts                 # CLI interface
+    ├── index.ts               # Package exports
+    ├── llm/
+    │   ├── client.ts          # LLM client (provider-agnostic)
+    │   ├── router.ts          # Multi-model router (fast/balanced/powerful tiers)
+    │   ├── budget.ts          # Budget tracker (daily/monthly spending limits)
+    │   └── retry.ts           # Retry/failover with exponential backoff
+    ├── mcp/
+    │   ├── connector.ts       # MCP server connector (stdio + remote HTTP)
+    │   └── tools.ts           # MCP management tools
+    ├── memory/
+    │   ├── manager.ts         # Memory manager (orchestrates all layers)
+    │   ├── vector-store.ts    # Vector store with embeddings
+    │   ├── knowledge-graph.ts # Knowledge graph with cognitive dynamics
+    │   ├── skills.ts          # Skill store (procedural memory)
+    │   ├── situation.ts       # Situation classifier
+    │   └── consolidator.ts    # LLM-powered memory consolidation
+    ├── utils/
+    │   ├── shell.ts           # Cross-platform shell utilities
+    │   └── tokens.ts          # Token counting & budget utilities
+    └── tools/
+        ├── ai-tools.ts        # All AI SDK tool definitions
+        ├── default-tools.ts   # File, shell, web, utility tools
+        ├── shell-tools.ts     # Shell command tools
+        ├── self-edit-tools.ts # Self-evolution tools
+        └── registry.ts       # Tool registry types
 ```
 
 ### Runtime Data (`.forkscout/` — gitignored)

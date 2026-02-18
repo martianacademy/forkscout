@@ -24,7 +24,7 @@
  * @module plugins/loader
  */
 
-import { readdir, readFile, stat, mkdir } from 'fs/promises';
+import { readdir, readFile, mkdir } from 'fs/promises';
 import { resolve, join, extname } from 'path';
 import { pathToFileURL } from 'url';
 import { AGENT_ROOT } from '../paths';

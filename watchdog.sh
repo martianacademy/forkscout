@@ -164,7 +164,7 @@ while true; do
 
         if [[ $ROLLBACK_COUNT -gt $MAX_ROLLBACKS ]]; then
             err "Max rollbacks ($MAX_ROLLBACKS) exceeded. Giving up."
-            err "Manually fix the issue in packages/agent/src/ and restart."
+            err "Manually fix the issue in src/ and restart."
             exit 1
         fi
 

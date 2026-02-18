@@ -16,13 +16,13 @@ import { resolve } from 'path';
  */
 const IS_DIST = __dirname.includes('/dist');
 
-/** Absolute path to the agent package root (packages/agent) */
+/** Absolute path to the project root (same as agent root after monorepo flattening) */
 export const AGENT_ROOT = IS_DIST
-    ? resolve(__dirname, '..')   // dist/  → packages/agent
-    : resolve(__dirname, '..');  // src/   → packages/agent
+    ? resolve(__dirname, '..')   // dist/  → project root
+    : resolve(__dirname, '..');  // src/   → project root
 
-/** Absolute path to the monorepo root (contains pnpm-workspace.yaml, .git) */
-export const PROJECT_ROOT = resolve(AGENT_ROOT, '..', '..');
+/** Absolute path to the project root (same as AGENT_ROOT — kept for compatibility) */
+export const PROJECT_ROOT = AGENT_ROOT;
 
 /** Absolute path to the agent source directory (always src/, even when running from dist/) */
 export const AGENT_SRC = resolve(AGENT_ROOT, 'src');

@@ -12,35 +12,34 @@ Get Forkscout up and running in minutes!
 
 1. **Clone the repository**
 
-   ```bash
-   git clone https://github.com/yourusername/forkscout.git
-   cd forkscout
-   ```
+    ```bash
+    git clone https://github.com/yourusername/forkscout.git
+    cd forkscout
+    ```
 
 2. **Install dependencies**
 
-   ```bash
-   pnpm install
-   ```
+    ```bash
+    pnpm install
+    ```
 
 3. **Configure environment**
 
-   ```bash
-   cp .env.example .env
-   # Edit .env with your settings
-   ```
+    ```bash
+    cp .env.example .env
+    # Edit .env with your settings
+    ```
 
 4. **Build packages**
-   ```bash
-   pnpm build
-   ```
+    ```bash
+    pnpm build
+    ```
 
 ## Running the Agent
 
 ### Interactive CLI Mode
 
 ```bash
-cd packages/agent
 pnpm dev
 ```
 
@@ -49,24 +48,23 @@ This starts the agent in interactive mode. You can chat with it directly in the 
 ### Programmatic Usage
 
 ```typescript
-import { createAgent } from "@forkscout/agent";
+import { createAgent } from '@forkscout/agent';
 
 const agent = await createAgent({
-  llm: {
-    provider: "ollama",
-    model: "qwen2.5-coder:32b",
-    baseURL: "http://localhost:11434/v1"
-  }
+    llm: {
+        provider: 'ollama',
+        model: 'qwen2.5-coder:32b',
+        baseURL: 'http://localhost:11434/v1',
+    },
 });
 
-const response = await agent.processMessage("Search for Bitcoin news");
+const response = await agent.processMessage('Search for Bitcoin news');
 console.log(response);
 ```
 
 ## Running the Agent Server
 
 ```bash
-cd packages/agent
 pnpm serve
 ```
 
@@ -80,28 +78,28 @@ If you want to run Forkscout in the same environment as OpenClaw:
 
 1. **Access Ollama from Docker**
 
-   Use `host.docker.internal:11434` as the LLM base URL:
+    Use `host.docker.internal:11434` as the LLM base URL:
 
-   ```typescript
-   baseURL: "http://host.docker.internal:11434/v1";
-   ```
+    ```typescript
+    baseURL: 'http://host.docker.internal:11434/v1';
+    ```
 
 2. **Use SearXNG for web search**
 
-   If SearXNG is running in Docker Compose:
+    If SearXNG is running in Docker Compose:
 
-   ```bash
-   SEARXNG_URL=http://searxng:8888
-   ```
+    ```bash
+    SEARXNG_URL=http://searxng:8888
+    ```
 
 3. **Mount workspace**
 
-   Add to docker-compose.yml:
+    Add to docker-compose.yml:
 
-   ```yaml
-   volumes:
-     - ./forkscout:/workspace/forkscout
-   ```
+    ```yaml
+    volumes:
+        - ./forkscout:/workspace/forkscout
+    ```
 
 ## Examples
 
@@ -109,10 +107,10 @@ Run the example scripts:
 
 ```bash
 # Basic usage
-tsx packages/agent/examples/basic.ts
+tsx examples/basic.ts
 
 # Custom tools
-tsx packages/agent/examples/custom-tools.ts
+tsx examples/custom-tools.ts
 ```
 
 ## Common Commands
@@ -125,13 +123,10 @@ pnpm install
 pnpm build
 
 # Run agent in dev mode
-pnpm --filter @forkscout/agent dev
+pnpm dev
 
 # Run agent server
-pnpm --filter @forkscout/agent serve
-
-# Run all packages in dev mode
-pnpm dev
+pnpm serve
 
 # Clean build artifacts
 pnpm clean
