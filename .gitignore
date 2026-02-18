@@ -43,7 +43,7 @@ temp-*.ts
 *.tmp
 *.bak
 *.bak2
-packages/agent/.forkscout-backup-*
+.forkscout-backup-*
 
 # Playwright persistent browser profiles
 playwright-canary-persist/
