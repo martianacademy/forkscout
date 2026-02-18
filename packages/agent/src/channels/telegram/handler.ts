@@ -9,7 +9,7 @@ import { createReasoningContext, createPrepareStep, getReasoningSummary } from '
 import { buildFailureObservation } from '../../memory/failure-memory';
 import type { Agent, ChatContext } from '../../agent';
 import type { TelegramUpdate } from './types';
-import { TOOL_LABELS, humanTimeAgo } from './types';
+import { describeToolCall, humanTimeAgo } from './types';
 import { downloadFile, sendMessage, sendTyping } from './api';
 import type { TelegramStateManager } from './state';
 
@@ -219,15 +219,15 @@ export async function handleTelegramUpdate(
                     console.log(`[Telegram/Agent → early]: ${earlyTextSent.slice(0, 150)}`);
                 }
 
-                // Send tool call labels
+                // Send contextual tool call descriptions
                 if (toolCalls?.length) {
                     console.log(
                         `[Telegram/Agent]: ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`,
                     );
-                    const labels = toolCalls.map(
-                        (tc: any) => TOOL_LABELS[tc.toolName] || `⚙️ ${tc.toolName}`,
+                    const descriptions = toolCalls.map(
+                        (tc: any) => describeToolCall(tc.toolName, tc.args),
                     );
-                    const unique = [...new Set(labels)];
+                    const unique = [...new Set(descriptions)];
                     sendMessage(token, chatId, unique.join('\n')).catch(() => { });
                     sendTyping(token, chatId);
                 }
