@@ -37,6 +37,8 @@ const PORT_TIMEOUT_MS = 10000; // max time to wait for port to free
 let child = null;
 let restartTimer = null;
 let lastRestart = 0;
+let stoppingForRestart = false; // true while we're intentionally killing child for a restart
+let startInProgress = false; // mutex to prevent concurrent startChild() calls
 
 function log(msg) {
     const ts = new Date().toLocaleTimeString();
@@ -101,38 +103,61 @@ async function waitForPortFree(port) {
 }
 
 async function startChild() {
-    await waitForPortFree(PORT);
-    log(`Starting: tsx ${entry}`);
-    lastRestart = Date.now();
+    // Prevent concurrent starts
+    if (startInProgress) {
+        log('Start already in progress — skipping');
+        return;
+    }
+    startInProgress = true;
 
-    child = spawn('npx', ['tsx', entry], {
-        cwd: ROOT,
-        stdio: 'inherit',
-        env: { ...process.env },
-    });
+    try {
+        await waitForPortFree(PORT);
+        log(`Starting: tsx ${entry}`);
+        lastRestart = Date.now();
 
-    child.on('exit', (code, signal) => {
-        child = null;
-        if (signal === 'SIGTERM' || signal === 'SIGINT') {
-            // Normal shutdown from our restart — we'll respawn via the watcher
-            return;
-        }
-        log(`Process exited (code=${code}, signal=${signal}) — restarting in 2s`);
-        setTimeout(() => startChild(), 2000);
-    });
+        child = spawn('npx', ['tsx', entry], {
+            cwd: ROOT,
+            stdio: 'inherit',
+            env: { ...process.env },
+        });
+
+        child.on('exit', (code, signal) => {
+            child = null;
+
+            // If we killed this child intentionally for a restart, don't auto-respawn.
+            // The restart() function will call startChild() after stopChild() resolves.
+            if (stoppingForRestart) return;
+
+            // SIGTERM/SIGINT from outside (e.g. Ctrl+C) — don't respawn
+            if (signal === 'SIGTERM' || signal === 'SIGINT') return;
+
+            log(`Process exited (code=${code}, signal=${signal}) — restarting in 3s`);
+            setTimeout(() => startChild(), 3000);
+        });
+    } finally {
+        startInProgress = false;
+    }
 }
 
 function stopChild() {
     return new Promise((resolve) => {
         if (!child) return resolve();
-        child.once('exit', resolve);
+        stoppingForRestart = true;
+        child.once('exit', () => {
+            stoppingForRestart = false;
+            resolve();
+        });
         child.kill('SIGTERM');
         // Force kill after 5s
         setTimeout(() => {
             if (child) {
                 child.kill('SIGKILL');
-                resolve();
             }
+            // Resolve even if SIGKILL — don't hang forever
+            setTimeout(() => {
+                stoppingForRestart = false;
+                resolve();
+            }, 500);
         }, 5000);
     });
 }
@@ -145,7 +170,7 @@ async function restart() {
     }
     log('Build change detected — restarting…');
     await stopChild();
-    startChild();
+    await startChild();
 }
 
 function scheduleRestart() {
