@@ -6,6 +6,7 @@
 
 import type { UIMessage } from 'ai';
 import { resolve as resolvePath } from 'path';
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import type { Agent } from '../../agent';
 import { AGENT_ROOT } from '../../paths';
 import type { TelegramBotInfo, TelegramBridgeConfig, TelegramUpdate, InboxMessage } from './types';
@@ -29,6 +30,8 @@ export class TelegramBridge {
     // Per-chat message history for multi-turn context
     private chatHistories: Map<number, UIMessage[]> = new Map();
     private readonly MAX_HISTORY = 20;
+    private historyPath: string;
+    private historyDirty = false;
 
     constructor(agent: Agent, config: TelegramBridgeConfig) {
         this.agent = agent;
@@ -38,6 +41,7 @@ export class TelegramBridge {
 
         const dataDir = resolvePath(AGENT_ROOT, '.forkscout');
         this.state = new TelegramStateManager(resolvePath(dataDir, 'telegram-state.json'));
+        this.historyPath = resolvePath(dataDir, 'telegram-history.json');
     }
 
     // ── Lifecycle ─────────────────────────────────────
@@ -60,6 +64,9 @@ export class TelegramBridge {
         this.startedAt = Math.floor(Date.now() / 1000);
         this.running = true;
 
+        // Load persisted chat histories
+        await this.loadHistories();
+
         // Process any missed messages from Telegram's queue
         await this.processMissedMessages();
 
@@ -69,8 +76,11 @@ export class TelegramBridge {
     /** Stop polling and save state */
     async stop(): Promise<void> {
         this.running = false;
-        await this.state.saveShutdownState(this.offset);
-        console.log('📱 Telegram bridge stopped (state saved)');
+        await Promise.all([
+            this.state.saveShutdownState(this.offset),
+            this.saveHistories(),
+        ]);
+        console.log('📱 Telegram bridge stopped (state + history saved)');
     }
 
     // ── Polling ───────────────────────────────────────
@@ -127,6 +137,9 @@ export class TelegramBridge {
                 if (this.state.isDirty) {
                     await this.state.saveState(this.offset, this.startedAt);
                 }
+                if (this.historyDirty) {
+                    await this.saveHistories();
+                }
             } catch (err) {
                 if (this.running) {
                     console.error(`[Telegram]: Polling error — retrying in 5s:`, err instanceof Error ? err.message : err);
@@ -161,6 +174,7 @@ export class TelegramBridge {
         if (history && history.length > this.MAX_HISTORY) {
             this.chatHistories.set(chatId, history.slice(-this.MAX_HISTORY));
         }
+        this.historyDirty = true;
     }
 
     /** Clear chat history for a specific chat or all chats */
@@ -169,6 +183,61 @@ export class TelegramBridge {
             this.chatHistories.delete(chatId);
         } else {
             this.chatHistories.clear();
+        }
+        this.historyDirty = true;
+    }
+
+    // ── History persistence ─────────────────────────────
+
+    /** Strip binary image data from parts before saving (base64 is huge) */
+    private static stripBinaryParts(parts: any[]): any[] {
+        return parts.map(p => {
+            if (p.type === 'image') return { type: 'image', note: '(image omitted from history)' };
+            return p;
+        });
+    }
+
+    /** Load chat histories from disk */
+    private async loadHistories(): Promise<void> {
+        try {
+            const raw = await readFile(this.historyPath, 'utf-8');
+            const data: Record<string, UIMessage[]> = JSON.parse(raw);
+            this.chatHistories.clear();
+            let totalMessages = 0;
+            for (const [chatIdStr, messages] of Object.entries(data)) {
+                const chatId = Number(chatIdStr);
+                if (!isNaN(chatId) && Array.isArray(messages)) {
+                    // Keep only the last MAX_HISTORY messages
+                    this.chatHistories.set(chatId, messages.slice(-this.MAX_HISTORY));
+                    totalMessages += this.chatHistories.get(chatId)!.length;
+                }
+            }
+            console.log(`[Telegram]: Loaded ${totalMessages} message(s) across ${this.chatHistories.size} chat(s) from history`);
+        } catch {
+            // First run or corrupted — start with empty histories
+        }
+    }
+
+    /** Save chat histories to disk (strip binary data to keep file small) */
+    private async saveHistories(): Promise<void> {
+        if (!this.historyDirty) return;
+        try {
+            const dir = resolvePath(this.historyPath, '..');
+            await mkdir(dir, { recursive: true });
+
+            const data: Record<string, any[]> = {};
+            for (const [chatId, messages] of this.chatHistories) {
+                // Only persist the last MAX_HISTORY messages, strip binary data
+                data[String(chatId)] = messages.slice(-this.MAX_HISTORY).map(m => ({
+                    ...m,
+                    parts: TelegramBridge.stripBinaryParts(m.parts || []),
+                }));
+            }
+
+            await writeFile(this.historyPath, JSON.stringify(data, null, 2), 'utf-8');
+            this.historyDirty = false;
+        } catch (err) {
+            console.error('[Telegram]: Failed to save history:', err instanceof Error ? err.message : err);
         }
     }
 
