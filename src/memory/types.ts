@@ -79,6 +79,8 @@ export interface MemoryConfig {
     recentWindowSize?: number;
     contextBudget?: number;
     entityExtractor?: (prompt: string) => Promise<string>;
+    /** If set, delegates all memory reads/writes to the remote MCP server (single source of truth). */
+    mcpUrl?: string;
 }
 
 // ── Context result (consumed by prompt-builder) ────────

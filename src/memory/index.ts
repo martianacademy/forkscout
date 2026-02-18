@@ -6,6 +6,7 @@
 
 import { resolve } from 'path';
 import { MemoryStore } from './store';
+import { RemoteMemoryStore } from './remote-store';
 import { buildContext, searchKnowledge, buildFailureObservation } from './context';
 import type { MemoryConfig, ContextResult, SearchResult, Entity, EntityType, Relation, RelationType, ActiveTask, TaskStatus } from './types';
 import { SELF_ENTITY_NAME, RELATION_TYPES } from './types';
@@ -17,8 +18,9 @@ export { buildFailureObservation };
 interface RecentMsg { role: 'user' | 'assistant'; content: string; timestamp: Date }
 
 export class MemoryManager {
-    private store: MemoryStore;
+    private store: MemoryStore | RemoteMemoryStore;
     private config: MemoryConfig;
+    private remote: boolean;
     private sessionId = `session_${Date.now()}`;
     private recentMessages: RecentMsg[] = [];
     private pendingUser: string | null = null;
@@ -26,10 +28,17 @@ export class MemoryManager {
 
     constructor(config: MemoryConfig) {
         this.config = { recentWindowSize: 6, contextBudget: 4000, ...config };
-        this.store = new MemoryStore(
-            resolve(config.storagePath, 'memory.json'),
-            config.ownerName,
-        );
+        this.remote = !!config.mcpUrl;
+
+        if (config.mcpUrl) {
+            console.log(`🧠 Memory: remote mode → ${config.mcpUrl}`);
+            this.store = new RemoteMemoryStore(config.mcpUrl);
+        } else {
+            this.store = new MemoryStore(
+                resolve(config.storagePath, 'memory.json'),
+                config.ownerName,
+            );
+        }
         this.entityExtractor = config.entityExtractor;
     }
 
@@ -79,14 +88,52 @@ export class MemoryManager {
     async buildContext(query: string): Promise<ContextResult> {
         const windowSize = this.config.recentWindowSize ?? 6;
         const recent = this.recentMessages.slice(-windowSize);
-        return buildContext(query, this.store, recent, this.sessionId, (this.config.contextBudget ?? 4000) * 4);
+
+        if (this.remote) {
+            // Remote mode: build context from local recent window + MCP search
+            const remote = this.store as RemoteMemoryStore;
+            const recentStr = recent
+                .map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`)
+                .join('\n');
+
+            let graphContext = '';
+            let relevantMemories = '';
+            let retrievedCount = 0;
+            let graphEntities = 0;
+
+            try {
+                const results = await remote.searchKnowledgeAsync(query, 10);
+                const graphLines: string[] = [];
+                const exchangeLines: string[] = [];
+                for (const r of results) {
+                    if (r.source === 'graph') { graphLines.push(`• ${r.content}`); graphEntities++; }
+                    else { exchangeLines.push(`[Past] ${r.content}`); retrievedCount++; }
+                }
+                if (graphLines.length) graphContext = '\n\n[Knowledge Graph]\n' + graphLines.join('\n');
+                if (exchangeLines.length) relevantMemories = '\n\nRelevant memories from past conversations:\n' + exchangeLines.join('\n\n');
+            } catch { /* MCP unreachable — use local recent only */ }
+
+            return {
+                recentHistory: recentStr,
+                relevantMemories,
+                graphContext,
+                skillContext: '',
+                stats: { recentCount: recent.length, retrievedCount, graphEntities, totalChunks: 0, skillCount: 0, situation: { primary: [], goal: '' } },
+            };
+        }
+
+        return buildContext(query, this.store as MemoryStore, recent, this.sessionId, (this.config.contextBudget ?? 4000) * 4);
     }
 
     // ── Knowledge operations ─────────────────────────
 
     async saveKnowledge(fact: string, category?: string): Promise<void> {
+        if (this.remote) {
+            const remote = this.store as RemoteMemoryStore;
+            await remote.callTool('save_knowledge', { fact, category });
+            return;
+        }
         const tagged = category ? `[${category}] ${fact}` : fact;
-        // Try to find or create a relevant entity
         const entities = this.store.searchEntities(fact, 1);
         if (entities.length > 0) {
             this.store.addEntity(entities[0].name, entities[0].type, [tagged]);
@@ -96,7 +143,10 @@ export class MemoryManager {
     }
 
     async searchKnowledge(query: string, limit = 5): Promise<SearchResult[]> {
-        return searchKnowledge(this.store, query, limit);
+        if (this.remote) {
+            return (this.store as RemoteMemoryStore).searchKnowledgeAsync(query, limit);
+        }
+        return searchKnowledge(this.store as MemoryStore, query, limit);
     }
 
     // ── Entity operations (for memory tools) ─────────
@@ -141,7 +191,7 @@ export class MemoryManager {
         };
     }
 
-    getStore(): MemoryStore { return this.store; }
+    getStore(): MemoryStore | RemoteMemoryStore { return this.store; }
 
     // ── Active tasks (executive memory) ──────────────
 

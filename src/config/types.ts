@@ -54,6 +54,9 @@ export interface AgentSettings {
     owner: string;
     /** Built-in MCP servers to connect on startup */
     mcpServers: Record<string, McpServerEntry>;
+    /** Optional URL to a remote Memory MCP server (e.g. http://localhost:3211/mcp).
+     *  When set, all memory reads/writes go through the MCP server — no local file I/O. */
+    memoryMcpUrl?: string;
 }
 
 // ── SearXNG ────────────────────────────────────────────
@@ -124,6 +127,7 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         autoRegisterTools: true,
         port: 3210,
         owner: 'Admin',
+        memoryMcpUrl: undefined,
         mcpServers: {
             'sequential-thinking': {
                 command: 'npx',

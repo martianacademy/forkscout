@@ -5,6 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MemoryStore } from './store.js';
+import { RELATION_TYPES } from './types.js';
 
 export function registerTools(server: McpServer, store: MemoryStore): void {
     // ── Knowledge ────────────────────────────────────
@@ -122,5 +123,72 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
                 text: `Entities: ${store.entityCount}\nRelations: ${store.relationCount}\nExchanges: ${store.exchangeCount}\nActive tasks: ${store.tasks.runningCount}\n\nBreakdown:\n${breakdown || '  (none)'}`,
             }],
         };
+    });
+
+    // ── Agent internal tools (exchange tracking, relations, self-identity) ──
+
+    server.tool('add_exchange', {
+        user: z.string().describe('User message text'),
+        assistant: z.string().describe('Assistant response text'),
+        sessionId: z.string().describe('Session identifier'),
+    }, async ({ user, assistant, sessionId }) => {
+        store.addExchange(user, assistant, sessionId);
+        await store.flush();
+        return { content: [{ type: 'text' as const, text: 'Exchange recorded.' }] };
+    });
+
+    server.tool('search_exchanges', {
+        query: z.string().describe('Search query'),
+        limit: z.number().optional().describe('Max results (default: 5)'),
+    }, async ({ query, limit }) => {
+        const hits = store.searchExchanges(query, limit || 5);
+        if (hits.length === 0) return { content: [{ type: 'text' as const, text: '[]' }] };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(hits) }] };
+    });
+
+    server.tool('add_relation', {
+        from: z.string().describe('Source entity name'),
+        to: z.string().describe('Target entity name'),
+        type: z.enum(RELATION_TYPES).describe('Relation type'),
+    }, async ({ from, to, type }) => {
+        // Auto-create entities if missing
+        if (!store.getEntity(from)) store.addEntity(from, 'other', []);
+        if (!store.getEntity(to)) store.addEntity(to, 'other', []);
+        const rel = store.addRelation(from, type, to);
+        await store.flush();
+        return { content: [{ type: 'text' as const, text: `Relation: ${from} → ${rel.type} → ${to}` }] };
+    });
+
+    server.tool('get_all_entities', {
+        limit: z.number().optional().describe('Max entities to return'),
+    }, async ({ limit }) => {
+        const all = store.getAllEntities();
+        const subset = limit ? all.slice(0, limit) : all;
+        return { content: [{ type: 'text' as const, text: JSON.stringify(subset) }] };
+    });
+
+    server.tool('get_all_relations', {}, async () => {
+        return { content: [{ type: 'text' as const, text: JSON.stringify(store.getAllRelations()) }] };
+    });
+
+    server.tool('get_self_entity', {}, async () => {
+        const self = store.getSelfEntity();
+        return { content: [{ type: 'text' as const, text: JSON.stringify(self) }] };
+    });
+
+    server.tool('self_observe', {
+        content: z.string().describe('Self-observation text'),
+    }, async ({ content }) => {
+        store.addSelfObservation(content);
+        await store.flush();
+        return { content: [{ type: 'text' as const, text: `Self-observation recorded.` }] };
+    });
+
+    server.tool('clear_all', {
+        reason: z.string().describe('Why — this is logged'),
+    }, async ({ reason }) => {
+        console.log(`⚠️ Memory clear requested: ${reason}`);
+        await store.clear();
+        return { content: [{ type: 'text' as const, text: `All memory cleared. Reason: ${reason}` }] };
     });
 }

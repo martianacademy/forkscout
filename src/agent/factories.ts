@@ -17,13 +17,18 @@ import { getConfig } from '../config';
 /** Create a configured MemoryManager with LLM-powered entity extraction */
 export function createMemoryManager(_llm: LLMClient, router: ModelRouter): MemoryManager {
     const storagePath = resolvePath(AGENT_ROOT, '.forkscout');
+    const config = getConfig();
+
+    // If a memory MCP URL is configured, delegate all reads/writes there
+    const mcpUrl = config.agent.memoryMcpUrl || process.env.MEMORY_MCP_URL;
 
     return new MemoryManager({
         storagePath,
-        ownerName: getConfig().agent.owner,
+        ownerName: config.agent.owner,
         recentWindowSize: 6,
         contextBudget: 4000,
-        entityExtractor: async (prompt: string) => {
+        mcpUrl,
+        entityExtractor: mcpUrl ? undefined : async (prompt: string) => {
             return generateTextQuiet({
                 model: router.getModel('extract').model,
                 system: 'You are an entity extraction bot. Return ONLY valid JSON, no markdown.',

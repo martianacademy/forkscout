@@ -24,7 +24,11 @@
         "autoRegisterTools": true,
         "port": 3210,
         "owner": "Suru",
+        "memoryMcpUrl": "http://localhost:3211/mcp",
         "mcpServers": {
+            "memory": {
+                "url": "http://localhost:3211/mcp"
+            },
             "sequential-thinking": {
                 "command": "npx",
                 "args": [

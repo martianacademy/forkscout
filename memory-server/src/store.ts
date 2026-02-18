@@ -108,6 +108,23 @@ export class MemoryStore {
 
     getAllRelations(): Relation[] { return this.relations; }
 
+    // ── Exchanges ────────────────────────────────────
+
+    addExchange(user: string, assistant: string, sessionId: string): Exchange {
+        const ex: Exchange = {
+            id: `ex_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            user: user.slice(0, 2000),
+            assistant: assistant.slice(0, 2000),
+            timestamp: Date.now(),
+            sessionId,
+        };
+        this.exchanges.push(ex);
+        this.dirty = true;
+        return ex;
+    }
+
+    getExchanges(): Exchange[] { return this.exchanges; }
+
     // ── Search ───────────────────────────────────────
 
     searchEntities(query: string, limit = 5): Entity[] {
