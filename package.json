@@ -1,7 +1,7 @@
 {
     "name": "forkscout",
-    "version": "0.1.0",
-    "description": "Intelligent AI agent system with RAG and memory for task automation",
+    "version": "2.0.0",
+    "description": "Autonomous AI agent with persistent memory, multi-model routing, sub-agents, self-evolution, and production-grade security",
     "private": true,
     "main": "dist/index.js",
     "types": "dist/index.d.ts",

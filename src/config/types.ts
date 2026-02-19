@@ -25,6 +25,13 @@ export interface RouterConfig {
     powerful: TierConfig;
 }
 
+/**
+ * Per-provider router presets.
+ * Maps each provider to its own fast/balanced/powerful tier models.
+ * The active provider's preset is resolved at config load time.
+ */
+export type ProviderRouterPresets = Partial<Record<ProviderType, RouterConfig>>;
+
 // ── Budget ─────────────────────────────────────────────
 
 export interface BudgetConfig {
@@ -52,6 +59,10 @@ export interface AgentSettings {
     port: number;
     /** Owner/creator name used in knowledge graph bootstrap and identity references */
     owner: string;
+    /** App name shown in provider dashboards (e.g. OpenRouter) */
+    appName: string;
+    /** App URL shown in provider dashboards (HTTP-Referer header) */
+    appUrl: string;
     /** Built-in MCP servers to connect on startup */
     mcpServers: Record<string, McpServerEntry>;
     /** Optional URL to a remote Memory MCP server (e.g. http://localhost:3211/mcp).
@@ -79,8 +90,11 @@ export interface ForkscoutConfig {
     /** Max tokens per response */
     maxTokens: number;
 
-    /** Multi-model router tiers */
+    /** Multi-model router tiers (resolved from active provider's preset) */
     router: RouterConfig;
+
+    /** Per-provider router presets (raw from config file, kept for hot-swap) */
+    routerPresets?: ProviderRouterPresets;
 
     /** Budget limits */
     budget: BudgetConfig;
@@ -110,23 +124,45 @@ export interface ForkscoutConfig {
 
 // ── Defaults ───────────────────────────────────────────
 
+/** Built-in per-provider router presets — used when config file has per-provider format */
+export const PROVIDER_ROUTER_DEFAULTS: Record<string, RouterConfig> = {
+    openrouter: {
+        fast: { model: 'google/gemini-2.0-flash-001', provider: 'openrouter' },
+        balanced: { model: 'x-ai/grok-4.1-fast', provider: 'openrouter' },
+        powerful: { model: 'anthropic/claude-sonnet-4', provider: 'openrouter' },
+    },
+    google: {
+        fast: { model: 'gemini-2.0-flash-lite', provider: 'google' },
+        balanced: { model: 'gemini-2.5-flash', provider: 'google' },
+        powerful: { model: 'gemini-2.5-pro', provider: 'google' },
+    },
+    anthropic: {
+        fast: { model: 'claude-haiku-3.5', provider: 'anthropic' },
+        balanced: { model: 'claude-sonnet-4', provider: 'anthropic' },
+        powerful: { model: 'claude-opus-4', provider: 'anthropic' },
+    },
+    openai: {
+        fast: { model: 'gpt-4.1-mini', provider: 'openai' },
+        balanced: { model: 'gpt-4.1', provider: 'openai' },
+        powerful: { model: 'o3', provider: 'openai' },
+    },
+};
+
 export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
     provider: 'openrouter',
     model: 'x-ai/grok-4.1-fast',
     baseURL: 'https://openrouter.ai/api/v1',
     temperature: 0.7,
     maxTokens: 2000,
-    router: {
-        fast: { model: 'google/gemini-2.0-flash-001', provider: 'openrouter' },
-        balanced: { model: 'x-ai/grok-4.1-fast', provider: 'openrouter' },
-        powerful: { model: 'anthropic/claude-sonnet-4', provider: 'openrouter' },
-    },
+    router: PROVIDER_ROUTER_DEFAULTS.openrouter,
     budget: { dailyUSD: 5, monthlyUSD: 50, warningPct: 80 },
     agent: {
         maxIterations: 10,
         autoRegisterTools: true,
         port: 3210,
         owner: 'Admin',
+        appName: 'Forkscout Agent',
+        appUrl: 'https://github.com/martianacademy/forkscout',
         forkscoutMemoryMcpUrl: undefined,
         mcpServers: {
             'sequential-thinking': {

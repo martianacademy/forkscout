@@ -51,9 +51,9 @@ services:
             start_period: 15s
             retries: 3
 
-    # Memory MCP Server — lightweight standalone container (~30 MB)
+    # Memory MCP Server — persistent memory + knowledge graph
     memory:
-        build: ./memory-server
+        image: ghcr.io/martianacademy/forkscout-memory-mcp:latest
         container_name: forkscout-memory
         restart: unless-stopped
         ports:

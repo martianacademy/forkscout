@@ -70,4 +70,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -sf http://localhost:3210/api/status || exit 1
 
 # Run the agent server
+LABEL org.opencontainers.image.source="https://github.com/martianacademy/forkscout"
+LABEL org.opencontainers.image.description="Forkscout — autonomous AI agent with persistent memory, multi-model routing, and self-evolution"
+LABEL org.opencontainers.image.licenses="MIT"
 CMD ["npx", "tsx", "src/serve.ts"]

@@ -19,8 +19,10 @@ import { buildFailureObservation } from './memory';
 import { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
 import type { ChannelAuthStore } from './channels/auth';
 import { TelegramBridge } from './channels/telegram';
-import { getConfig } from './config';
+import { getConfig, watchConfig } from './config';
 import { logToolCall, logLLMCall, logChat, logShutdown, readRecentActivity, getActivitySummary, type ActivityEventType } from './activity-log';
+import { requestTracker } from './request-tracker';
+import { checkRateLimit } from './server/rate-limit';
 
 
 export interface ServerOptions {
@@ -32,7 +34,16 @@ export interface ServerOptions {
 function readBody(req: IncomingMessage): Promise<string> {
     return new Promise((resolve, reject) => {
         let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        let bytes = 0;
+        req.on('data', (chunk: Buffer) => {
+            bytes += chunk.length;
+            if (bytes > 1_048_576) {
+                req.destroy();
+                reject(new Error('Request body too large (max 1 MB)'));
+                return;
+            }
+            body += chunk.toString();
+        });
         req.on('end', () => resolve(body));
         req.on('error', reject);
     });
@@ -43,10 +54,15 @@ function sendJSON(res: ServerResponse, status: number, data: unknown) {
     res.end(JSON.stringify(data));
 }
 
-function setCors(res: ServerResponse) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+function setCors(req: IncomingMessage, res: ServerResponse) {
+    const ALLOWED_ORIGINS = new Set(['http://localhost:3000', 'http://localhost:3210', 'http://127.0.0.1:3000', 'http://127.0.0.1:3210']);
+    const origin = req.headers['origin'] || '';
+    if (ALLOWED_ORIGINS.has(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Channel, X-Sender, X-Admin-Secret');
+    res.setHeader('Vary', 'Origin');
 }
 
 /**
@@ -219,7 +235,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
     const channelAuth = agent.getChannelAuth();
 
     const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-        if (opts.cors !== false) setCors(res);
+        if (opts.cors !== false) setCors(req, res);
 
         // CORS preflight
         if (req.method === 'OPTIONS') {
@@ -227,6 +243,9 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
             res.end();
             return;
         }
+
+        // Rate limiting
+        if (!checkRateLimit(req, res)) return;
 
         const url = req.url || '';
 
@@ -255,6 +274,9 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 const { model: chatModel, tier: chatTier, modelId: chatModelId, complexity } = agent.getModelForChat(userText);
                 console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [${complexity.reason}]`);
 
+                // Track request for abort capability
+                const { id: reqId, signal: abortSignal } = requestTracker.start('http-stream', ctx.sender);
+
                 // Create reasoning context for inner loop
                 const reasoningCtx = createReasoningContext(userText, complexity, chatTier as ModelTier, systemPrompt, agent.getRouter());
 
@@ -264,6 +286,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     messages: await convertToModelMessages(messages),
                     tools: agent.getToolsForContext(ctx),
                     stopWhen: stepCountIs(20),
+                    abortSignal,
                     prepareStep: createPrepareStep(reasoningCtx),
                     onStepFinish: ({ toolCalls, toolResults }) => {
                         if (toolCalls && toolCalls.length > 0) {
@@ -323,6 +346,9 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     },
                 });
 
+                // Clean up tracker when stream finishes
+                Promise.resolve(result.text).then(() => requestTracker.finish(reqId), () => requestTracker.finish(reqId));
+
                 // Convert AI SDK Response to Node.js response
                 const webResponse = result.toUIMessageStreamResponse();
                 const headers: Record<string, string> = {};
@@ -355,6 +381,9 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 agent.saveToMemory('user', userText, ctx);
                 logChat(ctx.channel, ctx.isAdmin, userText, ctx.sender);
 
+                // Track request for abort capability
+                const { id: syncReqId, signal: syncAbortSignal } = requestTracker.start('http-sync', ctx.sender);
+
                 try {
                     const { model: syncModel, tier: syncTier, modelId: syncModelId, complexity: syncComplexity } = agent.getModelForChat(userText);
                     console.log(`[Router]: Sync using ${syncTier} tier (${syncModelId}) [${syncComplexity.reason}]`);
@@ -368,6 +397,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                         messages: await convertToModelMessages(messages),
                         tools: agent.getToolsForContext(ctx),
                         stopWhen: stepCountIs(20),
+                        abortSignal: syncAbortSignal,
                         prepareStep: createPrepareStep(syncReasoningCtx),
                     });
 
@@ -390,11 +420,54 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     }
 
                     agent.saveToMemory('assistant', text);
+                    requestTracker.finish(syncReqId);
                     sendJSON(res, 200, { response: text });
                 } catch (error) {
+                    requestTracker.finish(syncReqId);
                     const errMsg = error instanceof Error ? error.message : String(error);
-                    sendJSON(res, 500, { error: errMsg });
+                    const isAborted = errMsg.includes('aborted') || errMsg.includes('abort');
+                    sendJSON(res, isAborted ? 499 : 500, {
+                        error: isAborted ? 'Request aborted' : errMsg,
+                        aborted: isAborted,
+                    });
                 }
+                return;
+            }
+
+            // ── POST /api/chat/abort — cancel active request(s) ── (admin only)
+            if (req.method === 'POST' && url.startsWith('/api/chat/abort')) {
+                const ctx = detectChatContext(req, undefined, channelAuth);
+                if (!ctx.isAdmin) {
+                    sendJSON(res, 403, { error: 'Admin access required' });
+                    return;
+                }
+                const body = url === '/api/chat/abort' ? (() => { try { return JSON.parse(''); } catch { return {}; } })() : {};
+                try {
+                    const rawBody = await readBody(req);
+                    Object.assign(body, rawBody ? JSON.parse(rawBody) : {});
+                } catch { /* empty body = abort all */ }
+
+                const targetId = body.id as string | undefined;
+
+                if (targetId) {
+                    // Abort specific request
+                    const aborted = requestTracker.abort(targetId);
+                    if (aborted) {
+                        sendJSON(res, 200, { aborted: true, id: targetId });
+                    } else {
+                        sendJSON(res, 404, { error: `No active request with id: ${targetId}`, active: requestTracker.list() });
+                    }
+                } else {
+                    // Abort ALL active requests
+                    const count = requestTracker.abortAll();
+                    sendJSON(res, 200, { aborted: true, count, message: `Aborted ${count} active request(s)` });
+                }
+                return;
+            }
+
+            // ── GET /api/chat/active — list active requests ──
+            if (req.method === 'GET' && url === '/api/chat/active') {
+                sendJSON(res, 200, { active: requestTracker.list(), count: requestTracker.size });
                 return;
             }
 
@@ -459,6 +532,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     running: agent.getState().running,
                     tools: tools.map(t => t.name),
                     toolCount: tools.length,
+                    activeRequests: requestTracker.list(),
                     router: routerStatus,
                     telegram: telegramBridge ? {
                         connected: telegramBridge.isRunning(),
@@ -593,6 +667,8 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
         console.log(`   POST /api/memory/clear — clear memory`);
         console.log(`   GET  /api/status       — agent status`);
         console.log(`   GET  /api/tools        — list tools`);
+        console.log(`   POST /api/chat/abort   — abort active request(s)`);
+        console.log(`   GET  /api/chat/active  — list active requests`);
         console.log(`   GET  /api/activity     — activity log\n`);
 
         // Start Telegram bridge after server is ready
@@ -603,9 +679,14 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
 
     // Graceful shutdown — survival monitor handles signal trapping & emergency flush.
     // We just listen for its 'shutdown' callback to close the HTTP server and exit.
+    const stopWatcher = watchConfig((freshCfg) => {
+        agent.reloadConfig(freshCfg);
+    });
+
     agent.getSurvival().onShutdown(async () => {
         console.log('\nSurvival monitor triggered shutdown...');
         logShutdown('survival_monitor');
+        stopWatcher();
         if (telegramBridge) await telegramBridge.stop();
         await agent.stop();
         server.close();

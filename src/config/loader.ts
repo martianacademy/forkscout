@@ -12,7 +12,7 @@
  * @module config/loader
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, watch, type FSWatcher } from 'fs';
 import type { ProviderType, ForkscoutConfig } from './types';
 import { DEFAULTS, PROVIDER_URLS } from './types';
 import {
@@ -55,14 +55,23 @@ export function loadConfig(force = false): ForkscoutConfig {
         || PROVIDER_URLS[provider]
         || DEFAULTS.baseURL;
 
+    const { router, routerPresets } = buildRouterConfig(fileConfig.router, provider, baseURL);
+
+    // Auto-resolve default model: explicit > env > balanced tier from router > fallback
+    const model = env('DEFAULT_MODEL')
+        || fileConfig.model
+        || router.balanced.model
+        || DEFAULTS.model;
+
     const config: ForkscoutConfig = {
         provider,
-        model: env('DEFAULT_MODEL') || fileConfig.model || DEFAULTS.model,
+        model,
         baseURL,
         temperature: fileConfig.temperature ?? DEFAULTS.temperature,
         maxTokens: fileConfig.maxTokens ?? DEFAULTS.maxTokens,
 
-        router: buildRouterConfig(fileConfig.router, provider, baseURL),
+        router,
+        ...(routerPresets ? { routerPresets } : {}),
         budget: buildBudgetConfig(fileConfig.budget),
         agent: buildAgentConfig(fileConfig.agent),
         searxng: {
@@ -140,4 +149,50 @@ export function resolveApiUrlForProvider(provider: ProviderType, cfg?: Forkscout
         'openai-compatible': c.secrets.openApiCompatibleApiUrl,
     };
     return map[provider] || PROVIDER_URLS[provider];
+}
+
+// ── Hot-reload file watcher ────────────────────────────
+
+let _watcher: FSWatcher | null = null;
+
+/**
+ * Watch forkscout.config.json for changes and call `onChange` with the fresh config.
+ *
+ * Uses a 500ms debounce to coalesce editor "save" events (some editors fire
+ * multiple change events per save).  Only triggers when the config actually
+ * parses successfully — malformed JSON is silently ignored so the agent
+ * continues running with the previous config.
+ *
+ * Returns a cleanup function that stops the watcher.
+ */
+export function watchConfig(onChange: (cfg: ForkscoutConfig) => void): () => void {
+    const configPath = findConfigFile();
+    if (!configPath) {
+        console.warn('[Config↻] No config file found — hot-reload disabled');
+        return () => {};
+    }
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    _watcher = watch(configPath, (eventType) => {
+        if (eventType !== 'change') return;
+
+        // Debounce: coalesce rapid-fire events into a single reload
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            try {
+                const fresh = loadConfig(true);
+                console.log(`[Config↻] Reloaded — provider: ${fresh.provider}, model: ${fresh.model}`);
+                onChange(fresh);
+            } catch (e: any) {
+                console.warn(`[Config↻] Reload failed (keeping previous config): ${e.message}`);
+            }
+        }, 500);
+    });
+
+    console.log(`[Config↻] Watching ${configPath} for changes`);
+    return () => {
+        if (_watcher) { _watcher.close(); _watcher = null; }
+        if (debounceTimer) clearTimeout(debounceTimer);
+    };
 }

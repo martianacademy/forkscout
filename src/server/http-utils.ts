@@ -16,11 +16,23 @@ export interface ServerOptions {
 
 // ── Body reading ───────────────────────────────────────
 
-/** Read the full request body as a UTF-8 string. */
+/** Max request body size (1 MB). */
+const MAX_BODY_BYTES = 1_048_576;
+
+/** Read the full request body as a UTF-8 string. Rejects if body exceeds 1 MB. */
 export function readBody(req: IncomingMessage): Promise<string> {
     return new Promise((resolve, reject) => {
         let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        let bytes = 0;
+        req.on('data', (chunk: Buffer) => {
+            bytes += chunk.length;
+            if (bytes > MAX_BODY_BYTES) {
+                req.destroy();
+                reject(new Error('Request body too large (max 1 MB)'));
+                return;
+            }
+            body += chunk.toString();
+        });
         req.on('end', () => resolve(body));
         req.on('error', reject);
     });
@@ -36,9 +48,22 @@ export function sendJSON(res: ServerResponse, status: number, data: unknown) {
 
 // ── CORS ───────────────────────────────────────────────
 
-/** Set permissive CORS headers on a response. */
-export function setCors(res: ServerResponse) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+/** Allowed origins — localhost only (single-user deployment). */
+const ALLOWED_ORIGINS = new Set([
+    'http://localhost:3000',
+    'http://localhost:3210',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3210',
+]);
+
+/** Set restrictive CORS headers — localhost only. */
+export function setCors(req: IncomingMessage, res: ServerResponse) {
+    const origin = req.headers['origin'] || '';
+    if (ALLOWED_ORIGINS.has(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    // No origin header = same-origin request (curl, Telegram bridge, etc.) — allow
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Channel, X-Sender, X-Admin-Secret');
+    res.setHeader('Vary', 'Origin');
 }

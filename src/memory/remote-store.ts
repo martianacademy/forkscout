@@ -7,7 +7,7 @@
  * Uses plain HTTP + JSON-RPC to call MCP tools (stateless mode).
  */
 
-import type { Entity, EntityType, Relation, RelationType, Exchange, SearchResult } from './types';
+import type { Entity, EntityType, Fact, Relation, RelationType, Exchange, SearchResult } from './types';
 
 // Minimal task manager interface (matches what MemoryManager expects)
 export interface RemoteTaskManager {
@@ -104,7 +104,7 @@ export class RemoteMemoryStore {
     async flush(): Promise<void> { /* no-op — MCP server manages its own persistence */ }
 
     async clear(): Promise<void> {
-        await this.callTool('clear_all', { reason: 'Agent requested clear' });
+        console.warn('[Memory] clear_all tool has been removed from MCP server — memory clear is a no-op');
     }
 
     /** Whether the MCP server is reachable */
@@ -125,7 +125,9 @@ export class RemoteMemoryStore {
     addEntity(name: string, type: EntityType, facts: string[]): Entity {
         // Fire-and-forget for sync interface compatibility
         this.callTool('add_entity', { name, type, facts }).catch(() => { });
-        return { name, type, facts, lastSeen: Date.now(), accessCount: 1 };
+        const now = Date.now();
+        const structuredFacts: Fact[] = facts.map(f => ({ content: f, confidence: 1.0, sources: 1, firstSeen: now, lastConfirmed: now }));
+        return { name, type, facts: structuredFacts, lastSeen: now, accessCount: 1 };
     }
 
     getEntity(_name: string): Entity | undefined {
@@ -156,7 +158,8 @@ export class RemoteMemoryStore {
 
     addRelation(from: string, type: RelationType, to: string): Relation {
         this.callTool('add_relation', { from, type, to }).catch(() => { });
-        return { from, to, type, createdAt: Date.now() };
+        const now = Date.now();
+        return { from, to, type, weight: 0.5, evidenceCount: 1, lastValidated: now, createdAt: now };
     }
 
     getAllRelations(): Relation[] { return []; }
@@ -203,7 +206,17 @@ export class RemoteMemoryStore {
         const entities: Entity[] = [];
         for (const line of text.split('\n')) {
             const m = line.match(/^[•\-]\s*(.+?)\s*\((\w[\w-]*)\):\s*(.+)/);
-            if (m) entities.push({ name: m[1], type: m[2] as EntityType, facts: m[3].split('; '), lastSeen: 0, accessCount: 0 });
+            if (m) {
+                // Parse facts — may include confidence like "fact text [80%]"
+                const factStrs = m[3].split('; ');
+                const facts: Fact[] = factStrs.map(fs => {
+                    const cm = fs.match(/^(.+?)\s*\[(\d+)%\]$/);
+                    const content = cm ? cm[1].trim() : fs.trim();
+                    const confidence = cm ? parseInt(cm[2]) / 100 : 0.5;
+                    return { content, confidence, sources: 1, firstSeen: 0, lastConfirmed: 0 };
+                });
+                entities.push({ name: m[1], type: m[2] as EntityType, facts, lastSeen: 0, accessCount: 0 });
+            }
         }
         return entities;
     }

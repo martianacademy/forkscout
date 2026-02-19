@@ -181,7 +181,9 @@ export class MemoryManager {
         try {
             const selfEntity = await this.store.getSelfEntityAsync();
             if (selfEntity && selfEntity.facts && selfEntity.facts.length > 0) {
-                this.selfContextCache = selfEntity.facts.map(f => `• ${f}`).join('\n');
+                this.selfContextCache = selfEntity.facts
+                    .map(f => typeof f === 'string' ? `• ${f}` : `• [${Math.round(f.confidence * 100)}%] ${f.content}`)
+                    .join('\n');
             } else {
                 this.selfContextCache = '';
             }
@@ -216,6 +218,21 @@ export class MemoryManager {
     }
 
     getStore(): RemoteMemoryStore { return this.store; }
+
+    // ── Consolidation (delegated to MCP server) ─────
+
+    /**
+     * Manually trigger a consolidation pass via the MCP server.
+     * The MCP server also runs this automatically on a periodic timer.
+     */
+    async runConsolidation(): Promise<string> {
+        return this.store.callTool('consolidate_memory', {});
+    }
+
+    /** Get stale entities via the MCP server. */
+    async getStaleEntities(maxAgeDays = 30): Promise<string> {
+        return this.store.callTool('get_stale_entities', { maxAgeDays });
+    }
 
     // ── Active tasks (executive memory) ──────────────
 

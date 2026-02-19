@@ -18,6 +18,7 @@ import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
 import type { ChannelAuthStore } from '../channels/auth';
 import type { ModelRouter } from '../llm/router';
+import { createSubAgentTool } from '../tools/agent-tool';
 
 /** Register all default tool groups into the toolSet */
 export function registerDefaultTools(
@@ -64,6 +65,9 @@ export function registerDefaultTools(
 
     // Self-rebuild tool (build from source + graceful restart)
     toolSet.self_rebuild = createSelfRebuildTool(() => memory.flush());
+
+    // Sub-agent tool (spawn 1-10 worker agents in parallel)
+    toolSet.spawn_agents = createSubAgentTool({ router, toolSet });
 
     // Wrap all tools with error enhancement — produces helpful diagnostics
     // instead of raw stack traces when tools fail

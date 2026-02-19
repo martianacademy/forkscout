@@ -8,6 +8,7 @@ import type { ModelTier } from '../../llm/router';
 import { createReasoningContext, createPrepareStep, getReasoningSummary } from '../../llm/reasoning';
 import { buildFailureObservation } from '../../memory';
 import type { Agent, ChatContext } from '../../agent';
+import { requestTracker } from '../../request-tracker';
 import type { TelegramUpdate } from './types';
 import { describeToolCall, humanTimeAgo } from './types';
 import { downloadFile, sendMessage, sendTyping } from './api';
@@ -196,6 +197,9 @@ export async function handleTelegramUpdate(
         let earlyTextSent = '';
         let stepCounter = 0;
 
+        // Track request for abort capability
+        const { id: tgReqId, signal: tgAbortSignal } = requestTracker.start('telegram', who);
+
         const { text: responseText, usage } = await generateTextWithRetry({
             model: tgModel,
             system: systemPrompt,
@@ -216,16 +220,18 @@ export async function handleTelegramUpdate(
             }),
             tools: agent.getToolsForContext(ctx),
             stopWhen: stepCountIs(20),
+            abortSignal: tgAbortSignal,
             prepareStep: createPrepareStep(reasoningCtx),
             onStepFinish: async ({ text: stepText, toolCalls, toolResults }) => {
                 const currentStep = stepCounter++;
 
                 // Send acknowledgment/plan text immediately from early steps.
                 // The model produces text alongside tool calls in step 0 thanks
-                // to the ACKNOWLEDGE/PLAN system prompt injection.
+                // to the ACKNOWLEDGE/PLAN system prompt instruction.
+                // Allow up to step 3 — some models take a step or two to produce text.
                 if (
                     stepText?.trim() &&
-                    currentStep <= 1 &&
+                    currentStep <= 3 &&
                     !earlyTextSent
                 ) {
                     earlyTextSent = stepText.trim();
@@ -348,9 +354,13 @@ export async function handleTelegramUpdate(
         } else {
             console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
         }
+
+        requestTracker.finish(tgReqId);
     } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`[Telegram]: Error generating response for ${who}:`, errMsg);
-        await sendMessage(token, chatId, 'Sorry, I hit an error processing that. Try again in a moment.');
+        // Check if it was an intentional abort
+        const isAborted = errMsg.includes('aborted') || errMsg.includes('abort');
+        await sendMessage(token, chatId, isAborted ? '⏹️ Request was cancelled.' : 'Sorry, I hit an error processing that. Try again in a moment.');
     }
 }

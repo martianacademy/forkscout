@@ -13,6 +13,7 @@ import { TelegramBridge } from '../channels/telegram';
 import { getConfig } from '../config';
 import type { ServerOptions } from './http-utils';
 import { setCors, sendJSON } from './http-utils';
+import { checkRateLimit } from './rate-limit';
 import {
     handleChatStream,
     handleChatSync,
@@ -67,7 +68,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
     }
 
     const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-        if (opts.cors !== false) setCors(res);
+        if (opts.cors !== false) setCors(req, res);
 
         // CORS preflight
         if (req.method === 'OPTIONS') {
@@ -75,6 +76,9 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
             res.end();
             return;
         }
+
+        // Rate limiting
+        if (!checkRateLimit(req, res)) return;
 
         const url = req.url || '';
 

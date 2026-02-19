@@ -13,6 +13,7 @@ import { connectMcpServers } from '../mcp/defaults';
 import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-builder';
 import { createMemoryManager, createScheduler } from './factories';
 import { registerDefaultTools } from './tools-setup';
+import { resolveApiKeyForProvider } from '../config';
 
 // Re-export all types from the barrel
 export type { AgentConfig, AgentState, ChatContext, ChatChannel } from './types';
@@ -108,6 +109,28 @@ export class Agent {
         return this.router;
     }
 
+    /**
+     * Hot-reload: apply a fresh config to the running agent.
+     * Swaps LLM client settings and router tiers without restarting the process.
+     */
+    reloadConfig(cfg: import('../config').ForkscoutConfig): void {
+        // Rebuild LLM client config
+        this.config.llm = {
+            provider: cfg.provider as any,
+            model: cfg.model,
+            baseURL: cfg.baseURL,
+            apiKey: resolveApiKeyForProvider(cfg.provider),
+            temperature: cfg.temperature,
+            maxTokens: cfg.maxTokens,
+        };
+        this.llm = new LLMClient(this.config.llm);
+
+        // Hot-swap router tiers (preserves budget state)
+        this.router.reloadConfig(createRouterFromEnv());
+
+        console.log(`[Agent↻] Config reloaded — provider: ${cfg.provider}, model: ${cfg.model}`);
+    }
+
     getTools(): Record<string, any> {
         return { ...this.toolSet };
     }
@@ -186,7 +209,7 @@ export class Agent {
 
     getToolsForContext(ctx?: ChatContext): Record<string, any> {
         if (ctx?.isAdmin) return { ...this.toolSet };
-        const GUEST_TOOLS = new Set(['web_search', 'browse_web', 'get_current_date']);
+        const GUEST_TOOLS = new Set(['web_search', 'browse_web', 'get_current_date', 'think']);
         const filtered: Record<string, any> = {};
         for (const [name, t] of Object.entries(this.toolSet)) {
             if (GUEST_TOOLS.has(name)) filtered[name] = t;

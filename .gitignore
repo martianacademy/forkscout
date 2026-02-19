@@ -51,3 +51,9 @@ playwright-canary-persist/
 # Agent custom scripts/experiments (user-specific)
 custom/
 packages/agent/custom/
+forkscout-memory-mcp/
+forkscout-memory-mcp-rust/
+temp_voice.oga
+moltbook-*.png
+packages/frontend/.next/
+screenshots/*.png

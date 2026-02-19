@@ -3,6 +3,7 @@ import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
 import type { CronAlert } from '../scheduler';
 import { getDefaultSystemPrompt, getPublicSystemPrompt } from './system-prompts';
+import { getCurrentTodos } from '../tools/todo-tool';
 
 /**
  * Mutable cache object — owned by the Agent instance, passed by reference.
@@ -99,5 +100,17 @@ export async function buildSystemPrompt(
         }
     }
 
-    return base + channelSection + alertSection + selfSection + memorySection;
+    // Active todo list — inject so the agent remembers its plan across turns
+    let todoSection = '';
+    const todos = getCurrentTodos();
+    if (todos.length > 0) {
+        const completed = todos.filter(t => t.status === 'completed').length;
+        const lines = todos.map(t => {
+            const icon = t.status === 'completed' ? '✅' : t.status === 'in-progress' ? '🔄' : '⬜';
+            return `${icon} ${t.id}. ${t.title}${t.notes ? ` — ${t.notes}` : ''}`;
+        });
+        todoSection = `\n\n[Active Todo List — ${completed}/${todos.length} completed]\n` + lines.join('\n');
+    }
+
+    return base + channelSection + alertSection + selfSection + todoSection + memorySection;
 }

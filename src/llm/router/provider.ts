@@ -17,7 +17,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
 import { BudgetTracker } from '../budget';
-import { loadConfig, resolveApiKeyForProvider, resolveApiUrlForProvider, type ProviderType } from '../../config';
+import { loadConfig, getConfig, resolveApiKeyForProvider, resolveApiUrlForProvider, type ProviderType } from '../../config';
 import type { ModelTier, ModelTierConfig, ModelPricing, RouterConfig } from './types';
 import { KNOWN_PRICES } from './types';
 
@@ -74,6 +74,13 @@ export function createProviderModel(
             const p = createOpenAI({
                 baseURL: resolvedURL,
                 apiKey,
+                // OpenRouter requires these headers for app identification
+                ...(provider === 'openrouter' ? {
+                    headers: {
+                        'HTTP-Referer': getConfig().agent.appUrl,
+                        'X-Title': getConfig().agent.appName,
+                    },
+                } : {}),
             });
             return p.chat(modelId);
         }

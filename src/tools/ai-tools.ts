@@ -15,6 +15,8 @@ export { createSelfRebuildTool } from './self-rebuild-tool';
 export { listSecrets, httpRequest } from './secret-tools';
 export { viewActivityLog } from './activity-tool';
 export { think } from './think-tool';
+export { manageTodos } from './todo-tool';
+export { createSubAgentTool } from './agent-tool';
 
 // ── Factory function exports ────────────────────────────
 export { createSchedulerTools } from './scheduler-tools';
@@ -33,6 +35,7 @@ import { safeSelfEdit } from './self-edit-tool';
 import { listSecrets, httpRequest } from './secret-tools';
 import { viewActivityLog } from './activity-tool';
 import { think } from './think-tool';
+import { manageTodos } from './todo-tool';
 
 export const coreTools = {
     read_file: readFile,
@@ -51,4 +54,5 @@ export const coreTools = {
     http_request: httpRequest,
     view_activity_log: viewActivityLog,
     think,
+    manage_todos: manageTodos,
 };

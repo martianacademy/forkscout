@@ -31,14 +31,20 @@ export const AGENT_SRC = resolve(AGENT_ROOT, 'src');
 export const AGENT_DIST = resolve(AGENT_ROOT, 'dist');
 
 /**
- * Resolve a path the agent provides.
+ * Resolve a path the agent provides, jailed to PROJECT_ROOT.
  *
- * - Absolute paths are returned as-is.
- * - Relative paths are resolved against PROJECT_ROOT
- *   (so "packages/agent/src/foo.ts" works regardless of CWD).
+ * - Relative paths are resolved against PROJECT_ROOT.
+ * - Absolute paths are validated to be within PROJECT_ROOT.
+ * - Throws if the resolved path escapes the project root (path traversal).
+ *
+ * @throws Error if the resolved path is outside PROJECT_ROOT
  */
 export function resolveAgentPath(p: string): string {
     if (!p || p.trim() === '') return PROJECT_ROOT;
-    if (resolve(p) === p) return p; // already absolute
-    return resolve(PROJECT_ROOT, p);
+    const resolved = resolve(p) === p ? p : resolve(PROJECT_ROOT, p);
+    // Jail: resolved path must be within PROJECT_ROOT (or /tmp for scratch work)
+    if (!resolved.startsWith(PROJECT_ROOT) && !resolved.startsWith('/tmp')) {
+        throw new Error(`Path traversal blocked: "${p}" resolves outside project root`);
+    }
+    return resolved;
 }

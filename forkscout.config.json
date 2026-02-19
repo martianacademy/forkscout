@@ -1,29 +1,61 @@
 {
     "$schema": "./packages/agent/src/config.schema.json",
     "provider": "openrouter",
-    "model": "x-ai/grok-4.1-fast",
-    "baseURL": "https://openrouter.ai/api/v1",
     "temperature": 0.7,
-    "maxTokens": 2000,
     "router": {
-        "fast": {
-            "model": "qwen/qwen3.5-397b-a17b",
-            "provider": "openrouter"
+        "openrouter": {
+            "fast": {
+                "model": "qwen/qwen3.5-397b-a17b"
+            },
+            "balanced": {
+                "model": "minimax/minimax-m2.5"
+            },
+            "powerful": {
+                "model": "moonshotai/kimi-k2.5"
+            }
         },
-        "balanced": {
-            "model": "minimax/minimax-m2.5",
-            "provider": "openrouter"
+        "google": {
+            "fast": {
+                "model": "gemini-2.5-flash"
+            },
+            "balanced": {
+                "model": "gemini-3-flash-preview"
+            },
+            "powerful": {
+                "model": "gemini-3-pro-preview"
+            }
         },
-        "powerful": {
-            "model": "moonshotai/kimi-k2.5",
-            "provider": "openrouter"
+        "anthropic": {
+            "fast": {
+                "model": "claude-haiku-4.5"
+            },
+            "balanced": {
+                "model": "claude-sonnet-4.6"
+            },
+            "powerful": {
+                "model": "claude-opus-4.6"
+            }
+        },
+        "openai": {
+            "fast": {
+                "model": "gpt-5-mini"
+            },
+            "balanced": {
+                "model": "gpt-5"
+            },
+            "powerful": {
+                "model": "gpt-5.2-codex"
+            }
         }
     },
     "agent": {
-        "maxIterations": 10,
+        "maxIterations": 20,
+        "maxSteps": 30,
         "autoRegisterTools": true,
         "port": 3210,
         "owner": "Suru",
+        "appName": "Forkscout Agent",
+        "appUrl": "https://github.com/martianacademy/forkscout",
         "forkscoutMemoryMcpUrl": "http://localhost:3211/mcp",
         "mcpServers": {
             "forkscout-memory": {
@@ -47,6 +79,11 @@
                 "url": "https://mcp.deepwiki.com/mcp"
             }
         }
+    },
+    "budget": {
+        "dailyUSD": 5,
+        "monthlyUSD": 50,
+        "warningPct": 80
     },
     "searxng": {
         "url": "http://localhost:8888"

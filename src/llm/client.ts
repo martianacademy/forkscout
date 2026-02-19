@@ -1,12 +1,23 @@
 import { createOpenAI } from '@ai-sdk/openai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import type { LanguageModel, EmbeddingModel } from 'ai';
 import { getConfig } from '../config';
+
+/** Get OpenRouter app identification headers from config */
+function openRouterHeaders() {
+    const cfg = getConfig();
+    return {
+        'HTTP-Referer': cfg.agent.appUrl,
+        'X-Title': cfg.agent.appName,
+    };
+}
 
 /**
  * LLM Configuration
  */
 export interface LLMConfig {
-    provider: 'openai' | 'ollama' | 'anthropic' | 'openrouter' | 'custom';
+    provider: 'openai' | 'ollama' | 'anthropic' | 'google' | 'openrouter' | 'custom';
     model: string;
     baseURL?: string;
     apiKey?: string;
@@ -75,8 +86,23 @@ export class LLMClient {
                 const p = createOpenAI({
                     baseURL: 'https://openrouter.ai/api/v1',
                     apiKey: this.config.apiKey || getConfig().secrets.openrouterApiKey || '',
+                    headers: openRouterHeaders(),
                 });
                 return p.chat(this.config.model);
+            }
+
+            case 'google': {
+                const p = createGoogleGenerativeAI({
+                    apiKey: this.config.apiKey || getConfig().secrets.googleApiKey || '',
+                });
+                return p(this.config.model);
+            }
+
+            case 'anthropic': {
+                const p = createAnthropic({
+                    apiKey: this.config.apiKey || getConfig().secrets.anthropicApiKey || '',
+                });
+                return p(this.config.model);
             }
 
             case 'custom': {
@@ -108,6 +134,7 @@ export class LLMClient {
                 const p = createOpenAI({
                     baseURL: 'https://openrouter.ai/api/v1',
                     apiKey: this.config.apiKey || getConfig().secrets.openrouterApiKey || '',
+                    headers: openRouterHeaders(),
                 });
                 return p.embedding(embeddingModelId);
             }

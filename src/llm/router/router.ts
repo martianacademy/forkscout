@@ -81,6 +81,19 @@ export class ModelRouter {
         console.log(`[Router]: ${tier} tier → ${modelId} [${existing.provider}] ($${pricing.inputPer1M}/$${pricing.outputPer1M} per 1M tokens)`);
     }
 
+    /**
+     * Hot-reload: swap the router's config in-place.
+     * Preserves the existing BudgetTracker state (spending totals, limits).
+     */
+    reloadConfig(newConfig: RouterConfig): void {
+        // Preserve existing budget state — don't reset spending counters
+        this.config = { ...newConfig, budget: this.budget };
+        for (const t of ['fast', 'balanced', 'powerful'] as ModelTier[]) {
+            const tc = this.config.tiers[t];
+            console.log(`[Router↻]: ${t} → ${tc.modelId} via ${tc.provider}`);
+        }
+    }
+
     /** Record usage after an LLM call completes. */
     recordUsage(tier: ModelTier, inputTokens: number, outputTokens: number): void {
         const pricing = this.config.tiers[tier].pricing;

@@ -10,31 +10,92 @@
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { PROJECT_ROOT } from '../paths';
-import type { ProviderType, RouterConfig, BudgetConfig, AgentSettings } from './types';
-import { DEFAULTS } from './types';
+import type { ProviderType, RouterConfig, BudgetConfig, AgentSettings, ProviderRouterPresets } from './types';
+import { DEFAULTS, PROVIDER_ROUTER_DEFAULTS } from './types';
 
 // ── Router config builder ──────────────────────────────
 
-export function buildRouterConfig(file: any, globalProvider: ProviderType, _globalBaseURL: string): RouterConfig {
+/**
+ * Detect whether `file` is per-provider format (keys are provider names)
+ * or flat format (keys are tier names: fast/balanced/powerful).
+ */
+function isPerProviderFormat(file: any): boolean {
+    if (!file || typeof file !== 'object') return false;
+    const providerKeys = ['openrouter', 'openai', 'anthropic', 'google', 'ollama', 'openai-compatible'];
+    return Object.keys(file).some(k => providerKeys.includes(k));
+}
+
+/**
+ * Build RouterConfig from config file.
+ *
+ * Supports two formats:
+ *   1. Flat: { fast: {...}, balanced: {...}, powerful: {...} }
+ *   2. Per-provider: { openrouter: { fast, balanced, powerful }, google: { ... }, ... }
+ *      → resolves the active provider's preset
+ *
+ * Returns { router, routerPresets? } — routerPresets is set only for per-provider format.
+ */
+export function buildRouterConfig(
+    file: any,
+    globalProvider: ProviderType,
+    _globalBaseURL: string,
+): { router: RouterConfig; routerPresets?: ProviderRouterPresets } {
+    // Per-provider format
+    if (isPerProviderFormat(file)) {
+        const presets: ProviderRouterPresets = {};
+
+        for (const [providerName, tierBlock] of Object.entries(file)) {
+            const provider = resolveProvider(providerName);
+            const t = tierBlock as any;
+            presets[provider] = {
+                fast: {
+                    model: t?.fast?.model || PROVIDER_ROUTER_DEFAULTS[provider]?.fast?.model || DEFAULTS.router.fast.model,
+                    provider: resolveProvider(t?.fast?.provider || provider),
+                    baseURL: t?.fast?.baseURL,
+                },
+                balanced: {
+                    model: t?.balanced?.model || PROVIDER_ROUTER_DEFAULTS[provider]?.balanced?.model || DEFAULTS.router.balanced.model,
+                    provider: resolveProvider(t?.balanced?.provider || provider),
+                    baseURL: t?.balanced?.baseURL,
+                },
+                powerful: {
+                    model: t?.powerful?.model || PROVIDER_ROUTER_DEFAULTS[provider]?.powerful?.model || DEFAULTS.router.powerful.model,
+                    provider: resolveProvider(t?.powerful?.provider || provider),
+                    baseURL: t?.powerful?.baseURL,
+                },
+            };
+        }
+
+        // Resolve active provider's preset (fall back to defaults)
+        const active = presets[globalProvider]
+            || PROVIDER_ROUTER_DEFAULTS[globalProvider]
+            || DEFAULTS.router;
+
+        return { router: active, routerPresets: presets };
+    }
+
+    // Legacy flat format
     const fileFast = file?.fast || {};
     const fileBalanced = file?.balanced || {};
     const filePowerful = file?.powerful || {};
 
     return {
-        fast: {
-            model: fileFast.model || DEFAULTS.router.fast.model,
-            provider: resolveProvider(fileFast.provider || globalProvider),
-            baseURL: fileFast.baseURL,
-        },
-        balanced: {
-            model: fileBalanced.model || DEFAULTS.router.balanced.model,
-            provider: resolveProvider(fileBalanced.provider || globalProvider),
-            baseURL: fileBalanced.baseURL,
-        },
-        powerful: {
-            model: filePowerful.model || DEFAULTS.router.powerful.model,
-            provider: resolveProvider(filePowerful.provider || globalProvider),
-            baseURL: filePowerful.baseURL,
+        router: {
+            fast: {
+                model: fileFast.model || DEFAULTS.router.fast.model,
+                provider: resolveProvider(fileFast.provider || globalProvider),
+                baseURL: fileFast.baseURL,
+            },
+            balanced: {
+                model: fileBalanced.model || DEFAULTS.router.balanced.model,
+                provider: resolveProvider(fileBalanced.provider || globalProvider),
+                baseURL: fileBalanced.baseURL,
+            },
+            powerful: {
+                model: filePowerful.model || DEFAULTS.router.powerful.model,
+                provider: resolveProvider(filePowerful.provider || globalProvider),
+                baseURL: filePowerful.baseURL,
+            },
         },
     };
 }
@@ -62,6 +123,9 @@ export function buildAgentConfig(file: any): AgentSettings {
         autoRegisterTools: file?.autoRegisterTools ?? DEFAULTS.agent.autoRegisterTools,
         port: intEnv('AGENT_PORT') ?? file?.port ?? DEFAULTS.agent.port,
         owner: env('AGENT_OWNER') || file?.owner || DEFAULTS.agent.owner,
+        appName: file?.appName || DEFAULTS.agent.appName,
+        appUrl: file?.appUrl || DEFAULTS.agent.appUrl,
+        forkscoutMemoryMcpUrl: env('MEMORY_MCP_URL') || file?.forkscoutMemoryMcpUrl || DEFAULTS.agent.forkscoutMemoryMcpUrl,
         mcpServers,
     };
 }
