@@ -7,7 +7,10 @@
 import { Agent, type AgentConfig } from './agent';
 
 // Export main classes
-export { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
+export { Agent, type AgentConfig, type ChatContext, type ChatChannel, type ChatAgentOptions, type ChatAgentResult } from './agent';
+
+// Re-export key AI SDK v6 agent primitives for consumers
+export { ToolLoopAgent, createAgentUIStreamResponse, type InferAgentUIMessage } from 'ai';
 export { LLMClient, type LLMConfig } from './llm/client';
 export {
     MemoryManager,
@@ -23,6 +26,8 @@ export {
     buildFailureObservation,
 } from './memory';
 export { generateTextWithRetry, streamTextWithRetry, generateTextQuiet, type RetryConfig } from './llm/retry';
+export { buildStopConditions, budgetExceeded, idleDetected, tokenLimitExceeded, repeatedToolFailure, type LoopControlConfig } from './llm/stop-conditions';
+export { createReasoningContext, createPrepareStep, getReasoningSummary, type ReasoningContext, type ToolFailureRecord } from './llm/reasoning';
 export { countTokens, truncateToTokens } from './utils/tokens';
 export {
     coreTools,

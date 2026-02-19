@@ -1,32 +1,43 @@
 /**
  * Reasoning Engine — implements a multi-phase inner loop using AI SDK v6's `prepareStep`.
  *
- * Instead of a single flat tool loop, the agent now operates in phases:
+ * Implements all loop control patterns from the AI SDK v6 documentation:
  *
+ * ## Stop Conditions (via stopWhen array):
+ *   - `stepCountIs(N)` — hard step limit
+ *   - `budgetExceeded(maxUSD)` — per-request cost cap
+ *   - `idleDetected(N)` — stop after N consecutive no-tool-call steps
+ *   - `repeatedToolFailure(N)` — stop if same tool fails N times
+ *   - `tokenLimitExceeded(N)` — hard token cap
+ *
+ * ## prepareStep Phases:
  *   Phase 0 — PLAN (step 0):
- *     System prompt override forces the model to output a plan before acting.
- *     toolChoice: 'none' — no tools allowed during planning.
+ *     System prompt injection forces model to plan + call tools in one step.
+ *     toolChoice: 'required' for complex tasks (force tool invocation, not text).
+ *     activeTools: planning-safe subset (think, memory-read, manage_todos).
  *
- *   Phase 1 — EXECUTE (steps 1–16):
- *     Normal tool execution with full tool access.
- *     If tools return errors, inject remediation guidance into step context.
+ *   Phase 1 — EXECUTE (steps 1 – reflectStep-1):
+ *     Full tool access. toolChoice: 'auto'.
+ *     Context management: prune messages when conversation grows too long.
  *
- *   Phase 2 — REFLECT (step 17):
- *     After execution, inject a reflection prompt asking the model to evaluate:
- *     "Did I actually solve the problem? What evidence do I have?"
- *     If the model finds it didn't solve it, it still has 3 steps to continue.
+ *   Phase 2 — REFLECT (reflectStep):
+ *     Reflection prompt. activeTools: think + verification tools only.
  *
- *   Phase 3 — WRAP-UP (steps 18-20):
- *     Final steps for any remaining work the reflection identified.
+ *   Phase 3 — WRAP-UP (reflectStep+1 ... max):
+ *     All tools available for final fixes. Failure context injected.
  *
- * The engine also:
- *   - Enables Anthropic extended thinking for powerful-tier models
- *   - Tracks tool failures across steps for pattern detection
- *   - Escalates model mid-task if balanced-tier is struggling
+ * ## Dynamic Model Selection:
+ *   - Escalates from balanced→powerful after N tool failures
+ *   - Enables Anthropic extended thinking for powerful+complex
+ *
+ * ## Context Management:
+ *   - Prunes old tool results from messages when step count exceeds threshold
+ *   - Uses AI SDK's `pruneMessages` to trim tool call data before last N messages
  *
  * @module llm/reasoning
  */
 
+import { pruneMessages, type ModelMessage } from 'ai';
 import type { ModelRouter, ModelTier } from './router';
 import type { ComplexityResult } from './complexity';
 import { getConfig } from '../config';
@@ -50,6 +61,8 @@ export interface ReasoningContext {
     escalated: boolean;
     /** Phase tracking */
     phase: 'plan' | 'execute' | 'reflect' | 'wrapup';
+    /** All tool names registered for this session — used for activeTools filtering */
+    allToolNames: string[];
 }
 
 export interface ToolFailureRecord {
@@ -64,29 +77,101 @@ export interface ToolFailureRecord {
 const REFLECT_STEP = 15;
 /** Fallback — prefer getConfig().agent.failureEscalationThreshold at runtime */
 const FAILURE_ESCALATION_THRESHOLD = 3;
+/** After this many steps, start pruning old tool results from messages */
+const CONTEXT_PRUNE_AFTER_STEP = 8;
+/** Keep the last N messages when pruning (AI SDK pruneMessages) */
+const CONTEXT_KEEP_LAST_MESSAGES = 6;
+
+// ── Tool Groups for activeTools ────────────────────────
+
+/** Tools safe for the planning phase (read-only, reasoning, memory-read) */
+const PLANNING_TOOLS = new Set([
+    'think',
+    'manage_todos',
+    'get_current_date',
+    'read_file',
+    'list_directory',
+    'view_activity_log',
+]);
+
+/** Memory-read tools (MCP) — allowed during planning */
+const MEMORY_READ_PREFIXES = ['forkscout-mem_search_', 'forkscout-mem_get_', 'forkscout-mem_check_', 'forkscout-mem_memory_stats'];
+
+/** Tools for the reflection phase — think + verification */
+const REFLECT_TOOLS = new Set([
+    'think',
+    'manage_todos',
+    'read_file',
+    'list_directory',
+    'run_command',
+    'view_activity_log',
+]);
+
+/** Memory-write tools (MCP) — allowed during wrapup for recording findings */
+const MEMORY_WRITE_PREFIXES = [
+    'forkscout-mem_save_knowledge', 'forkscout-mem_add_entity', 'forkscout-mem_add_relation',
+    'forkscout-mem_add_exchange', 'forkscout-mem_self_observe',
+    'forkscout-mem_complete_task', 'forkscout-mem_abort_task',
+];
+
+/**
+ * Filter tool names by phase.
+ * Returns undefined (= all tools available) if the full set can't be determined.
+ */
+function getActiveToolsForPhase(
+    phase: 'plan' | 'execute' | 'reflect' | 'wrapup',
+    allToolNames: string[],
+): string[] | undefined {
+    if (allToolNames.length === 0) return undefined; // Can't filter without names
+
+    switch (phase) {
+        case 'plan': {
+            const allowed = allToolNames.filter(name =>
+                PLANNING_TOOLS.has(name) ||
+                MEMORY_READ_PREFIXES.some(prefix => name.startsWith(prefix)),
+            );
+            // If filtering would empty the set, allow all (safety)
+            return allowed.length > 0 ? allowed : undefined;
+        }
+        case 'reflect': {
+            const allowed = allToolNames.filter(name =>
+                REFLECT_TOOLS.has(name) ||
+                MEMORY_READ_PREFIXES.some(prefix => name.startsWith(prefix)),
+            );
+            return allowed.length > 0 ? allowed : undefined;
+        }
+        case 'wrapup': {
+            // Wrapup: all regular tools + ensure memory-write tools are included
+            const allowed = allToolNames.filter(name =>
+                REFLECT_TOOLS.has(name) ||
+                MEMORY_READ_PREFIXES.some(prefix => name.startsWith(prefix)) ||
+                MEMORY_WRITE_PREFIXES.some(prefix => name.startsWith(prefix)) ||
+                name === 'run_command' || name === 'write_file',
+            );
+            return allowed.length > 0 ? allowed : undefined;
+        }
+        case 'execute':
+        default:
+            return undefined; // Full access
+    }
+}
 
 // ── Planning Prompt ────────────────────────────────────
 
 const PLANNING_INJECTION = `
 
-━━━━ PLANNING PHASE ━━━━
-Before diving into tool calls, start your response with a brief plan:
-
-1. What is the user asking for?
-2. What information do I need to gather first?
-3. What tools should I use, and in what order?
-4. What could go wrong, and how will I verify success?
-
-Output your plan as a brief numbered list FIRST, then proceed to call tools.
+━━━━ INSTRUCTIONS FOR THIS STEP ━━━━
+This is a complex task. In this SAME response:
+1. Write 1-3 sentences saying what you will do (your plan).
+2. IMMEDIATELY call the tools you need — in this same step, not later.
+Do NOT describe tool calls in text. CALL them using the tool API.
 ━━━━━━━━━━━━━━━━━━━━━━━━`;
 
 const ACKNOWLEDGE_INJECTION = `
 
-━━━━ ACKNOWLEDGE FIRST ━━━━
-Before using any tools, start your response with a brief acknowledgment.
-Tell the user what you understood and what you're about to do, in 1-2 natural sentences.
-Keep it short and conversational — no bullet lists, no formality.
-Then proceed to call the necessary tools.
+━━━━ INSTRUCTIONS FOR THIS STEP ━━━━
+Write a brief 1-sentence acknowledgment, then IMMEDIATELY call the necessary tools in this same step.
+Do NOT describe tool calls in text or code blocks — actually CALL them.
 ━━━━━━━━━━━━━━━━━━━━━━━━`;
 
 // ── Reflection Prompt ──────────────────────────────────
@@ -104,6 +189,10 @@ You have been working on this task. Before responding to the user, evaluate:
 If you're not confident the task is complete, continue working.
 If you are confident, provide a clear summary of what you did and the evidence it worked.
 ━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+// ── Context Management Prompt ──────────────────────────
+
+const CONTEXT_PRUNE_NOTICE = `\n\n[Note: Older tool results have been pruned to stay within context limits. Recent results are preserved.]`;
 
 // ── Error Context Injection ────────────────────────────
 
@@ -136,6 +225,37 @@ function getThinkingOptions(tier: ModelTier, complexity: ComplexityResult, model
     };
 }
 
+// ── Context Pruning ────────────────────────────────────
+
+/**
+ * Prune messages to stay within context limits during long tool loops.
+ *
+ * Uses AI SDK's `pruneMessages` to strip old tool call/result data while
+ * keeping recent messages intact. This prevents context window overflow
+ * in long-running agent sessions.
+ */
+function pruneContextIfNeeded(
+    messages: Array<any>,
+    stepNumber: number,
+): Array<ModelMessage> | undefined {
+    const pruneAfter = getConfig().agent.contextPruneAfterStep ?? CONTEXT_PRUNE_AFTER_STEP;
+    if (stepNumber < pruneAfter) return undefined;
+
+    // Only prune if messages have grown significantly
+    if (messages.length <= CONTEXT_KEEP_LAST_MESSAGES * 2) return undefined;
+
+    try {
+        const keepLast = getConfig().agent.contextKeepLastMessages ?? CONTEXT_KEEP_LAST_MESSAGES;
+        return pruneMessages({
+            messages: messages as ModelMessage[],
+            toolCalls: `before-last-${keepLast}-messages`,
+        });
+    } catch {
+        // If pruning fails (e.g. message format issue), return undefined (use original)
+        return undefined;
+    }
+}
+
 // ── Main PrepareStep Factory ───────────────────────────
 
 /**
@@ -143,8 +263,10 @@ function getThinkingOptions(tier: ModelTier, complexity: ComplexityResult, model
  *
  * This function is called before every LLM step in the tool loop and can:
  *   - Override the system prompt (inject planning, reflection prompts)
+ *   - Set `activeTools` — restrict which tools are available per phase
+ *   - Set `toolChoice` — force tool usage or specific tool selection
+ *   - Override `messages` — prune context for long-running loops
  *   - Swap the model (escalate from balanced to powerful on failures)
- *   - Restrict tools (no tools during planning phase)
  *   - Set provider options (enable Anthropic thinking)
  */
 export function createPrepareStep(context: ReasoningContext) {
@@ -154,7 +276,7 @@ export function createPrepareStep(context: ReasoningContext) {
         model: any;
         messages: Array<any>;
     }) => {
-        const { stepNumber, steps } = options;
+        const { stepNumber, steps, messages } = options;
 
         // ── Detect tool failures from previous step ──────
         if (steps.length > 0) {
@@ -173,24 +295,30 @@ export function createPrepareStep(context: ReasoningContext) {
             }
         }
 
+        // ── Context management: prune messages in long loops ──
+        const prunedMessages = pruneContextIfNeeded(messages, stepNumber);
+
         // ── Phase 0: ACKNOWLEDGE / PLAN (step 0, moderate+ tasks) ──
-        // NOTE: We do NOT set toolChoice:'none' here. AI SDK terminates the
-        // step loop when there are zero tool calls in a step. Instead, we inject
-        // an acknowledgment/planning prompt into the system message and let the
-        // model produce text alongside its first tool calls. The handler sends
-        // the text part early via onStepFinish.
+        // We inject a planning prompt and restrict tools to planning-safe subset.
+        // toolChoice: 'required' for complex tasks — forces tool invocation,
+        // preventing the "writes tool calls as text" failure mode.
         if (stepNumber === 0 && context.complexity.complexity !== 'simple') {
             context.phase = 'plan';
             const modelInfo = context.router.getModelByTier(context.tier);
             const providerOpts = getThinkingOptions(context.tier, context.complexity, modelInfo.modelId);
 
-            // Complex: detailed planning. Moderate: quick acknowledgment.
-            const injection = context.complexity.complexity === 'complex'
-                ? PLANNING_INJECTION
-                : ACKNOWLEDGE_INJECTION;
+            // Complex: detailed planning + forced tool use. Moderate: quick ack.
+            const isComplex = context.complexity.complexity === 'complex';
+            const injection = isComplex ? PLANNING_INJECTION : ACKNOWLEDGE_INJECTION;
+
+            // activeTools: restrict to planning-safe tools
+            const activeTools = getActiveToolsForPhase('plan', context.allToolNames);
 
             return {
                 system: context.baseSystemPrompt + injection,
+                ...(activeTools ? { activeTools } : {}),
+                // Force tools for complex tasks to prevent text-only responses
+                ...(isComplex ? { toolChoice: 'required' as const } : {}),
                 ...(providerOpts ? { providerOptions: providerOpts } : {}),
             };
         }
@@ -210,6 +338,7 @@ export function createPrepareStep(context: ReasoningContext) {
             return {
                 model: escalated.model,
                 system: context.baseSystemPrompt + buildFailureContext(context.toolFailures),
+                ...(prunedMessages ? { messages: prunedMessages } : {}),
                 ...(providerOpts ? { providerOptions: providerOpts } : {}),
             };
         }
@@ -218,8 +347,11 @@ export function createPrepareStep(context: ReasoningContext) {
         const reflectStep = getConfig().agent.reflectStep ?? REFLECT_STEP;
         if (stepNumber === reflectStep && context.complexity.complexity !== 'simple') {
             context.phase = 'reflect';
+            const activeTools = getActiveToolsForPhase('reflect', context.allToolNames);
             return {
                 system: context.baseSystemPrompt + REFLECTION_INJECTION + buildFailureContext(context.toolFailures),
+                ...(activeTools ? { activeTools } : {}),
+                ...(prunedMessages ? { messages: prunedMessages } : {}),
             };
         }
 
@@ -230,11 +362,15 @@ export function createPrepareStep(context: ReasoningContext) {
             context.phase = 'execute';
         }
 
-        // Inject failure context if there have been errors
-        if (context.toolFailures.length > 0 && stepNumber > 0) {
-            return {
-                system: context.baseSystemPrompt + buildFailureContext(context.toolFailures),
-            };
+        // Build result object — accumulate optional overrides
+        const result: Record<string, any> = {};
+
+        // Inject context pruning notice when messages were trimmed
+        if (prunedMessages) {
+            result.messages = prunedMessages;
+            result.system = context.baseSystemPrompt + CONTEXT_PRUNE_NOTICE + buildFailureContext(context.toolFailures);
+        } else if (context.toolFailures.length > 0 && stepNumber > 0) {
+            result.system = context.baseSystemPrompt + buildFailureContext(context.toolFailures);
         }
 
         // Enable thinking for powerful tier on complex tasks (all execution steps)
@@ -242,11 +378,11 @@ export function createPrepareStep(context: ReasoningContext) {
             const modelInfo = context.router.getModelByTier(context.tier);
             const providerOpts = getThinkingOptions(context.tier, context.complexity, modelInfo.modelId);
             if (providerOpts) {
-                return { providerOptions: providerOpts };
+                result.providerOptions = providerOpts;
             }
         }
 
-        return undefined;
+        return Object.keys(result).length > 0 ? result : undefined;
     };
 }
 
@@ -259,6 +395,7 @@ export function createReasoningContext(
     tier: ModelTier,
     baseSystemPrompt: string,
     router: ModelRouter,
+    allToolNames: string[] = [],
 ): ReasoningContext {
     return {
         userMessage,
@@ -269,6 +406,7 @@ export function createReasoningContext(
         toolFailures: [],
         escalated: false,
         phase: 'plan',
+        allToolNames,
     };
 }
 

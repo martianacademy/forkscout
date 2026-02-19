@@ -11,13 +11,10 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { Readable } from 'stream';
 import {
-    stepCountIs,
-    convertToModelMessages,
+    createAgentUIStreamResponse,
     type UIMessage,
 } from 'ai';
-import { generateTextWithRetry, streamTextWithRetry } from '../llm/retry';
-import type { ModelTier } from '../llm/router';
-import { createReasoningContext, createPrepareStep, getReasoningSummary } from '../llm/reasoning';
+import { getReasoningSummary } from '../llm/reasoning';
 import { buildFailureObservation } from '../memory';
 import type { Agent } from '../agent';
 import type { ChannelAuthStore } from '../channels/auth';
@@ -47,23 +44,13 @@ export async function handleChatStream(
     const who = ctx.sender ? `${ctx.sender} via ${ctx.channel}` : ctx.channel;
     console.log(`\n[${who}${ctx.isAdmin ? ' (admin)' : ' (guest)'}]: ${userText}`);
 
-    const systemPrompt = await agent.buildSystemPrompt(userText, ctx);
     agent.saveToMemory('user', userText, ctx);
 
-    const { model: chatModel, tier: chatTier, modelId: chatModelId, complexity } = agent.getModelForChat(userText);
-    console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [${complexity.reason}]`);
-
-    // Create reasoning context for inner loop
-    const reasoningCtx = createReasoningContext(userText, complexity, chatTier as ModelTier, systemPrompt, agent.getRouter());
-
-    const result = streamTextWithRetry({
-        model: chatModel,
-        system: systemPrompt,
-        messages: await convertToModelMessages(messages),
-        tools: agent.getToolsForContext(ctx),
-        stopWhen: stepCountIs(getConfig().agent.maxSteps),
-        prepareStep: createPrepareStep(reasoningCtx),
-        onStepFinish: ({ toolCalls, toolResults }) => {
+    // Create a per-request ToolLoopAgent with all configuration
+    const { agent: chatAgent, reasoningCtx } = await agent.createChatAgent({
+        userText,
+        ctx,
+        onStepFinish: ({ toolCalls, toolResults }: any) => {
             if (toolCalls && toolCalls.length > 0) {
                 console.log(`[Agent]: Step — ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
             }
@@ -74,7 +61,7 @@ export async function handleChatStream(
                 }
             }
         },
-        onFinish: ({ text, steps, usage }) => {
+        onFinish: ({ text, steps, usage }: any) => {
             const summary = getReasoningSummary(reasoningCtx);
             console.log(`[Agent]: Done (${steps?.length || 0} step(s), tier: ${summary.finalTier}, failures: ${summary.toolFailures}${summary.escalated ? ', ESCALATED' : ''})`);
             if (usage) {
@@ -90,18 +77,20 @@ export async function handleChatStream(
                 try { agent.getMemoryManager().recordSelfObservation(failureObs, 'failure-learning'); } catch { /* non-critical */ }
             }
         },
-        onError: ({ error }) => {
-            console.error(`[Agent]: Stream error:`, error);
-        },
     });
 
-    // Convert AI SDK Response to Node.js response
-    const webResponse = result.toUIMessageStreamResponse();
+    // Use createAgentUIStreamResponse — handles agent.stream() + UIMessage serialization
+    const webResponse = await createAgentUIStreamResponse({
+        agent: chatAgent,
+        uiMessages: messages,
+    });
+
+    // Pipe the web Response to the Node.js ServerResponse
     const headers: Record<string, string> = {};
     webResponse.headers.forEach((value, key) => {
         headers[key] = value;
     });
-    res.writeHead(200, headers);
+    res.writeHead(webResponse.status, headers);
 
     if (webResponse.body) {
         Readable.fromWeb(webResponse.body as any).pipe(res);
@@ -128,30 +117,23 @@ export async function handleChatSync(
         return;
     }
 
-    const systemPrompt = await agent.buildSystemPrompt(userText, ctx);
     agent.saveToMemory('user', userText, ctx);
 
     try {
-        const { model: syncModel, tier: syncTier, modelId: syncModelId } = agent.getModelForChat(userText);
-        console.log(`[Router]: Sync using ${syncTier} tier (${syncModelId})`);
+        // Create a per-request ToolLoopAgent via the centralized factory
+        const { agent: chatAgent, reasoningCtx } = await agent.createChatAgent({ userText, ctx });
 
-        const syncReasoningCtx = createReasoningContext(userText, { complexity: 'moderate', tier: syncTier as ModelTier, reason: 'sync' }, syncTier as ModelTier, systemPrompt, agent.getRouter());
-
-        const { text, usage } = await generateTextWithRetry({
-            model: syncModel,
-            system: systemPrompt,
-            messages: await convertToModelMessages(messages),
-            tools: agent.getToolsForContext(ctx),
-            stopWhen: stepCountIs(getConfig().agent.maxSteps),
-            prepareStep: createPrepareStep(syncReasoningCtx),
+        // agent.generate() returns the same shape as generateText()
+        const { text, usage } = await chatAgent.generate({
+            prompt: userText,
         });
 
         if (usage) {
-            agent.getRouter().recordUsage(syncReasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
+            agent.getRouter().recordUsage(reasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
         }
 
         // Learn from failures
-        const syncFailureObs = buildFailureObservation(syncReasoningCtx, text || '');
+        const syncFailureObs = buildFailureObservation(reasoningCtx, text || '');
         if (syncFailureObs) {
             try { agent.getMemoryManager().recordSelfObservation(syncFailureObs, 'failure-learning'); } catch { /* non-critical */ }
         }

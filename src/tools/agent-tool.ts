@@ -17,10 +17,8 @@
  * @module tools/agent-tool
  */
 
-import { tool } from 'ai';
+import { tool, ToolLoopAgent, stepCountIs } from 'ai';
 import { z } from 'zod';
-import { stepCountIs } from 'ai';
-import { generateTextWithRetry } from '../llm/retry';
 import type { ModelRouter } from '../llm/router';
 import { getConfig } from '../config';
 import { describeToolCall } from '../utils/describe-tool-call';
@@ -414,53 +412,57 @@ async function runSubAgent(deps: SubAgentDeps, task: SubAgentTask, batchSignal?:
     // Collect partial steps via callback — if the agent crashes mid-run, we preserve its progress
     const partialSteps: any[] = [];
 
-    try {
-        const result = await generateTextWithRetry(
-            {
-                model,
-                temperature: temp,
-                system: systemPrompt,
-                prompt: task.task,
-                tools: subAgentTools,
-                stopWhen: stepCountIs(getConfig().agent.subAgent.maxSteps ?? SUBAGENT_MAX_STEPS),
-                abortSignal: AbortSignal.any([
-                    AbortSignal.timeout(getConfig().agent.subAgent.timeoutMs ?? SUBAGENT_TIMEOUT_MS),
-                    ...(batchSignal ? [batchSignal] : []),
-                ]),
-                onStepFinish: (step) => {
-                    partialSteps.push(step);
+    // Build the ToolLoopAgent — encapsulates model, tools, system prompt, and stop conditions
+    const subAgent = new ToolLoopAgent({
+        id: `subagent-${label}`,
+        model,
+        temperature: temp,
+        instructions: systemPrompt,
+        tools: subAgentTools,
+        maxRetries: subAgentCfg.retryAttempts ?? 2,
+        stopWhen: stepCountIs(subAgentCfg.maxSteps ?? SUBAGENT_MAX_STEPS),
+        onStepFinish: (step) => {
+            partialSteps.push(step);
 
-                    // Live progress feedback to the user's channel
-                    if (deps.onProgress) {
-                        try {
-                            const lines: string[] = [];
+            // Live progress feedback to the user's channel
+            if (deps.onProgress) {
+                try {
+                    const lines: string[] = [];
 
-                            // Include any reasoning text from this step
-                            if (step.text?.trim()) {
-                                const preview = step.text.trim().length > 150
-                                    ? step.text.trim().slice(0, 150) + '…'
-                                    : step.text.trim();
-                                lines.push(preview);
-                            }
+                    // Include any reasoning text from this step
+                    if (step.text?.trim()) {
+                        const preview = step.text.trim().length > 150
+                            ? step.text.trim().slice(0, 150) + '…'
+                            : step.text.trim();
+                        lines.push(preview);
+                    }
 
-                            // Describe each tool call
-                            if (step.toolCalls?.length) {
-                                for (const tc of step.toolCalls as any[]) {
-                                    lines.push(describeToolCall(tc.toolName, tc.input ?? tc.args ?? {}));
-                                }
-                            }
-
-                            if (lines.length > 0) {
-                                deps.onProgress(label, lines.join('\n'));
-                            }
-                        } catch {
-                            // Progress reporting is non-critical — never crash the sub-agent
+                    // Describe each tool call
+                    if (step.toolCalls?.length) {
+                        for (const tc of step.toolCalls as any[]) {
+                            lines.push(describeToolCall(tc.toolName, tc.input ?? tc.args ?? {}));
                         }
                     }
-                },
-            },
-            { maxAttempts: subAgentCfg.retryAttempts ?? 2, initialDelayMs: subAgentCfg.retryDelayMs ?? 500 },
-        );
+
+                    if (lines.length > 0) {
+                        deps.onProgress(label, lines.join('\n'));
+                    }
+                } catch {
+                    // Progress reporting is non-critical — never crash the sub-agent
+                }
+            }
+        },
+    });
+
+    try {
+        // Use agent.generate() — clean call with just the prompt and abort signal
+        const result = await subAgent.generate({
+            prompt: task.task,
+            abortSignal: AbortSignal.any([
+                AbortSignal.timeout(subAgentCfg.timeoutMs ?? SUBAGENT_TIMEOUT_MS),
+                ...(batchSignal ? [batchSignal] : []),
+            ]),
+        });
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         const steps = result.steps?.length ?? 0;

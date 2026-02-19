@@ -128,6 +128,18 @@ export interface AgentSettings {
     browserIdleMs: number;
     /** Activity log max size in bytes before rotation */
     activityLogMaxBytes: number;
+    /** Max USD spend per single request. 0 = disabled. (stop condition) */
+    maxRequestCostUSD: number;
+    /** Consecutive no-tool-call steps before stopping. 0 = disabled. (stop condition) */
+    idleStepThreshold: number;
+    /** Max total tokens per single request. 0 = disabled. (stop condition) */
+    maxRequestTokens: number;
+    /** Max times same tool can fail before stopping. 0 = disabled. (stop condition) */
+    maxToolRetries: number;
+    /** Step number after which to start pruning old tool results from context. 0 = disabled. */
+    contextPruneAfterStep: number;
+    /** Number of recent messages to keep when pruning context */
+    contextKeepLastMessages: number;
 }
 
 // ── SearXNG ────────────────────────────────────────────
@@ -259,6 +271,12 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         failureEscalationThreshold: 3,
         browserIdleMs: 60_000,
         activityLogMaxBytes: 5 * 1024 * 1024,
+        maxRequestCostUSD: 0.50,
+        idleStepThreshold: 3,
+        maxRequestTokens: 0,
+        maxToolRetries: 4,
+        contextPruneAfterStep: 8,
+        contextKeepLastMessages: 6,
     },
     searxng: { url: 'http://localhost:8888' },
 };

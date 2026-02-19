@@ -1,5 +1,6 @@
+import { ToolLoopAgent, type ToolSet } from 'ai';
 import { LLMClient } from '../llm/client';
-import { ModelRouter, createRouterFromEnv, type ModelPurpose } from '../llm/router';
+import { ModelRouter, createRouterFromEnv, type ModelPurpose, type ModelTier } from '../llm/router';
 import { classifyComplexity, type ComplexityResult } from '../llm/complexity';
 import { MemoryManager } from '../memory';
 import type { Scheduler, CronAlert } from '../scheduler';
@@ -13,13 +14,57 @@ import { connectMcpServers } from '../mcp/defaults';
 import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-builder';
 import { createMemoryManager, createScheduler } from './factories';
 import { registerDefaultTools } from './tools-setup';
-import { resolveApiKeyForProvider } from '../config';
+import { resolveApiKeyForProvider, getConfig } from '../config';
+import { buildStopConditions } from '../llm/stop-conditions';
+import { createReasoningContext, createPrepareStep, type ReasoningContext } from '../llm/reasoning';
 import type { SubAgentDeps, SubAgentProgressCallback } from '../tools/agent-tool';
 
 // Re-export all types from the barrel
 export type { AgentConfig, AgentState, ChatContext, ChatChannel } from './types';
 import type { AgentConfig, AgentState, ChatContext } from './types';
 
+/**
+ * Options for creating a per-request ToolLoopAgent via `agent.createChatAgent()`.
+ */
+export interface ChatAgentOptions {
+    /** The user's text message (used for complexity routing and system prompt) */
+    userText: string;
+    /** Chat context (channel, sender, admin status) */
+    ctx?: ChatContext;
+    /** Callback fired after each tool-loop step. Applied in ADDITION to any constructor-level onStepFinish. */
+    onStepFinish?: (step: any) => void | Promise<void>;
+    /** Callback fired when the entire generation completes */
+    onFinish?: (result: any) => void | Promise<void>;
+    /** Callback fired on stream errors */
+    onError?: (event: { error: unknown }) => void;
+    /** Override model (skip complexity routing) */
+    model?: any;
+    /** Override model tier label (for logging) */
+    tier?: string;
+    /** Override model ID label (for logging) */
+    modelId?: string;
+    /** Text appended to the system prompt (e.g. Telegram resume context) */
+    systemPromptSuffix?: string;
+}
+
+/**
+ * Result from `createChatAgent()` — the ToolLoopAgent instance plus
+ * metadata needed for logging and cost tracking after generation.
+ */
+export interface ChatAgentResult {
+    /** The configured ToolLoopAgent ready for .generate() or .stream() */
+    agent: ToolLoopAgent<never, ToolSet>;
+    /** The reasoning context (for post-generation logging/failure learning) */
+    reasoningCtx: ReasoningContext;
+    /** Resolved model tier */
+    tier: string;
+    /** Resolved model ID */
+    modelId: string;
+    /** The system prompt that was built */
+    systemPrompt: string;
+    /** The tools given to this agent */
+    tools: Record<string, any>;
+}
 /**
  * Forkscout Agent — AI SDK v6 powered agent with tools, memory, and MCP.
  *
@@ -105,6 +150,72 @@ export class Agent {
 
         const result = this.router.getModel('chat');
         return { ...result, complexity };
+    }
+
+    /**
+     * Create a fully configured ToolLoopAgent for a single chat request.
+     *
+     * Centralizes the ~15 parameters that every call site needs into one factory:
+     *   - Model selection (complexity-based routing)
+     *   - System prompt (memory-enriched)
+     *   - Tools (access-level filtered)
+     *   - Stop conditions (budget, idle, token limit, step count)
+     *   - PrepareStep (multi-phase reasoning: plan → execute → reflect → wrapup)
+     *   - onStepFinish / onFinish callbacks
+     *
+     * Call sites use: `agent.createChatAgent(opts)` → `result.agent.generate(...)` or
+     * `createAgentUIStreamResponse({ agent: result.agent, uiMessages })`.
+     */
+    async createChatAgent(opts: ChatAgentOptions): Promise<ChatAgentResult> {
+        const { userText, ctx, onStepFinish, onFinish } = opts;
+
+        // 1. Build enriched system prompt with memory + urgent alerts
+        let systemPrompt = await this.buildSystemPrompt(userText, ctx);
+        if (opts.systemPromptSuffix) {
+            systemPrompt += '\n\n' + opts.systemPromptSuffix;
+        }
+
+        // 2. Model selection — use override or complexity-based routing
+        let chatModel = opts.model;
+        let chatTier = opts.tier || 'balanced';
+        let chatModelId = opts.modelId || '';
+        let complexity: ComplexityResult;
+
+        if (chatModel) {
+            complexity = classifyComplexity(userText);
+        } else {
+            const selection = this.getModelForChat(userText);
+            chatModel = selection.model;
+            chatTier = selection.tier;
+            chatModelId = selection.modelId;
+            complexity = selection.complexity;
+            console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [${complexity.reason}]`);
+        }
+
+        // 3. Tools — filtered by access level
+        const tools = this.getToolsForContext(ctx);
+        const toolNames = Object.keys(tools);
+
+        // 4. Reasoning context — drives the multi-phase prepareStep
+        const reasoningCtx = createReasoningContext(
+            userText, complexity, chatTier as ModelTier,
+            systemPrompt, this.router, toolNames,
+        );
+
+        // 5. Build the ToolLoopAgent with all configuration
+        const agent = new ToolLoopAgent({
+            id: `forkscout-${ctx?.channel || 'chat'}`,
+            model: chatModel,
+            instructions: systemPrompt,
+            tools,
+            maxRetries: 3,
+            stopWhen: buildStopConditions(getConfig().agent),
+            prepareStep: createPrepareStep(reasoningCtx),
+            onStepFinish: onStepFinish ? (step: any) => { onStepFinish(step); } : undefined,
+            onFinish: onFinish ? (result: any) => { onFinish(result); } : undefined,
+        });
+
+        return { agent, reasoningCtx, tier: chatTier, modelId: chatModelId, systemPrompt, tools };
     }
 
     getRouter(): ModelRouter {

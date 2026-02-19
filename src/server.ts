@@ -7,14 +7,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { Readable } from 'stream';
 import {
-    stepCountIs,
-    convertToModelMessages,
-
+    createAgentUIStreamResponse,
     type UIMessage,
 } from 'ai';
-import { generateTextWithRetry, streamTextWithRetry } from './llm/retry';
-import type { ModelTier } from './llm/router';
-import { createReasoningContext, createPrepareStep, getReasoningSummary } from './llm/reasoning';
+import { getReasoningSummary } from './llm/reasoning';
 import { buildFailureObservation } from './memory';
 import { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
 import type { ChannelAuthStore } from './channels/auth';
@@ -266,29 +262,16 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 console.log(`\n[${who}${ctx.isAdmin ? ' (admin)' : ' (guest)'}]: ${userText}`);
                 logChat(ctx.channel, ctx.isAdmin, userText, ctx.sender);
 
-                // Build enriched system prompt with memory + urgent alerts
-                const systemPrompt = await agent.buildSystemPrompt(userText, ctx);
                 agent.saveToMemory('user', userText, ctx);
-
-                // Stream with AI SDK v6 — tools filtered by access level
-                const { model: chatModel, tier: chatTier, modelId: chatModelId, complexity } = agent.getModelForChat(userText);
-                console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [${complexity.reason}]`);
 
                 // Track request for abort capability
                 const { id: reqId, signal: abortSignal } = requestTracker.start('http-stream', ctx.sender);
 
-                // Create reasoning context for inner loop
-                const reasoningCtx = createReasoningContext(userText, complexity, chatTier as ModelTier, systemPrompt, agent.getRouter());
-
-                const result = streamTextWithRetry({
-                    model: chatModel,
-                    system: systemPrompt,
-                    messages: await convertToModelMessages(messages),
-                    tools: agent.getToolsForContext(ctx),
-                    stopWhen: stepCountIs(getConfig().agent.maxSteps),
-                    abortSignal,
-                    prepareStep: createPrepareStep(reasoningCtx),
-                    onStepFinish: ({ toolCalls, toolResults }) => {
+                // Create a per-request ToolLoopAgent via the centralized factory
+                const { agent: chatAgent, reasoningCtx, modelId: chatModelId } = await agent.createChatAgent({
+                    userText,
+                    ctx,
+                    onStepFinish: ({ toolCalls, toolResults }: any) => {
                         if (toolCalls && toolCalls.length > 0) {
                             console.log(`[Agent]: Step — ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
                         }
@@ -308,7 +291,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                             }
                         }
                     },
-                    onFinish: ({ text, steps, usage }) => {
+                    onFinish: ({ text, steps, usage }: any) => {
                         const summary = getReasoningSummary(reasoningCtx);
                         console.log(`[Agent]: Done (${steps?.length || 0} step(s), tier: ${summary.finalTier}, failures: ${summary.toolFailures}${summary.escalated ? ', ESCALATED' : ''})`);
                         // Record cost
@@ -343,21 +326,25 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                             }
                         }
                     },
-                    onError: ({ error }) => {
-                        console.error(`[Agent]: Stream error:`, error);
-                    },
                 });
 
-                // Clean up tracker when stream finishes
-                Promise.resolve(result.text).then(() => requestTracker.finish(reqId), () => requestTracker.finish(reqId));
+                // Use createAgentUIStreamResponse — handles agent.stream() + UIMessage serialization
+                const webResponse = await createAgentUIStreamResponse({
+                    agent: chatAgent,
+                    uiMessages: messages,
+                    abortSignal,
+                });
 
-                // Convert AI SDK Response to Node.js response
-                const webResponse = result.toUIMessageStreamResponse();
+                // Clean up tracker when response is sent
+                res.on('finish', () => requestTracker.finish(reqId));
+                res.on('close', () => requestTracker.finish(reqId));
+
+                // Pipe the web Response to the Node.js ServerResponse
                 const headers: Record<string, string> = {};
                 webResponse.headers.forEach((value, key) => {
                     headers[key] = value;
                 });
-                res.writeHead(200, headers);
+                res.writeHead(webResponse.status, headers);
 
                 if (webResponse.body) {
                     Readable.fromWeb(webResponse.body as any).pipe(res);
@@ -379,7 +366,6 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     return;
                 }
 
-                const systemPrompt = await agent.buildSystemPrompt(userText, ctx);
                 agent.saveToMemory('user', userText, ctx);
                 logChat(ctx.channel, ctx.isAdmin, userText, ctx.sender);
 
@@ -387,20 +373,12 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 const { id: syncReqId, signal: syncAbortSignal } = requestTracker.start('http-sync', ctx.sender);
 
                 try {
-                    const { model: syncModel, tier: syncTier, modelId: syncModelId, complexity: syncComplexity } = agent.getModelForChat(userText);
-                    console.log(`[Router]: Sync using ${syncTier} tier (${syncModelId}) [${syncComplexity.reason}]`);
+                    // Create a per-request ToolLoopAgent via the centralized factory
+                    const { agent: syncAgent, reasoningCtx: syncReasoningCtx, modelId: syncModelId } = await agent.createChatAgent({ userText, ctx });
 
-                    // Create reasoning context for inner loop
-                    const syncReasoningCtx = createReasoningContext(userText, syncComplexity, syncTier as ModelTier, systemPrompt, agent.getRouter());
-
-                    const { text, usage, steps } = await generateTextWithRetry({
-                        model: syncModel,
-                        system: systemPrompt,
-                        messages: await convertToModelMessages(messages),
-                        tools: agent.getToolsForContext(ctx),
-                        stopWhen: stepCountIs(getConfig().agent.maxSteps),
+                    const { text, usage, steps } = await syncAgent.generate({
+                        prompt: userText,
                         abortSignal: syncAbortSignal,
-                        prepareStep: createPrepareStep(syncReasoningCtx),
                     });
 
                     // Record cost + activity log

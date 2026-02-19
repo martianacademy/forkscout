@@ -2,11 +2,11 @@
  * Telegram message handler — processes incoming updates and generates AI responses.
  */
 
-import { stepCountIs, type UIMessage } from 'ai';
+import type { UIMessage } from 'ai';
 import { getConfig } from '../../config';
 import { generateTextWithRetry, isVisionUnsupportedError } from '../../llm/retry';
-import type { ModelTier } from '../../llm/router';
-import { createReasoningContext, createPrepareStep, getReasoningSummary } from '../../llm/reasoning';
+import { getReasoningSummary } from '../../llm/reasoning';
+import { buildStopConditions } from '../../llm/stop-conditions';
 import { buildFailureObservation } from '../../memory';
 import type { Agent, ChatContext } from '../../agent';
 import { requestTracker } from '../../request-tracker';
@@ -161,8 +161,7 @@ export async function handleTelegramUpdate(
     await deps.flushHistory();
 
     try {
-        // Build enriched system prompt — include missed-message context
-        // Use text for prompt query; fall back to a type description for non-text messages
+        // Build user query — include missed-message context for the system prompt
         const queryText = text || describeMessageType(msg);
         let queryForPrompt = queryText;
         if (isMissed) {
@@ -171,28 +170,10 @@ export async function handleTelegramUpdate(
             queryForPrompt = `[This message was sent ${ago} while you were offline. Acknowledge that you were away and respond helpfully.]\n\n${queryText}`;
         }
 
-        let systemPrompt = await agent.buildSystemPrompt(queryForPrompt, ctx);
-
-        // If resuming after a restart, inject context about already-completed steps
-        if (resumeContext) {
-            systemPrompt += '\n\n' + resumeContext;
-        }
-
         agent.saveToMemory('user', queryText, ctx);
 
         // Refresh typing every ~4 seconds during generation
         const typingInterval = setInterval(() => sendTyping(token, chatId), 4000);
-
-        const { model: tgModel, tier: tgTier, complexity: tgComplexity } = agent.getModelForChat(queryText);
-
-        // Build reasoning context for multi-phase reasoning
-        const reasoningCtx = createReasoningContext(
-            queryText,
-            tgComplexity,
-            tgTier as ModelTier,
-            systemPrompt,
-            agent.getRouter(),
-        );
 
         // Track ALL text fragments sent during generation so we don't double-send
         const sentFragments: string[] = [];
@@ -208,9 +189,14 @@ export async function handleTelegramUpdate(
             );
         });
 
-        const { text: responseText, usage } = await generateTextWithRetry({
-            model: tgModel,
-            system: systemPrompt,
+        // Create a per-request ToolLoopAgent via the centralized factory
+        const { agent: chatAgent, reasoningCtx } = await agent.createChatAgent({
+            userText: queryForPrompt,
+            ctx,
+            systemPromptSuffix: resumeContext,
+        });
+
+        const { text: responseText, usage } = await chatAgent.generate({
             messages: history.map(m => {
                 const contentParts: any[] = [];
                 for (const p of (m.parts || []) as any[]) {
@@ -226,11 +212,8 @@ export async function handleTelegramUpdate(
                         : contentParts;
                 return { role: m.role as 'user' | 'assistant', content };
             }),
-            tools: agent.getToolsForContext(ctx),
-            stopWhen: stepCountIs(getConfig().agent.maxSteps),
             abortSignal: tgAbortSignal,
-            prepareStep: createPrepareStep(reasoningCtx),
-            onStepFinish: async ({ text: stepText, toolCalls, toolResults }) => {
+            onStepFinish: async ({ text: stepText, toolCalls, toolResults }: any) => {
                 const currentStep = stepCounter++;
 
                 // Stream ALL intermediate text (planning, reasoning, progress updates)
@@ -448,7 +431,7 @@ export async function handleTelegramUpdate(
                         return { role: m.role as 'user' | 'assistant', content };
                     }),
                     tools: agent.getToolsForContext(ctx),
-                    stopWhen: stepCountIs(getConfig().agent.maxSteps),
+                    stopWhen: buildStopConditions(getConfig().agent),
                 });
                 clearInterval(typingInterval2);
 
