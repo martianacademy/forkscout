@@ -134,24 +134,40 @@ export class McpConnector {
             description: `[MCP:${serverName}] ${mcpTool.description || mcpTool.name}`,
             parameters: zodSchema,
             execute: async (params: any) => {
-                const result = await client.callTool({
-                    name: mcpTool.name,
-                    arguments: params,
-                });
+                try {
+                    const result = await client.callTool({
+                        name: mcpTool.name,
+                        arguments: params,
+                    });
 
-                // MCP returns content array — extract text
-                const texts: string[] = [];
-                if (result.content && Array.isArray(result.content)) {
-                    for (const item of result.content as any[]) {
-                        if (item.type === 'text') {
-                            texts.push(item.text);
-                        } else if (item.type === 'resource') {
-                            texts.push(JSON.stringify(item.resource));
+                    // MCP returns content array — extract text
+                    const texts: string[] = [];
+                    if (result.content && Array.isArray(result.content)) {
+                        for (const item of result.content as any[]) {
+                            if (item.type === 'text') {
+                                texts.push(item.text);
+                            } else if (item.type === 'resource') {
+                                texts.push(JSON.stringify(item.resource));
+                            }
                         }
                     }
-                }
 
-                return texts.join('\n') || JSON.stringify(result);
+                    // Check for MCP-level error flag
+                    if ((result as any).isError) {
+                        const errorText = texts.join('\n') || JSON.stringify(result);
+                        return `⚠️ TOOL ERROR in "${toolName}" (MCP)\nError: ${errorText}\n\nNEXT STEPS: The MCP tool reported an error. Check your parameters and try again with corrected input.`;
+                    }
+
+                    return texts.join('\n') || JSON.stringify(result);
+                } catch (error) {
+                    // Return structured error instead of throwing — prevents breaking the tool loop
+                    const errMsg = error instanceof Error ? error.message : String(error);
+                    const isConnectionError = /ECONNREFUSED|EPIPE|socket|disconnected|transport|closed/i.test(errMsg);
+                    const guide = isConnectionError
+                        ? `The MCP server "${serverName}" appears to be down or disconnected. Check if it is running, then retry.`
+                        : `The MCP tool failed. Read the error message, verify your parameters, and try again.`;
+                    return `⚠️ TOOL ERROR in "${toolName}" (MCP:${serverName})\nError: ${errMsg}\n\nNEXT STEPS: ${guide}\nDo NOT retry the same call without understanding why it failed first.`;
+                }
             },
         };
     }

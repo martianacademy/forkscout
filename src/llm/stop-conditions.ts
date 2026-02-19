@@ -132,7 +132,9 @@ export function repeatedToolFailure(maxRepeats = 3): StopCondition<any> {
         for (const step of steps) {
             if (!step.toolResults) continue;
             for (const tr of step.toolResults) {
-                const output = typeof (tr as any).result === 'string' ? (tr as any).result : JSON.stringify((tr as any).result || '');
+                // AI SDK v6 StepResult content parts use .output (not .result)
+                const raw = (tr as any).output;
+                const output = typeof raw === 'string' ? raw : JSON.stringify(raw || '');
                 if (output.includes('TOOL ERROR') || output.includes('Error:') || output.includes('ENOENT')) {
                     const name = (tr as any).toolName || 'unknown';
                     failCounts.set(name, (failCounts.get(name) ?? 0) + 1);

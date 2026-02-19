@@ -283,7 +283,9 @@ export function createPrepareStep(context: ReasoningContext) {
             const lastStep = steps[steps.length - 1];
             if (lastStep.toolResults) {
                 for (const tr of lastStep.toolResults) {
-                    const output = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result || '');
+                    // AI SDK v6 StepResult content parts use .output (not .result)
+                    const raw = (tr as any).output;
+                    const output = typeof raw === 'string' ? raw : JSON.stringify(raw || '');
                     if (output.includes('TOOL ERROR') || output.includes('Error:') || output.includes('ENOENT') || output.includes('permission denied')) {
                         context.toolFailures.push({
                             stepNumber: stepNumber - 1,

@@ -203,9 +203,11 @@ function extractFromSteps(steps: any[]): string {
         // Grab tool results (the actual findings)
         if (step.toolResults?.length) {
             for (const tr of step.toolResults) {
-                const content = typeof tr.result === 'string'
-                    ? tr.result
-                    : JSON.stringify(tr.result, null, 2);
+                // AI SDK v6 StepResult content parts use .output (not .result)
+                const raw = (tr as any).output;
+                const content = typeof raw === 'string'
+                    ? raw
+                    : JSON.stringify(raw, null, 2);
                 if (content && content.length > 10) {
                     // Truncate very large tool outputs
                     const maxLen = getConfig().agent.subAgent.outputMaxLength ?? 2000;

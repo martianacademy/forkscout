@@ -5,10 +5,10 @@
     "router": {
         "openrouter": {
             "fast": {
-                "model": "minimax/minimax-m2.5"
+                "model": "moonshotai/kimi-k2.5"
             },
             "balanced": {
-                "model": "minimax/minimax-m2.5"
+                "model": "moonshotai/kimi-k2.5"
             },
             "powerful": {
                 "model": "moonshotai/kimi-k2.5"

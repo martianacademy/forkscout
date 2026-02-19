@@ -4,6 +4,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { McpConnector, loadMcpConfig, saveMcpConfig, type McpServerConfig } from '../mcp/connector';
+import { enhanceToolSet } from './error-enhancer';
 
 export function createMcpTools(
     connector: McpConnector,
@@ -26,7 +27,7 @@ export function createMcpTools(
                 const serverConfig: McpServerConfig = { command, args, env, url, headers, enabled: true };
                 const mcpTools = await connector.connectServer(name, serverConfig);
 
-                // Convert MCP tools to AI SDK format and register
+                // Convert MCP tools to AI SDK format, enhance, and register
                 const aiTools: Record<string, any> = {};
                 for (const t of mcpTools) {
                     aiTools[t.name] = tool({
@@ -35,6 +36,9 @@ export function createMcpTools(
                         execute: async (input: any) => t.execute(input),
                     });
                 }
+                // Wrap with error enhancer — dynamically-added tools miss
+                // the initial enhanceToolSet() call from tools-setup.ts
+                enhanceToolSet(aiTools);
                 addToolsFn(aiTools);
 
                 // Persist config

@@ -6,6 +6,7 @@
 import { tool } from 'ai';
 import { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './connector';
 import { getConfig, type McpServerEntry } from '../config';
+import { enhanceToolSet } from '../tools/error-enhancer';
 
 /**
  * Connect to all configured MCP servers and register their tools.
@@ -44,15 +45,25 @@ export async function connectMcpServers(
     const mcpTools = await mcpConnector.connect(config);
 
     // Convert MCP tools (custom format) → AI SDK tool() format
+    const mcpToolNames: string[] = [];
     for (const t of mcpTools) {
         toolSet[t.name] = tool({
             description: t.description,
             inputSchema: t.parameters,
             execute: async (input: any) => t.execute(input),
         });
+        mcpToolNames.push(t.name);
     }
 
-    if (mcpTools.length > 0) {
-        console.log(`Registered ${mcpTools.length} MCP tool(s)\n`);
+    // Wrap MCP tools with error enhancer — these were added AFTER the
+    // initial enhanceToolSet() call in tools-setup.ts, so they need
+    // explicit wrapping to prevent unhandled throws from breaking the loop.
+    if (mcpToolNames.length > 0) {
+        const mcpSubset: Record<string, any> = {};
+        for (const name of mcpToolNames) mcpSubset[name] = toolSet[name];
+        enhanceToolSet(mcpSubset);
+        // Write enhanced versions back
+        for (const name of mcpToolNames) toolSet[name] = mcpSubset[name];
+        console.log(`Registered ${mcpTools.length} MCP tool(s) (error-enhanced)\n`);
     }
 }
