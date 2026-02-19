@@ -14,6 +14,7 @@ import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-bui
 import { createMemoryManager, createScheduler } from './factories';
 import { registerDefaultTools } from './tools-setup';
 import { resolveApiKeyForProvider } from '../config';
+import type { SubAgentDeps, SubAgentProgressCallback } from '../tools/agent-tool';
 
 // Re-export all types from the barrel
 export type { AgentConfig, AgentState, ChatContext, ChatChannel } from './types';
@@ -45,6 +46,7 @@ export class Agent {
     private telegramBridge: any = null;
     private router: ModelRouter;
     private promptCache: PromptCache = { defaultPrompt: null, publicPrompt: null };
+    private subAgentDeps: SubAgentDeps | null = null;
 
     constructor(config: AgentConfig) {
         this.config = config;
@@ -71,7 +73,7 @@ export class Agent {
 
         // Register tools
         if (config.autoRegisterDefaultTools !== false) {
-            registerDefaultTools(
+            this.subAgentDeps = registerDefaultTools(
                 this.toolSet, this.scheduler, this.mcpConnector, this.mcpConfigPath,
                 this.memory, this.survival, this.channelAuth, this.router,
             );
@@ -145,6 +147,19 @@ export class Agent {
         return this.telegramBridge;
     }
 
+    /**
+     * Set a progress callback for sub-agents. Call before each request,
+     * clear after. Sub-agents will send live step-by-step updates.
+     */
+    setSubAgentProgress(cb: SubAgentProgressCallback): void {
+        if (this.subAgentDeps) this.subAgentDeps.onProgress = cb;
+    }
+
+    /** Clear the sub-agent progress callback (call after request completes). */
+    clearSubAgentProgress(): void {
+        if (this.subAgentDeps) this.subAgentDeps.onProgress = undefined;
+    }
+
     getToolList(): Array<{ name: string; description: string }> {
         return Object.entries(this.toolSet).map(([name, t]) => ({
             name,
@@ -155,7 +170,7 @@ export class Agent {
     // ── System Prompt ──────────────────────────────────
 
     async buildSystemPrompt(userQuery: string, ctx?: ChatContext): Promise<string> {
-        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, userQuery, ctx);
+        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, this.router, userQuery, ctx);
     }
 
     // ── Memory ─────────────────────────────────────────
@@ -171,8 +186,8 @@ export class Agent {
             try {
                 const recentMessages = this.memory.getRecentHistoryWithTimestamps(10);
                 this.memory.updateEntitySession(ctx.sender, recentMessages, ctx.channel);
-            } catch {
-                /* non-critical */
+            } catch (err) {
+                console.warn(`[Agent]: Entity session update failed for ${ctx.sender}: ${err instanceof Error ? (err as Error).message : err}`);
             }
         }
     }

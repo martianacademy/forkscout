@@ -58,7 +58,8 @@ export function createScheduler(router: ModelRouter, onUrgent: (alert: CronAlert
                 });
                 const level = response.trim().toLowerCase();
                 return level === 'urgent' || level === 'important' ? (level as any) : 'normal';
-            } catch {
+            } catch (err) {
+                console.warn(`[Scheduler]: Urgency evaluation failed for "${jobName}": ${err instanceof Error ? err.message : err}`);
                 return 'normal';
             }
         },

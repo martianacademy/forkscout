@@ -51,10 +51,56 @@ export interface McpServerEntry {
     enabled?: boolean;
 }
 
+// ── Sub-agent settings ─────────────────────────────────
+
+export interface SubAgentConfig {
+    /** Max steps per sub-agent run */
+    maxSteps: number;
+    /** Timeout per sub-agent in ms */
+    timeoutMs: number;
+    /** Max concurrent sub-agents in a batch */
+    maxParallel: number;
+    /** Model tier to use: 'fast', 'balanced', or 'powerful' */
+    tier: 'fast' | 'balanced' | 'powerful';
+    /** Number of retry attempts on failure */
+    retryAttempts: number;
+    /** Initial retry delay in ms (doubles on each attempt) */
+    retryDelayMs: number;
+    /** Max chars per tool output in extractFromSteps (truncation limit) */
+    outputMaxLength: number;
+    /** Default sampling temperature for sub-agents (0.0–1.0). Per-agent override takes priority. */
+    temperature: number;
+    /** Max time in ms for an entire batch of sub-agents. 0 = no batch timeout (rely on per-agent timeouts). */
+    batchTimeoutMs: number;
+}
+
+// ── Server settings ────────────────────────────────────
+
+export interface ServerConfig {
+    /** Rate limit for localhost requests per window */
+    rateLimitLocal: number;
+    /** Rate limit for remote IP requests per window */
+    rateLimitRemote: number;
+    /** Rate limit window duration in ms */
+    rateLimitWindowMs: number;
+    /** Max request body size in bytes */
+    maxBodyBytes: number;
+}
+
+// ── Telegram settings ──────────────────────────────────
+
+export interface TelegramConfig {
+    /** Max inbox messages to keep in state */
+    maxInbox: number;
+    /** Max chat history messages per conversation */
+    maxHistory: number;
+}
+
 // ── Agent settings ─────────────────────────────────────
 
 export interface AgentSettings {
     maxIterations: number;
+    maxSteps: number;
     autoRegisterTools: boolean;
     port: number;
     /** Owner/creator name used in knowledge graph bootstrap and identity references */
@@ -68,6 +114,20 @@ export interface AgentSettings {
     /** Optional URL to a remote Memory MCP server (e.g. http://localhost:3211/mcp).
      *  When set, all memory reads/writes go through the MCP server — no local file I/O. */
     forkscoutMemoryMcpUrl?: string;
+    /** Sub-agent configuration */
+    subAgent: SubAgentConfig;
+    /** HTTP server configuration */
+    server: ServerConfig;
+    /** Telegram channel configuration */
+    telegram: TelegramConfig;
+    /** Step at which to inject a reflection prompt */
+    reflectStep: number;
+    /** Number of consecutive tool failures before tier escalation */
+    failureEscalationThreshold: number;
+    /** Browser idle timeout in ms before closing headless browser */
+    browserIdleMs: number;
+    /** Activity log max size in bytes before rotation */
+    activityLogMaxBytes: number;
 }
 
 // ── SearXNG ────────────────────────────────────────────
@@ -158,6 +218,7 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
     budget: { dailyUSD: 5, monthlyUSD: 50, warningPct: 80 },
     agent: {
         maxIterations: 10,
+        maxSteps: 60,
         autoRegisterTools: true,
         port: 3210,
         owner: 'Admin',
@@ -173,6 +234,31 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
                 url: 'https://mcp.deepwiki.com/mcp',
             },
         },
+        subAgent: {
+            maxSteps: 20,
+            timeoutMs: 300_000,
+            maxParallel: 10,
+            tier: 'fast' as const,
+            retryAttempts: 2,
+            retryDelayMs: 500,
+            outputMaxLength: 2000,
+            temperature: 0.5,
+            batchTimeoutMs: 0,
+        },
+        server: {
+            rateLimitLocal: 300,
+            rateLimitRemote: 30,
+            rateLimitWindowMs: 60_000,
+            maxBodyBytes: 1_048_576,
+        },
+        telegram: {
+            maxInbox: 200,
+            maxHistory: 20,
+        },
+        reflectStep: 15,
+        failureEscalationThreshold: 3,
+        browserIdleMs: 60_000,
+        activityLogMaxBytes: 5 * 1024 * 1024,
     },
     searxng: { url: 'http://localhost:8888' },
 };

@@ -15,7 +15,12 @@ export async function loadMcpConfig(configPath: string): Promise<McpConfig> {
         const fs = await import('fs/promises');
         const raw = await fs.readFile(configPath, 'utf-8');
         return JSON.parse(raw) as McpConfig;
-    } catch {
+    } catch (err) {
+        // File doesn't exist (normal) or is malformed (worth logging)
+        const isEnoent = err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT';
+        if (!isEnoent) {
+            console.warn(`[MCP]: Failed to load ${configPath}: ${err instanceof Error ? err.message : err} — using empty config`);
+        }
         return { servers: {} };
     }
 }

@@ -61,7 +61,7 @@ export async function handleChatStream(
         system: systemPrompt,
         messages: await convertToModelMessages(messages),
         tools: agent.getToolsForContext(ctx),
-        stopWhen: stepCountIs(20),
+        stopWhen: stepCountIs(getConfig().agent.maxSteps),
         prepareStep: createPrepareStep(reasoningCtx),
         onStepFinish: ({ toolCalls, toolResults }) => {
             if (toolCalls && toolCalls.length > 0) {
@@ -142,7 +142,7 @@ export async function handleChatSync(
             system: systemPrompt,
             messages: await convertToModelMessages(messages),
             tools: agent.getToolsForContext(ctx),
-            stopWhen: stepCountIs(20),
+            stopWhen: stepCountIs(getConfig().agent.maxSteps),
             prepareStep: createPrepareStep(syncReasoningCtx),
         });
 

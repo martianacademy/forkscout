@@ -5,6 +5,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { getConfig } from '../config';
 
 // ── Server options ─────────────────────────────────────
 
@@ -16,17 +17,18 @@ export interface ServerOptions {
 
 // ── Body reading ───────────────────────────────────────
 
-/** Max request body size (1 MB). */
+/** Fallback max request body size (1 MB). */
 const MAX_BODY_BYTES = 1_048_576;
 
-/** Read the full request body as a UTF-8 string. Rejects if body exceeds 1 MB. */
+/** Read the full request body as a UTF-8 string. Rejects if body exceeds configured limit. */
 export function readBody(req: IncomingMessage): Promise<string> {
     return new Promise((resolve, reject) => {
+        const maxBytes = getConfig().agent.server.maxBodyBytes ?? MAX_BODY_BYTES;
         let body = '';
         let bytes = 0;
         req.on('data', (chunk: Buffer) => {
             bytes += chunk.length;
-            if (bytes > MAX_BODY_BYTES) {
+            if (bytes > maxBytes) {
                 req.destroy();
                 reject(new Error('Request body too large (max 1 MB)'));
                 return;

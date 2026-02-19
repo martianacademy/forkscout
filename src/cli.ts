@@ -9,7 +9,7 @@ import { PROJECT_ROOT } from './paths';
 loadEnv({ path: resolve(PROJECT_ROOT, '.env') });
 
 import { createAgent, type AgentConfig } from './index';
-import { loadConfig, resolveApiKeyForProvider } from './config';
+import { loadConfig, getConfig, resolveApiKeyForProvider } from './config';
 
 const cfg = loadConfig();
 const config: AgentConfig = {
@@ -78,7 +78,7 @@ createAgent(config)
                         system: systemPrompt,
                         prompt: input,
                         tools: agent.getTools(),
-                        stopWhen: stepCountIs(20),
+                        stopWhen: stepCountIs(getConfig().agent.maxSteps),
                         prepareStep: createPrepareStep(cliReasoningCtx),
                     });
 

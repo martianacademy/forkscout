@@ -124,7 +124,9 @@ export class RemoteMemoryStore {
 
     addEntity(name: string, type: EntityType, facts: string[]): Entity {
         // Fire-and-forget for sync interface compatibility
-        this.callTool('add_entity', { name, type, facts }).catch(() => { });
+        this.callTool('add_entity', { name, type, facts }).catch(err =>
+            console.warn(`[Memory]: addEntity(${name}) failed: ${err instanceof Error ? err.message : err}`),
+        );
         const now = Date.now();
         const structuredFacts: Fact[] = facts.map(f => ({ content: f, confidence: 1.0, sources: 1, firstSeen: now, lastConfirmed: now }));
         return { name, type, facts: structuredFacts, lastSeen: now, accessCount: 1 };
@@ -157,7 +159,9 @@ export class RemoteMemoryStore {
     // ── Relations ────────────────────────────────────
 
     addRelation(from: string, type: RelationType, to: string): Relation {
-        this.callTool('add_relation', { from, type, to }).catch(() => { });
+        this.callTool('add_relation', { from, type, to }).catch(err =>
+            console.warn(`[Memory]: addRelation(${from} → ${to}) failed: ${err instanceof Error ? err.message : err}`),
+        );
         const now = Date.now();
         return { from, to, type, weight: 0.5, evidenceCount: 1, lastValidated: now, createdAt: now };
     }
@@ -171,7 +175,9 @@ export class RemoteMemoryStore {
     // ── Exchanges ────────────────────────────────────
 
     addExchange(user: string, assistant: string, sessionId: string): void {
-        this.callTool('add_exchange', { user, assistant, sessionId }).catch(() => { });
+        this.callTool('add_exchange', { user, assistant, sessionId }).catch(err =>
+            console.warn(`[Memory]: addExchange failed: ${err instanceof Error ? err.message : err}`),
+        );
     }
 
     getExchanges(): Exchange[] { return []; }
@@ -256,7 +262,9 @@ export class RemoteMemoryStore {
     }
 
     addSelfObservation(content: string): void {
-        this.callTool('self_observe', { content }).catch(() => { });
+        this.callTool('self_observe', { content }).catch(err =>
+            console.warn(`[Memory]: selfObserve failed: ${err instanceof Error ? err.message : err}`),
+        );
     }
 
     // ── Stats ────────────────────────────────────────
@@ -273,16 +281,22 @@ export class RemoteMemoryStore {
         return {
             create(title: string, goal: string, opts?: any) {
                 const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-                callTool('start_task', { title, goal, successCondition: opts?.successCondition }).catch(() => { });
+                callTool('start_task', { title, goal, successCondition: opts?.successCondition }).catch(err =>
+                    console.warn(`[Memory]: startTask(${title}) failed: ${err instanceof Error ? err.message : err}`),
+                );
                 return { id, title, goal, status: 'running', startedAt: Date.now(), lastStepAt: Date.now(), ...opts };
             },
             get(_id: string) { return undefined; },
             complete(id: string, reason?: string) {
-                callTool('complete_task', { taskId: id, result: reason }).catch(() => { });
+                callTool('complete_task', { taskId: id, result: reason }).catch(err =>
+                    console.warn(`[Memory]: completeTask(${id}) failed: ${err instanceof Error ? err.message : err}`),
+                );
                 return { id, status: 'completed' };
             },
             abort(id: string, reason?: string) {
-                callTool('abort_task', { taskId: id, reason: reason || 'Aborted' }).catch(() => { });
+                callTool('abort_task', { taskId: id, reason: reason || 'Aborted' }).catch(err =>
+                    console.warn(`[Memory]: abortTask(${id}) failed: ${err instanceof Error ? err.message : err}`),
+                );
                 return { id, status: 'aborted' };
             },
             pause(_id: string) { return undefined; },

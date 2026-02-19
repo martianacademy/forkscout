@@ -285,7 +285,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     system: systemPrompt,
                     messages: await convertToModelMessages(messages),
                     tools: agent.getToolsForContext(ctx),
-                    stopWhen: stepCountIs(20),
+                    stopWhen: stepCountIs(getConfig().agent.maxSteps),
                     abortSignal,
                     prepareStep: createPrepareStep(reasoningCtx),
                     onStepFinish: ({ toolCalls, toolResults }) => {
@@ -338,7 +338,9 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                             try {
                                 agent.getMemoryManager().recordSelfObservation(failureObs, 'failure-learning');
                                 console.log(`[Reasoning]: Stored failure lesson in memory`);
-                            } catch { /* non-critical */ }
+                            } catch (err) {
+                                console.warn(`[Server]: Stream failure observation save failed: ${err instanceof Error ? err.message : err}`);
+                            }
                         }
                     },
                     onError: ({ error }) => {
@@ -396,7 +398,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                         system: systemPrompt,
                         messages: await convertToModelMessages(messages),
                         tools: agent.getToolsForContext(ctx),
-                        stopWhen: stepCountIs(20),
+                        stopWhen: stepCountIs(getConfig().agent.maxSteps),
                         abortSignal: syncAbortSignal,
                         prepareStep: createPrepareStep(syncReasoningCtx),
                     });
@@ -416,7 +418,9 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     if (syncFailureObs) {
                         try {
                             agent.getMemoryManager().recordSelfObservation(syncFailureObs, 'failure-learning');
-                        } catch { /* non-critical */ }
+                        } catch (err) {
+                            console.warn(`[Server]: Failure observation save failed: ${err instanceof Error ? err.message : err}`);
+                        }
                     }
 
                     agent.saveToMemory('assistant', text);

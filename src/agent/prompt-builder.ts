@@ -2,6 +2,8 @@ import type { ChatContext, AgentConfig } from './types';
 import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
 import type { CronAlert } from '../scheduler';
+import type { ModelRouter } from '../llm/router';
+import { getConfig } from '../config';
 import { getDefaultSystemPrompt, getPublicSystemPrompt } from './system-prompts';
 import { getCurrentTodos } from '../tools/todo-tool';
 
@@ -24,6 +26,7 @@ export async function buildSystemPrompt(
     survival: SurvivalMonitor,
     urgentAlerts: CronAlert[],
     cache: PromptCache,
+    router: ModelRouter,
     userQuery: string,
     ctx?: ChatContext,
 ): Promise<string> {
@@ -112,5 +115,30 @@ export async function buildSystemPrompt(
         todoSection = `\n\n[Active Todo List — ${completed}/${todos.length} completed]\n` + lines.join('\n');
     }
 
-    return base + channelSection + alertSection + selfSection + todoSection + memorySection;
+    // Runtime config — so the agent knows its own model, provider, and capabilities
+    let configSection = '';
+    if (isAdmin) {
+        try {
+            const cfg = getConfig();
+            const status = router.getStatus();
+            const budgetStatus = status.budget;
+            const lines = [
+                `\n\n[Runtime Config — YOUR current setup]`,
+                `Provider: ${cfg.provider}`,
+                `Model tiers:`,
+                `  fast: ${status.tiers.fast.modelId} (${status.tiers.fast.provider})`,
+                `  balanced: ${status.tiers.balanced.modelId} (${status.tiers.balanced.provider})`,
+                `  powerful: ${status.tiers.powerful.modelId} (${status.tiers.powerful.provider})`,
+                `You are currently running on the balanced tier model unless complexity escalated you.`,
+                `Temperature: ${cfg.temperature ?? 'default'}`,
+                `Budget: $${budgetStatus.todayUSD.toFixed(2)}/$${budgetStatus.dailyLimitUSD}/day, $${budgetStatus.monthUSD.toFixed(2)}/$${budgetStatus.monthlyLimitUSD}/month (${budgetStatus.dailyPct.toFixed(0)}% daily used)`,
+            ];
+            if (budgetStatus.cappedTier) {
+                lines.push(`⚠️ Budget pressure — capped to ${budgetStatus.cappedTier} tier`);
+            }
+            configSection = lines.join('\n');
+        } catch { /* config unavailable — skip */ }
+    }
+
+    return base + channelSection + alertSection + configSection + selfSection + todoSection + memorySection;
 }

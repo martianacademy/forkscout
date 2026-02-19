@@ -18,9 +18,9 @@ import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
 import type { ChannelAuthStore } from '../channels/auth';
 import type { ModelRouter } from '../llm/router';
-import { createSubAgentTool } from '../tools/agent-tool';
+import { createSubAgentTool, type SubAgentDeps } from '../tools/agent-tool';
 
-/** Register all default tool groups into the toolSet */
+/** Register all default tool groups into the toolSet. Returns the sub-agent deps ref for progress wiring. */
 export function registerDefaultTools(
     toolSet: Record<string, any>,
     scheduler: Scheduler,
@@ -30,7 +30,7 @@ export function registerDefaultTools(
     survival: SurvivalMonitor,
     channelAuth: ChannelAuthStore,
     router: ModelRouter,
-): void {
+): SubAgentDeps {
     // Core tools (file, shell, web, utility)
     Object.assign(toolSet, coreTools);
 
@@ -67,9 +67,12 @@ export function registerDefaultTools(
     toolSet.self_rebuild = createSelfRebuildTool(() => memory.flush());
 
     // Sub-agent tool (spawn 1-10 worker agents in parallel)
-    toolSet.spawn_agents = createSubAgentTool({ router, toolSet });
+    const subAgentDeps: SubAgentDeps = { router, toolSet };
+    toolSet.spawn_agents = createSubAgentTool(subAgentDeps);
 
     // Wrap all tools with error enhancement — produces helpful diagnostics
     // instead of raw stack traces when tools fail
     enhanceToolSet(toolSet);
+
+    return subAgentDeps;
 }

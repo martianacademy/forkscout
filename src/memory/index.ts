@@ -62,12 +62,14 @@ export class MemoryManager {
                 }
                 console.log(`🧠 Restored ${restored.length} exchange(s) from previous sessions`);
             }
-        } catch {
-            /* MCP unreachable or no history — start fresh */
+        } catch (err) {
+            console.warn(`[Memory]: Failed to restore conversation history: ${err instanceof Error ? err.message : err}`);
         }
 
         // Pre-fetch self-entity so it's warm for first prompt
-        try { await this.refreshSelfContext(); } catch { /* non-critical */ }
+        try { await this.refreshSelfContext(); } catch (err) {
+            console.warn(`[Memory]: Self-entity pre-fetch failed: ${err instanceof Error ? err.message : err}`);
+        }
     }
 
     async flush(): Promise<void> {
@@ -130,7 +132,9 @@ export class MemoryManager {
             }
             if (graphLines.length) graphContext = '\n\n[Knowledge Graph]\n' + graphLines.join('\n');
             if (exchangeLines.length) relevantMemories = '\n\nRelevant memories from past conversations:\n' + exchangeLines.join('\n\n');
-        } catch { /* MCP unreachable — use local recent only */ }
+        } catch (err) {
+            console.warn(`[Memory]: Knowledge search failed for "${query.slice(0, 50)}": ${err instanceof Error ? err.message : err}`);
+        }
 
         return {
             recentHistory: recentStr,

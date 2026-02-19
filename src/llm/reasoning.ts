@@ -29,6 +29,7 @@
 
 import type { ModelRouter, ModelTier } from './router';
 import type { ComplexityResult } from './complexity';
+import { getConfig } from '../config';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -59,9 +60,9 @@ export interface ToolFailureRecord {
 
 // ── Phase Boundaries ───────────────────────────────────
 
-/** Step at which we inject a reflection prompt */
+/** Fallback — prefer getConfig().agent.reflectStep at runtime */
 const REFLECT_STEP = 15;
-/** Number of tool failures before escalating to powerful */
+/** Fallback — prefer getConfig().agent.failureEscalationThreshold at runtime */
 const FAILURE_ESCALATION_THRESHOLD = 3;
 
 // ── Planning Prompt ────────────────────────────────────
@@ -198,7 +199,7 @@ export function createPrepareStep(context: ReasoningContext) {
         if (
             !context.escalated &&
             context.tier !== 'powerful' &&
-            context.toolFailures.length >= FAILURE_ESCALATION_THRESHOLD
+            context.toolFailures.length >= (getConfig().agent.failureEscalationThreshold ?? FAILURE_ESCALATION_THRESHOLD)
         ) {
             context.escalated = true;
             context.tier = 'powerful';
@@ -214,7 +215,8 @@ export function createPrepareStep(context: ReasoningContext) {
         }
 
         // ── Phase 2: REFLECT ─────────────────────────────
-        if (stepNumber === REFLECT_STEP && context.complexity.complexity !== 'simple') {
+        const reflectStep = getConfig().agent.reflectStep ?? REFLECT_STEP;
+        if (stepNumber === reflectStep && context.complexity.complexity !== 'simple') {
             context.phase = 'reflect';
             return {
                 system: context.baseSystemPrompt + REFLECTION_INJECTION + buildFailureContext(context.toolFailures),
@@ -222,7 +224,7 @@ export function createPrepareStep(context: ReasoningContext) {
         }
 
         // ── Phase 1 & 3: EXECUTE / WRAP-UP ──────────────
-        if (stepNumber >= REFLECT_STEP) {
+        if (stepNumber >= reflectStep) {
             context.phase = 'wrapup';
         } else if (stepNumber > 0) {
             context.phase = 'execute';

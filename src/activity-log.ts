@@ -19,6 +19,7 @@
 import { appendFileSync, statSync, renameSync, existsSync, readFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { AGENT_ROOT } from './paths';
+import { getConfig } from './config';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -76,9 +77,9 @@ export interface SelfEditEvent {
 const LOG_DIR = resolve(AGENT_ROOT, '.forkscout');
 const LOG_PATH = resolve(LOG_DIR, 'activity.log');
 const LOG_PREV = resolve(LOG_DIR, 'activity.prev.log');
-const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_SIZE_BYTES = 5 * 1024 * 1024; // fallback — prefer getConfig().agent.activityLogMaxBytes
 
-// ── Core Logger ────────────────────────────────────────
+// ── Core Logger ──────────────────────────────────────────
 
 /** Ensure the log directory exists */
 function ensureDir(): void {
@@ -87,12 +88,13 @@ function ensureDir(): void {
     }
 }
 
-/** Rotate log if it exceeds MAX_SIZE_BYTES */
+/** Rotate log if it exceeds configured max size */
 function rotateIfNeeded(): void {
     try {
         if (!existsSync(LOG_PATH)) return;
         const stats = statSync(LOG_PATH);
-        if (stats.size >= MAX_SIZE_BYTES) {
+        const maxBytes = getConfig().agent.activityLogMaxBytes ?? MAX_SIZE_BYTES;
+        if (stats.size >= maxBytes) {
             // Keep one generation of backup
             if (existsSync(LOG_PREV)) {
                 // Delete old prev by overwriting
@@ -100,8 +102,8 @@ function rotateIfNeeded(): void {
             renameSync(LOG_PATH, LOG_PREV);
             console.log(`[Activity]: Log rotated (${(stats.size / 1024 / 1024).toFixed(1)} MB → activity.prev.log)`);
         }
-    } catch {
-        /* rotation failure is non-critical */
+    } catch (err) {
+        console.warn(`[Activity]: Log rotation failed: ${err instanceof Error ? err.message : err}`);
     }
 }
 

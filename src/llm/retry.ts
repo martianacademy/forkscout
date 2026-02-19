@@ -34,7 +34,7 @@ const DEFAULT_RETRY: Required<RetryConfig> = {
     jitter: true,
 };
 
-type ErrorType = 'rate_limit' | 'timeout' | 'auth' | 'context_overflow' | 'network' | 'overloaded' | 'unknown';
+type ErrorType = 'rate_limit' | 'timeout' | 'auth' | 'context_overflow' | 'unsupported_input' | 'network' | 'overloaded' | 'unknown';
 
 /** Classify an error to determine retry strategy */
 function classifyError(error: unknown): ErrorType {
@@ -60,6 +60,11 @@ function classifyError(error: unknown): ErrorType {
         return 'context_overflow';
     }
 
+    // Unsupported input modality (e.g. vision/image) — don't retry
+    if (msg.includes('image input') || msg.includes('image_input') || msg.includes('does not support image') || msg.includes('vision')) {
+        return 'unsupported_input';
+    }
+
     // Server overloaded
     if (status === 503 || status === 502 || msg.includes('overloaded') || msg.includes('capacity')) {
         return 'overloaded';
@@ -80,8 +85,17 @@ function classifyError(error: unknown): ErrorType {
 
 /** Whether this error type should be retried */
 function shouldRetry(errorType: ErrorType): boolean {
-    // Auth and context overflow should NOT be retried
-    return errorType !== 'auth' && errorType !== 'context_overflow';
+    // Auth, context overflow, and unsupported input should NOT be retried
+    return errorType !== 'auth' && errorType !== 'context_overflow' && errorType !== 'unsupported_input';
+}
+
+/**
+ * Check if an error indicates the model doesn't support image/vision input.
+ * Exported so callers (e.g. Telegram handler) can detect and gracefully degrade.
+ */
+export function isVisionUnsupportedError(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return msg.includes('image input') || msg.includes('image_input') || msg.includes('does not support image') || msg.includes('vision');
 }
 
 /** Calculate delay with exponential backoff + optional jitter */

@@ -8,6 +8,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { getConfig } from '../config';
 
 interface RateBucket {
     count: number;
@@ -16,13 +17,9 @@ interface RateBucket {
 
 const buckets = new Map<string, RateBucket>();
 
-/** Requests per window for localhost (owner). */
+/** Fallback constants — prefer getConfig().agent.server at runtime */
 const LOCAL_LIMIT = 300;
-
-/** Requests per window for external IPs (guests). */
 const REMOTE_LIMIT = 30;
-
-/** Window duration in ms (1 minute). */
 const WINDOW_MS = 60_000;
 
 /** Cleanup stale buckets every 5 minutes. */
@@ -56,12 +53,13 @@ function isLocalIP(ip: string): boolean {
  */
 export function checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
     const ip = getClientIP(req);
-    const limit = isLocalIP(ip) ? LOCAL_LIMIT : REMOTE_LIMIT;
+    const serverCfg = getConfig().agent.server;
+    const limit = isLocalIP(ip) ? (serverCfg.rateLimitLocal ?? LOCAL_LIMIT) : (serverCfg.rateLimitRemote ?? REMOTE_LIMIT);
     const now = Date.now();
 
     let bucket = buckets.get(ip);
     if (!bucket || now > bucket.resetAt) {
-        bucket = { count: 0, resetAt: now + WINDOW_MS };
+        bucket = { count: 0, resetAt: now + (serverCfg.rateLimitWindowMs ?? WINDOW_MS) };
         buckets.set(ip, bucket);
     }
 

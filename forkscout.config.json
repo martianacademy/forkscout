@@ -5,7 +5,7 @@
     "router": {
         "openrouter": {
             "fast": {
-                "model": "qwen/qwen3.5-397b-a17b"
+                "model": "minimax/minimax-m2.5"
             },
             "balanced": {
                 "model": "minimax/minimax-m2.5"
@@ -49,8 +49,8 @@
         }
     },
     "agent": {
-        "maxIterations": 20,
-        "maxSteps": 30,
+        "maxIterations": 100,
+        "maxSteps": 100,
         "autoRegisterTools": true,
         "port": 3210,
         "owner": "Suru",
@@ -78,7 +78,32 @@
             "deepwiki": {
                 "url": "https://mcp.deepwiki.com/mcp"
             }
-        }
+        },
+        "subAgent": {
+            "maxSteps": 50,
+            "timeoutMs": 600000,
+            "maxParallel": 10,
+            "tier": "balanced",
+            "retryAttempts": 5,
+            "retryDelayMs": 1000,
+            "outputMaxLength": 5000,
+            "temperature": 0.5,
+            "batchTimeoutMs": 0
+        },
+        "server": {
+            "rateLimitLocal": 300,
+            "rateLimitRemote": 30,
+            "rateLimitWindowMs": 60000,
+            "maxBodyBytes": 1048576
+        },
+        "telegram": {
+            "maxInbox": 200,
+            "maxHistory": 20
+        },
+        "reflectStep": 15,
+        "failureEscalationThreshold": 3,
+        "browserIdleMs": 60000,
+        "activityLogMaxBytes": 5242880
     },
     "budget": {
         "dailyUSD": 5,

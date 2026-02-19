@@ -143,7 +143,9 @@ export function createSurvivalMonitor(config: SurvivalConfig): SurvivalMonitor {
             logThreat('emergency', 'crash', `Uncaught exception: ${err.message}`);
             try {
                 await cfg.emergencyFlush();
-            } catch { }
+            } catch (flushErr) {
+                console.error('💀 Emergency flush failed during uncaughtException:', flushErr instanceof Error ? flushErr.message : flushErr);
+            }
             console.error('💀 Uncaught exception:', err);
             process.exit(1);
         });

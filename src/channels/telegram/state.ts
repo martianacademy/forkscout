@@ -5,12 +5,17 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { resolve as resolvePath } from 'path';
 import type { InboxMessage, TelegramMessage, TelegramState } from './types';
+import { getConfig } from '../../config';
 
 export class TelegramStateManager {
     private statePath: string;
     private inbox: InboxMessage[] = [];
     private stateDirty = false;
-    private readonly MAX_INBOX = 200;
+
+    /** Fallback — prefer getConfig().agent.telegram.maxInbox */
+    private get maxInbox(): number {
+        return getConfig().agent.telegram?.maxInbox ?? 200;
+    }
 
     constructor(statePath: string) {
         this.statePath = statePath;
@@ -43,7 +48,7 @@ export class TelegramStateManager {
             offset,
             lastStartedAt: startedAt,
             lastStoppedAt: 0,
-            inbox: this.inbox.slice(-this.MAX_INBOX),
+            inbox: this.inbox.slice(-this.maxInbox),
             version: 1,
         };
         await writeFile(this.statePath, JSON.stringify(state, null, 2), 'utf-8');
@@ -57,7 +62,7 @@ export class TelegramStateManager {
             const state: TelegramState = JSON.parse(raw);
             state.lastStoppedAt = Math.floor(Date.now() / 1000);
             state.offset = offset;
-            state.inbox = this.inbox.slice(-this.MAX_INBOX);
+            state.inbox = this.inbox.slice(-this.maxInbox);
             await writeFile(this.statePath, JSON.stringify(state, null, 2), 'utf-8');
         } catch {
             // Best effort
@@ -77,8 +82,8 @@ export class TelegramStateManager {
             date: msg.date,
             responded,
         });
-        if (this.inbox.length > this.MAX_INBOX) {
-            this.inbox = this.inbox.slice(-this.MAX_INBOX);
+        if (this.inbox.length > this.maxInbox) {
+            this.inbox = this.inbox.slice(-this.maxInbox);
         }
         this.stateDirty = true;
     }

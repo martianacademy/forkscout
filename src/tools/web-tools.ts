@@ -9,7 +9,7 @@ import { getConfig } from '../config';
 
 let _browser: any = null;
 let _browserCloseTimer: ReturnType<typeof setTimeout> | null = null;
-const BROWSER_IDLE_MS = 60_000; // close browser after 60s of inactivity
+const BROWSER_IDLE_MS = 60_000; // fallback — prefer getConfig().agent.browserIdleMs
 
 /** Get a shared Chromium browser instance (lazy-launched, auto-closed after idle) */
 async function getBrowser(): Promise<any> {
@@ -31,7 +31,7 @@ async function getBrowser(): Promise<any> {
             _browser = null;
         }
         _browserCloseTimer = null;
-    }, BROWSER_IDLE_MS);
+    }, getConfig().agent.browserIdleMs ?? BROWSER_IDLE_MS);
 
     return _browser;
 }
@@ -71,7 +71,9 @@ export const webSearch = tool({
                     }));
                 }
             }
-        } catch { /* SearXNG unavailable */ }
+        } catch (err) {
+            console.warn(`[WebSearch]: SearXNG unavailable (${err instanceof Error ? err.message : err}), falling back to Chromium`);
+        }
 
         // Fallback: Chromium scraping
         console.log('    ⚡ SearXNG unavailable, falling back to Chromium...');

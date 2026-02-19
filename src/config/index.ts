@@ -8,7 +8,7 @@
  */
 
 // Types & constants
-export type { ProviderType, TierConfig, RouterConfig, BudgetConfig, McpServerEntry, AgentSettings, SearxngConfig, ForkscoutConfig, ProviderRouterPresets } from './types';
+export type { ProviderType, TierConfig, RouterConfig, BudgetConfig, McpServerEntry, AgentSettings, SubAgentConfig, ServerConfig, TelegramConfig, SearxngConfig, ForkscoutConfig, ProviderRouterPresets } from './types';
 export { DEFAULTS, PROVIDER_URLS, PROVIDER_ROUTER_DEFAULTS } from './types';
 
 // Loader & resolver

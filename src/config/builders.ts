@@ -120,6 +120,7 @@ export function buildAgentConfig(file: any): AgentSettings {
 
     return {
         maxIterations: file?.maxIterations ?? DEFAULTS.agent.maxIterations,
+        maxSteps: file?.maxSteps ?? DEFAULTS.agent.maxSteps,
         autoRegisterTools: file?.autoRegisterTools ?? DEFAULTS.agent.autoRegisterTools,
         port: intEnv('AGENT_PORT') ?? file?.port ?? DEFAULTS.agent.port,
         owner: env('AGENT_OWNER') || file?.owner || DEFAULTS.agent.owner,
@@ -127,6 +128,31 @@ export function buildAgentConfig(file: any): AgentSettings {
         appUrl: file?.appUrl || DEFAULTS.agent.appUrl,
         forkscoutMemoryMcpUrl: env('MEMORY_MCP_URL') || file?.forkscoutMemoryMcpUrl || DEFAULTS.agent.forkscoutMemoryMcpUrl,
         mcpServers,
+        subAgent: {
+            maxSteps: file?.subAgent?.maxSteps ?? DEFAULTS.agent.subAgent.maxSteps,
+            timeoutMs: file?.subAgent?.timeoutMs ?? DEFAULTS.agent.subAgent.timeoutMs,
+            maxParallel: file?.subAgent?.maxParallel ?? DEFAULTS.agent.subAgent.maxParallel,
+            tier: file?.subAgent?.tier ?? DEFAULTS.agent.subAgent.tier,
+            retryAttempts: file?.subAgent?.retryAttempts ?? DEFAULTS.agent.subAgent.retryAttempts,
+            retryDelayMs: file?.subAgent?.retryDelayMs ?? DEFAULTS.agent.subAgent.retryDelayMs,
+            outputMaxLength: file?.subAgent?.outputMaxLength ?? DEFAULTS.agent.subAgent.outputMaxLength,
+            temperature: file?.subAgent?.temperature ?? DEFAULTS.agent.subAgent.temperature,
+            batchTimeoutMs: file?.subAgent?.batchTimeoutMs ?? DEFAULTS.agent.subAgent.batchTimeoutMs,
+        },
+        server: {
+            rateLimitLocal: file?.server?.rateLimitLocal ?? DEFAULTS.agent.server.rateLimitLocal,
+            rateLimitRemote: file?.server?.rateLimitRemote ?? DEFAULTS.agent.server.rateLimitRemote,
+            rateLimitWindowMs: file?.server?.rateLimitWindowMs ?? DEFAULTS.agent.server.rateLimitWindowMs,
+            maxBodyBytes: file?.server?.maxBodyBytes ?? DEFAULTS.agent.server.maxBodyBytes,
+        },
+        telegram: {
+            maxInbox: file?.telegram?.maxInbox ?? DEFAULTS.agent.telegram.maxInbox,
+            maxHistory: file?.telegram?.maxHistory ?? DEFAULTS.agent.telegram.maxHistory,
+        },
+        reflectStep: file?.reflectStep ?? DEFAULTS.agent.reflectStep,
+        failureEscalationThreshold: file?.failureEscalationThreshold ?? DEFAULTS.agent.failureEscalationThreshold,
+        browserIdleMs: file?.browserIdleMs ?? DEFAULTS.agent.browserIdleMs,
+        activityLogMaxBytes: file?.activityLogMaxBytes ?? DEFAULTS.agent.activityLogMaxBytes,
     };
 }
 

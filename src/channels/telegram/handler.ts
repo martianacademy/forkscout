@@ -3,7 +3,8 @@
  */
 
 import { stepCountIs, type UIMessage } from 'ai';
-import { generateTextWithRetry } from '../../llm/retry';
+import { getConfig } from '../../config';
+import { generateTextWithRetry, isVisionUnsupportedError } from '../../llm/retry';
 import type { ModelTier } from '../../llm/router';
 import { createReasoningContext, createPrepareStep, getReasoningSummary } from '../../llm/reasoning';
 import { buildFailureObservation } from '../../memory';
@@ -193,12 +194,19 @@ export async function handleTelegramUpdate(
             agent.getRouter(),
         );
 
-        // Track early text sent during generation so we don't double-send
-        let earlyTextSent = '';
+        // Track ALL text fragments sent during generation so we don't double-send
+        const sentFragments: string[] = [];
         let stepCounter = 0;
 
         // Track request for abort capability
         const { id: tgReqId, signal: tgAbortSignal } = requestTracker.start('telegram', who);
+
+        // Wire sub-agent live progress to this chat
+        agent.setSubAgentProgress((agentLabel, message) => {
+            sendMessage(token, chatId, `🤖 *${agentLabel}*: ${message}`).catch(err =>
+                console.warn(`[Telegram]: Sub-agent progress send failed: ${err instanceof Error ? err.message : err}`),
+            );
+        });
 
         const { text: responseText, usage } = await generateTextWithRetry({
             model: tgModel,
@@ -219,24 +227,21 @@ export async function handleTelegramUpdate(
                 return { role: m.role as 'user' | 'assistant', content };
             }),
             tools: agent.getToolsForContext(ctx),
-            stopWhen: stepCountIs(20),
+            stopWhen: stepCountIs(getConfig().agent.maxSteps),
             abortSignal: tgAbortSignal,
             prepareStep: createPrepareStep(reasoningCtx),
             onStepFinish: async ({ text: stepText, toolCalls, toolResults }) => {
                 const currentStep = stepCounter++;
 
-                // Send acknowledgment/plan text immediately from early steps.
-                // The model produces text alongside tool calls in step 0 thanks
-                // to the ACKNOWLEDGE/PLAN system prompt instruction.
-                // Allow up to step 3 — some models take a step or two to produce text.
-                if (
-                    stepText?.trim() &&
-                    currentStep <= 3 &&
-                    !earlyTextSent
-                ) {
-                    earlyTextSent = stepText.trim();
-                    sendMessage(token, chatId, earlyTextSent).catch(() => { });
-                    console.log(`[Telegram/Agent → early]: ${earlyTextSent.slice(0, 150)}`);
+                // Stream ALL intermediate text (planning, reasoning, progress updates)
+                // to the user as soon as the model produces it — don't wait for the end.
+                if (stepText?.trim()) {
+                    const fragment = stepText.trim();
+                    sendMessage(token, chatId, fragment).catch(err =>
+                        console.warn(`[Telegram]: Step text send failed: ${err instanceof Error ? err.message : err}`),
+                    );
+                    sentFragments.push(fragment);
+                    console.log(`[Telegram/Agent → step ${currentStep}]: ${fragment.slice(0, 150)}`);
                 }
 
                 // Send contextual tool call descriptions
@@ -249,7 +254,9 @@ export async function handleTelegramUpdate(
                         (tc: any) => describeToolCall(tc.toolName, tc.input),
                     );
                     const unique = [...new Set(descriptions)];
-                    sendMessage(token, chatId, unique.join('\n')).catch(() => { });
+                    sendMessage(token, chatId, unique.join('\n')).catch(err =>
+                        console.warn(`[Telegram]: Tool description send failed: ${err instanceof Error ? err.message : err}`),
+                    );
                     sendTyping(token, chatId);
                 }
 
@@ -315,7 +322,9 @@ export async function handleTelegramUpdate(
         // Learn from failures
         const tgFailureObs = buildFailureObservation(reasoningCtx, responseText || '');
         if (tgFailureObs) {
-            try { agent.getMemoryManager().recordSelfObservation(tgFailureObs, 'failure-learning'); } catch { /* non-critical */ }
+            try { agent.getMemoryManager().recordSelfObservation(tgFailureObs, 'failure-learning'); } catch (err) {
+                console.warn(`[Telegram]: Failure observation save failed: ${err instanceof Error ? err.message : err}`);
+            }
         }
 
         // Save response to memory
@@ -333,31 +342,138 @@ export async function handleTelegramUpdate(
         history.push(asstMsg);
         deps.trimHistory(chatId);
 
-        // Send response — skip text that was already sent as early acknowledgment
+        // Send response — skip text that was already streamed during steps
         if (responseText.trim()) {
             let finalText = responseText.trim();
-            // If the response starts with the early text, strip it to avoid double-sending
-            if (earlyTextSent && finalText.startsWith(earlyTextSent)) {
-                finalText = finalText.slice(earlyTextSent.length).trim();
+
+            // Strip all fragments that were already sent during onStepFinish.
+            // The final response often concatenates all step texts + a conclusion.
+            for (const frag of sentFragments) {
+                const idx = finalText.indexOf(frag);
+                if (idx !== -1) {
+                    finalText = (finalText.slice(0, idx) + finalText.slice(idx + frag.length)).trim();
+                }
             }
-            // Also handle the case where final response IS the early text (simple answers)
-            if (finalText && finalText !== earlyTextSent) {
+
+            if (finalText) {
                 await sendMessage(token, chatId, finalText);
                 console.log(`[Telegram/Agent → ${who}]: ${finalText.slice(0, 200)}${finalText.length > 200 ? '…' : ''}`);
-            } else if (!earlyTextSent) {
-                // Nothing was sent at all — send the full response
+            } else if (sentFragments.length === 0) {
+                // Nothing was sent during steps — send the full response
                 await sendMessage(token, chatId, responseText);
                 console.log(`[Telegram/Agent → ${who}]: ${responseText.slice(0, 200)}${responseText.length > 200 ? '…' : ''}`);
             } else {
-                console.log(`[Telegram/Agent → ${who}]: (response already sent as early acknowledgment)`);
+                console.log(`[Telegram/Agent → ${who}]: (response already streamed in ${sentFragments.length} step(s))`);
             }
         } else {
             console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
         }
 
         requestTracker.finish(tgReqId);
+        agent.clearSubAgentProgress();
     } catch (err) {
+        agent.clearSubAgentProgress();
         const errMsg = err instanceof Error ? err.message : String(err);
+
+        // ── Vision unsupported: strip images and retry ──────────────────
+        if (isVisionUnsupportedError(err)) {
+            console.warn(`[Telegram]: Model does not support image input — stripping images and retrying`);
+
+            // Strip image parts from ALL history messages
+            let imagesStripped = 0;
+            for (const m of history) {
+                if (!Array.isArray(m.parts)) continue;
+                const before = m.parts.length;
+                m.parts = m.parts.filter((p: any) => p.type !== 'image');
+                imagesStripped += before - m.parts.length;
+            }
+
+            // Check if the current user message has any text left after stripping
+            const lastUserMsg = history[history.length - 1];
+            const hasTextContent = lastUserMsg?.parts?.some(
+                (p: any) => p.type === 'text' && p.text && !p.text.startsWith('[Telegram Message]'),
+            ) ?? false;
+            const hasRawJson = lastUserMsg?.parts?.some(
+                (p: any) => p.type === 'text' && p.text?.includes('"text"'),
+            ) ?? false;
+
+            // If the message was image-only (no caption/text), inform user
+            if (!hasTextContent && !hasRawJson && !text) {
+                await sendMessage(
+                    token,
+                    chatId,
+                    '📷 The current model doesn\'t support image input. Please describe what you need in text, or I can switch to a vision-capable model.',
+                );
+                await deps.flushHistory();
+                return;
+            }
+
+            // Add a note so the model knows an image was present but couldn't be processed
+            if (imagesStripped > 0) {
+                // Prepend note to the latest user message text
+                const textPart = lastUserMsg?.parts?.find((p: any) => p.type === 'text');
+                if (textPart && 'text' in textPart) {
+                    (textPart as any).text = `[Note: An image was included but the current model does not support vision input. Respond based on the text and context only.]\n\n${(textPart as any).text}`;
+                }
+            }
+
+            try {
+                // Inform the user that the image couldn't be processed
+                await sendMessage(
+                    token,
+                    chatId,
+                    '📷 The current model doesn\'t support image input — I\'ll respond based on the text only.',
+                );
+
+                await sendTyping(token, chatId);
+                const { model: retryModel } = agent.getModelForChat(text || 'image message');
+                const retrySystemPrompt = await agent.buildSystemPrompt(text || 'User sent an image', ctx);
+
+                const typingInterval2 = setInterval(() => sendTyping(token, chatId), 4000);
+                const { text: retryText } = await generateTextWithRetry({
+                    model: retryModel,
+                    system: retrySystemPrompt,
+                    messages: history.map(m => {
+                        const contentParts: any[] = [];
+                        for (const p of (m.parts || []) as any[]) {
+                            if (p.type === 'text' && p.text) {
+                                contentParts.push({ type: 'text', text: p.text });
+                            }
+                            // Skip image parts entirely
+                        }
+                        const content =
+                            contentParts.length === 1 && contentParts[0].type === 'text'
+                                ? contentParts[0].text
+                                : contentParts;
+                        return { role: m.role as 'user' | 'assistant', content };
+                    }),
+                    tools: agent.getToolsForContext(ctx),
+                    stopWhen: stepCountIs(getConfig().agent.maxSteps),
+                });
+                clearInterval(typingInterval2);
+
+                if (retryText?.trim()) {
+                    await sendMessage(token, chatId, retryText);
+                    console.log(`[Telegram/Agent → ${who} (vision-fallback)]: ${retryText.slice(0, 200)}`);
+                }
+
+                agent.saveToMemory('assistant', retryText || '');
+                const asstMsg2: UIMessage = {
+                    id: `tg-resp-${msg.message_id}`,
+                    role: 'assistant' as const,
+                    parts: [{ type: 'text' as const, text: retryText || '' }],
+                };
+                history.push(asstMsg2);
+                deps.trimHistory(chatId);
+                await deps.flushHistory();
+            } catch (retryErr) {
+                const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+                console.error(`[Telegram]: Vision fallback also failed:`, retryErrMsg);
+                await sendMessage(token, chatId, 'Sorry, I hit an error processing that. Try again in a moment.');
+            }
+            return;
+        }
+
         console.error(`[Telegram]: Error generating response for ${who}:`, errMsg);
         // Check if it was an intentional abort
         const isAborted = errMsg.includes('aborted') || errMsg.includes('abort');

@@ -8,6 +8,7 @@ import type { UIMessage } from 'ai';
 import { resolve as resolvePath } from 'path';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import type { Agent } from '../../agent';
+import { getConfig } from '../../config';
 import { AGENT_ROOT } from '../../paths';
 import type { TelegramBotInfo, TelegramBridgeConfig, TelegramUpdate, InboxMessage } from './types';
 import { sleep } from './types';
@@ -29,7 +30,10 @@ export class TelegramBridge {
 
     // Per-chat message history for multi-turn context
     private chatHistories: Map<number, UIMessage[]> = new Map();
-    private readonly MAX_HISTORY = 20;
+    /** Fallback — prefer getConfig().agent.telegram.maxHistory */
+    private get maxHistory(): number {
+        return getConfig().agent.telegram?.maxHistory ?? 20;
+    }
     private historyPath: string;
     private historyDirty = false;
 
@@ -322,7 +326,9 @@ export class TelegramBridge {
                 console.log(`[Telegram]: Successfully resumed chat ${chatId}${hasCheckpoints ? ' (with progress context)' : ''}`);
             } catch (err) {
                 console.error(`[Telegram]: Failed to resume chat ${chatId}:`, err instanceof Error ? err.message : err);
-                await sendMessage(this.token, chatId, "I was interrupted and couldn't resume. Could you send your message again?").catch(() => { });
+                await sendMessage(this.token, chatId, "I was interrupted and couldn't resume. Could you send your message again?").catch(err =>
+                    console.warn(`[Telegram]: Resume notification send failed for chat ${chatId}: ${err instanceof Error ? err.message : err}`),
+                );
             }
         }
     }
@@ -338,8 +344,8 @@ export class TelegramBridge {
 
     private trimHistory(chatId: number): void {
         const history = this.chatHistories.get(chatId);
-        if (history && history.length > this.MAX_HISTORY) {
-            this.chatHistories.set(chatId, history.slice(-this.MAX_HISTORY));
+        if (history && history.length > this.maxHistory) {
+            this.chatHistories.set(chatId, history.slice(-this.maxHistory));
         }
         this.historyDirty = true;
     }
@@ -374,8 +380,8 @@ export class TelegramBridge {
             for (const [chatIdStr, messages] of Object.entries(data)) {
                 const chatId = Number(chatIdStr);
                 if (!isNaN(chatId) && Array.isArray(messages)) {
-                    // Keep only the last MAX_HISTORY messages
-                    this.chatHistories.set(chatId, messages.slice(-this.MAX_HISTORY));
+                    // Keep only the last maxHistory messages
+                    this.chatHistories.set(chatId, messages.slice(-this.maxHistory));
                     totalMessages += this.chatHistories.get(chatId)!.length;
                 }
             }
@@ -399,8 +405,8 @@ export class TelegramBridge {
 
             const data: Record<string, any[]> = {};
             for (const [chatId, messages] of this.chatHistories) {
-                // Only persist the last MAX_HISTORY messages, strip binary data
-                data[String(chatId)] = messages.slice(-this.MAX_HISTORY).map(m => ({
+                // Only persist the last maxHistory messages, strip binary data
+                data[String(chatId)] = messages.slice(-this.maxHistory).map(m => ({
                     ...m,
                     parts: TelegramBridge.stripBinaryParts(m.parts || []),
                 }));
