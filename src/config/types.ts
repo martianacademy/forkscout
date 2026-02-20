@@ -157,11 +157,15 @@ export interface AgentSettings {
     /** Max chars of raw tool output sent to the compression model */
     compressInputMaxChars: number;
 
-    // ── Pre-flight / Post-flight ────────────────────
-    /** Max retry attempts for preflight/postflight generateObject calls */
+    // ── Planning Agent ──────────────────────────────
+    /** Max retry attempts for planner/postflight generateObject calls */
     flightMaxRetries: number;
-    /** Max plan steps the preflight can suggest */
-    preflightMaxPlanSteps: number;
+    /** Max tasks the planner can produce */
+    plannerMaxTasks: number;
+    /** Number of recent chat exchanges to feed the planner */
+    plannerChatHistoryLimit: number;
+    /** Max memory queries the planner can request for pre-fetch */
+    plannerMaxMemoryQueries: number;
     /** Max chars of agent response sent to the postflight evaluator */
     postflightMaxResponseChars: number;
 
@@ -312,7 +316,9 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         compressAfterStep: 2,
         compressInputMaxChars: 6000,
         flightMaxRetries: 1,
-        preflightMaxPlanSteps: 5,
+        plannerMaxTasks: 8,
+        plannerChatHistoryLimit: 5,
+        plannerMaxMemoryQueries: 3,
         postflightMaxResponseChars: 2000,
         resolveMinContentLength: 20,
     },

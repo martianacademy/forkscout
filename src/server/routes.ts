@@ -51,7 +51,7 @@ export async function handleChatStream(
     const writerRef: { current?: { write: (part: any) => void } } = {};
 
     // Create a per-request ToolLoopAgent with all configuration
-    const { agent: chatAgent, reasoningCtx, modelId: chatModelId, preflight } = await agent.createChatAgent({
+    const { agent: chatAgent, reasoningCtx, modelId: chatModelId, plan } = await agent.createChatAgent({
         userText,
         ctx,
         onStepFinish: createStepLogger({ writer: { write: (part: any) => writerRef.current?.write(part) } }),
@@ -61,7 +61,7 @@ export async function handleChatStream(
     });
 
     // Stream with ack-first: write acknowledgment immediately, then merge agent stream
-    const ack = preflight.acknowledgment;
+    const ack = plan.acknowledgment;
     const uiStream = createUIMessageStream({
         execute: async ({ writer }) => {
             writerRef.current = writer; // Enable progress markers
@@ -116,12 +116,12 @@ export async function handleChatSync(
 
     try {
         // Create a per-request ToolLoopAgent via the centralized factory
-        const { agent: chatAgent, reasoningCtx, modelId: syncModelId, preflight: syncPreflight } = await agent.createChatAgent({ userText, ctx });
+        const { agent: chatAgent, reasoningCtx, modelId: syncModelId, plan: syncPlan } = await agent.createChatAgent({ userText, ctx });
 
         // Quick tasks with no tools needed — return the ack directly
-        if (syncPreflight.effort === 'quick' && !syncPreflight.needsTools && syncPreflight.acknowledgment) {
-            agent.saveToMemory('assistant', syncPreflight.acknowledgment);
-            sendJSON(res, 200, { response: syncPreflight.acknowledgment });
+        if (syncPlan.effort === 'quick' && !syncPlan.needsTools && syncPlan.acknowledgment) {
+            agent.saveToMemory('assistant', syncPlan.acknowledgment);
+            sendJSON(res, 200, { response: syncPlan.acknowledgment });
             return;
         }
 

@@ -189,25 +189,25 @@ export async function handleTelegramUpdate(
         });
 
         // Create a per-request ToolLoopAgent via the centralized factory
-        const { agent: chatAgent, reasoningCtx, modelId: chatModelId, preflight } = await agent.createChatAgent({
+        const { agent: chatAgent, reasoningCtx, modelId: chatModelId, plan } = await agent.createChatAgent({
             userText: queryForPrompt,
             ctx,
             systemPromptSuffix: resumeContext,
         });
 
         // Send ack immediately so the user sees a fast response
-        if (preflight.acknowledgment) {
-            sendMessage(token, chatId, preflight.acknowledgment).catch(err =>
+        if (plan.acknowledgment) {
+            sendMessage(token, chatId, plan.acknowledgment).catch(err =>
                 console.warn(`[Telegram]: Ack send failed: ${err instanceof Error ? err.message : err}`),
             );
-            sentFragments.push(preflight.acknowledgment);
+            sentFragments.push(plan.acknowledgment);
         }
 
         // Quick tasks with no tools needed — we're done
-        if (preflight.effort === 'quick' && !preflight.needsTools && preflight.acknowledgment) {
+        if (plan.effort === 'quick' && !plan.needsTools && plan.acknowledgment) {
             agent.clearSubAgentProgress();
             requestTracker.finish(tgReqId);
-            agent.saveToMemory('assistant', preflight.acknowledgment);
+            agent.saveToMemory('assistant', plan.acknowledgment);
             return;
         }
 

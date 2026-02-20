@@ -197,6 +197,10 @@ export class MemoryManager {
         return this.store.searchKnowledgeAsync(query, limit);
     }
 
+    async searchEntities(query: string, limit = 5): Promise<Entity[]> {
+        return this.store.searchEntitiesAsync(query, limit);
+    }
+
     // ── Entity operations ────────────────────────────
 
     addEntity(name: string, type: EntityType, facts: string[]): Entity {

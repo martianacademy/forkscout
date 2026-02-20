@@ -17,7 +17,7 @@ import { registerDefaultTools } from './tools-setup';
 import { resolveApiKeyForProvider, getConfig } from '../config';
 import { buildStopConditions, type LoopControlConfig } from '../llm/stop-conditions';
 import { createTurnTracker, createPrepareStep, type TurnTracker } from '../llm/reasoning';
-import { runPreflight, effortToTier, formatPlanForPrompt, type PreflightResult } from '../llm/preflight';
+import { runPlanner, effortToTier, formatPlanForPrompt, type PlannerResult, type PreFetchedMemory } from '../llm/planner';
 import type { SubAgentDeps, SubAgentProgressCallback } from '../tools/agent-tool';
 
 // Re-export all types from the barrel
@@ -65,8 +65,10 @@ export interface ChatAgentResult {
     systemPrompt: string;
     /** The tools given to this agent */
     tools: Record<string, any>;
-    /** Pre-flight analysis result */
-    preflight: PreflightResult;
+    /** Planning agent result */
+    plan: PlannerResult;
+    /** Pre-fetched memory from the planner */
+    preFetched: PreFetchedMemory;
 }
 /**
  * Forkscout Agent — AI SDK v6 powered agent with tools, memory, and MCP.
@@ -160,14 +162,14 @@ export class Agent {
     async createChatAgent(opts: ChatAgentOptions): Promise<ChatAgentResult> {
         const { userText, ctx, onStepFinish, onFinish } = opts;
 
-        // 1. Pre-flight: fast structured analysis for effort routing + plan
-        const preflight = await runPreflight(userText, this.router);
-        console.log(`[Preflight]: effort=${preflight.effort} needsTools=${preflight.needsTools} plan=[${preflight.plan.join(', ')}]`);
+        // 1. Planning Agent: context-aware structured analysis
+        const { plan, preFetched } = await runPlanner(userText, this.router, this.memory);
+        console.log(`[Planner]: effort=${plan.effort} tasks=${plan.tasks.length} tools=[${plan.recommendedTools.join(', ')}]`);
 
-        // 2. Build enriched system prompt with memory + urgent alerts (effort-gated)
-        let systemPrompt = await this.buildSystemPrompt(userText, ctx, preflight.effort);
-        // Inject the pre-flight plan so the model knows the approach
-        const planInjection = formatPlanForPrompt(preflight);
+        // 2. Build enriched system prompt — planner already gathered memory context
+        let systemPrompt = await this.buildSystemPrompt(userText, ctx, plan.effort, preFetched);
+        // Inject the planner's structured plan so the model knows the approach
+        const planInjection = formatPlanForPrompt(plan, preFetched);
         if (planInjection) systemPrompt += planInjection;
         if (opts.systemPromptSuffix) {
             systemPrompt += '\n\n' + opts.systemPromptSuffix;
@@ -175,7 +177,7 @@ export class Agent {
 
         // 3. Model selection — use override or effort-based tier routing
         let chatModel = opts.model;
-        let chatTier = opts.tier || effortToTier(preflight.effort);
+        let chatTier = opts.tier || effortToTier(plan.effort);
         let chatModelId = opts.modelId || '';
 
         if (!chatModel) {
@@ -183,7 +185,7 @@ export class Agent {
             chatModel = selection.model;
             chatTier = selection.tier;
             chatModelId = selection.modelId;
-            console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [effort: ${preflight.effort}]`);
+            console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [effort: ${plan.effort}]`);
         }
 
         // 4. Tools — filtered by access level
@@ -204,9 +206,9 @@ export class Agent {
         };
         const adaptiveConfig: LoopControlConfig = {
             ...agentCfg,
-            maxSteps: effortMaxSteps[preflight.effort] ?? agentCfg.maxSteps,
+            maxSteps: effortMaxSteps[plan.effort] ?? agentCfg.maxSteps,
         };
-        console.log(`[StopConditions]: maxSteps=${adaptiveConfig.maxSteps} (effort: ${preflight.effort})`);
+        console.log(`[StopConditions]: maxSteps=${adaptiveConfig.maxSteps} (effort: ${plan.effort})`);
 
         // 6. Build the ToolLoopAgent with all configuration
         const agent = new ToolLoopAgent({
@@ -221,7 +223,7 @@ export class Agent {
             onFinish: onFinish ? (result: any) => { onFinish(result); } : undefined,
         });
 
-        return { agent, reasoningCtx, tier: chatTier, modelId: chatModelId, systemPrompt, tools, preflight };
+        return { agent, reasoningCtx, tier: chatTier, modelId: chatModelId, systemPrompt, tools, plan, preFetched };
     }
 
     getRouter(): ModelRouter {
@@ -286,9 +288,9 @@ export class Agent {
 
     // ── System Prompt ──────────────────────────────────
 
-    async buildSystemPrompt(userQuery: string, ctx?: ChatContext, effort?: string): Promise<string> {
+    async buildSystemPrompt(userQuery: string, ctx?: ChatContext, effort?: string, preFetched?: PreFetchedMemory): Promise<string> {
         const guestTools = ctx?.isAdmin ? undefined : this.getToolsForContext(ctx);
-        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, this.router, userQuery, ctx, guestTools, effort);
+        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, this.router, userQuery, ctx, guestTools, effort, preFetched);
     }
 
     // ── Memory ─────────────────────────────────────────

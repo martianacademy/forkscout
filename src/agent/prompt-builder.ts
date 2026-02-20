@@ -3,6 +3,7 @@ import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
 import type { CronAlert } from '../scheduler';
 import type { ModelRouter } from '../llm/router';
+import type { PreFetchedMemory } from '../llm/planner';
 import { getConfig } from '../config';
 import { getDefaultSystemPrompt, getPublicSystemPrompt } from './system-prompts';
 import { getCurrentTodos } from '../tools/todo-tool';
@@ -33,6 +34,7 @@ export async function buildSystemPrompt(
     ctx?: ChatContext,
     guestTools?: Record<string, any>,
     effort?: string,
+    preFetched?: PreFetchedMemory,
 ): Promise<string> {
     const isAdmin = ctx?.isAdmin ?? false;
 
@@ -95,6 +97,7 @@ export async function buildSystemPrompt(
     alertSection += survivalAlerts;
 
     // Memory context — only injected for admin users (guests must not see private data)
+    // When preFetched is available (from planner), use it to avoid duplicate memory calls.
     // Lazy injection: quick = skip memory, moderate = recent history only, deep = full
     let memorySection = '';
     let selfSection = '';
@@ -106,7 +109,13 @@ export async function buildSystemPrompt(
                 selfSection = '\n\n[LEARNED BEHAVIORS — follow these rigorously, they come from your own experience and owner directives]\n' + selfCtx;
             }
 
-            if (effort === 'moderate') {
+            if (preFetched?.plannerContext) {
+                // Planner already gathered context — use it directly (no duplicate MCP calls)
+                const pc = preFetched.plannerContext;
+                if (pc.recentChat) memorySection += '\n\n[Recent Conversation]\n' + pc.recentChat;
+                if (pc.memoryHits) memorySection += '\n\n' + pc.memoryHits;
+                if (preFetched.additionalContext) memorySection += '\n\n' + preFetched.additionalContext;
+            } else if (effort === 'moderate') {
                 // Moderate: recent history only — skip vector search, graph, skills
                 const history = memory.getRecentHistory(10);
                 if (history.length > 0) {
