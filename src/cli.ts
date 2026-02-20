@@ -33,8 +33,7 @@ console.log();
 
 console.log('Starting Forkscout Agent (interactive mode)...\n');
 
-import { getReasoningSummary } from './llm/reasoning';
-import { buildFailureObservation } from './memory';
+import { finalizeGeneration } from './utils/generation-hooks';
 import * as readline from 'readline';
 
 createAgent(config)
@@ -65,29 +64,17 @@ createAgent(config)
                         userText: input,
                     });
 
-                    const { text, usage } = await chatAgent.generate({
+                    const { text, usage, steps } = await chatAgent.generate({
                         prompt: input,
                     });
 
-                    // Log reasoning summary
-                    const cliSummary = getReasoningSummary(reasoningCtx);
-                    if (cliSummary.escalated || cliSummary.toolFailures > 0) {
-                        console.log(`[Reasoning]: tier=${cliSummary.finalTier}, failures=${cliSummary.toolFailures}, escalated=${cliSummary.escalated}`);
-                    }
+                    const { response: resolved } = await finalizeGeneration({
+                        text, steps, usage, reasoningCtx,
+                        modelId: 'cli', channel: 'terminal', agent,
+                        userMessage: input,
+                    });
 
-                    // Record cost (use final tier in case of escalation)
-                    if (usage) {
-                        agent.getRouter().recordUsage(reasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
-                    }
-
-                    // Learn from failures
-                    const cliFailureObs = buildFailureObservation(reasoningCtx, text || '');
-                    if (cliFailureObs) {
-                        try { agent.getMemoryManager().recordSelfObservation(cliFailureObs, 'failure-learning'); } catch { /* non-critical */ }
-                    }
-
-                    agent.saveToMemory('assistant', text);
-                    console.log(`\n[Forkscout]: ${text}\n`);
+                    console.log(`\n[Forkscout]: ${resolved}\n`);
                 } catch (error) {
                     console.error('Error:', error);
                 }

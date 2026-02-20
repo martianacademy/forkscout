@@ -15,7 +15,7 @@ import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-bui
 import { createMemoryManager, createScheduler } from './factories';
 import { registerDefaultTools } from './tools-setup';
 import { resolveApiKeyForProvider, getConfig } from '../config';
-import { buildStopConditions } from '../llm/stop-conditions';
+import { buildStopConditions, type LoopControlConfig } from '../llm/stop-conditions';
 import { createTurnTracker, createPrepareStep, type TurnTracker } from '../llm/reasoning';
 import { runPreflight, effortToTier, formatPlanForPrompt, type PreflightResult } from '../llm/preflight';
 import type { SubAgentDeps, SubAgentProgressCallback } from '../tools/agent-tool';
@@ -164,8 +164,8 @@ export class Agent {
         const preflight = await runPreflight(userText, this.router);
         console.log(`[Preflight]: effort=${preflight.effort} needsTools=${preflight.needsTools} plan=[${preflight.plan.join(', ')}]`);
 
-        // 2. Build enriched system prompt with memory + urgent alerts
-        let systemPrompt = await this.buildSystemPrompt(userText, ctx);
+        // 2. Build enriched system prompt with memory + urgent alerts (effort-gated)
+        let systemPrompt = await this.buildSystemPrompt(userText, ctx, preflight.effort);
         // Inject the pre-flight plan so the model knows the approach
         const planInjection = formatPlanForPrompt(preflight);
         if (planInjection) systemPrompt += planInjection;
@@ -195,14 +195,23 @@ export class Agent {
             systemPrompt, this.router,
         );
 
-        // 5. Build the ToolLoopAgent with all configuration
+        // 5b. Adaptive step budget — effort-based maxSteps
+        const agentCfg = getConfig().agent;
+        const effortMaxSteps: Record<string, number> = { quick: 3, moderate: 15, deep: agentCfg.maxSteps };
+        const adaptiveConfig: LoopControlConfig = {
+            ...agentCfg,
+            maxSteps: effortMaxSteps[preflight.effort] ?? agentCfg.maxSteps,
+        };
+        console.log(`[StopConditions]: maxSteps=${adaptiveConfig.maxSteps} (effort: ${preflight.effort})`);
+
+        // 6. Build the ToolLoopAgent with all configuration
         const agent = new ToolLoopAgent({
             id: `forkscout-${ctx?.channel || 'chat'}`,
             model: chatModel,
             instructions: systemPrompt,
             tools,
             maxRetries: 3,
-            stopWhen: buildStopConditions(getConfig().agent),
+            stopWhen: buildStopConditions(adaptiveConfig),
             prepareStep: createPrepareStep(reasoningCtx),
             onStepFinish: onStepFinish ? (step: any) => { onStepFinish(step); } : undefined,
             onFinish: onFinish ? (result: any) => { onFinish(result); } : undefined,
@@ -273,9 +282,9 @@ export class Agent {
 
     // ── System Prompt ──────────────────────────────────
 
-    async buildSystemPrompt(userQuery: string, ctx?: ChatContext): Promise<string> {
+    async buildSystemPrompt(userQuery: string, ctx?: ChatContext, effort?: string): Promise<string> {
         const guestTools = ctx?.isAdmin ? undefined : this.getToolsForContext(ctx);
-        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, this.router, userQuery, ctx, guestTools);
+        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, this.router, userQuery, ctx, guestTools, effort);
     }
 
     // ── Memory ─────────────────────────────────────────

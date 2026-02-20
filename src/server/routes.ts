@@ -16,14 +16,13 @@ import {
     createUIMessageStreamResponse,
     type UIMessage,
 } from 'ai';
-import { getReasoningSummary } from '../llm/reasoning';
-import { buildFailureObservation } from '../memory';
 import type { Agent } from '../agent';
 import type { ChannelAuthStore } from '../channels/auth';
 import type { TelegramBridge } from '../channels/telegram';
 import { getConfig } from '../config';
 import { readBody, sendJSON } from './http-utils';
 import { detectChatContext, extractUserText } from './context';
+import { createStepLogger, finalizeGeneration } from '../utils/generation-hooks';
 
 // ── POST /api/chat — AI SDK UIMessage stream ───────────
 
@@ -48,36 +47,16 @@ export async function handleChatStream(
 
     agent.saveToMemory('user', userText, ctx);
 
+    // Mutable ref so the step logger can write progress to the stream
+    const writerRef: { current?: { write: (part: any) => void } } = {};
+
     // Create a per-request ToolLoopAgent with all configuration
-    const { agent: chatAgent, reasoningCtx, preflight } = await agent.createChatAgent({
+    const { agent: chatAgent, reasoningCtx, modelId: chatModelId, preflight } = await agent.createChatAgent({
         userText,
         ctx,
-        onStepFinish: ({ toolCalls, toolResults }: any) => {
-            if (toolCalls && toolCalls.length > 0) {
-                console.log(`[Agent]: Step — ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
-            }
-            if (toolResults && toolResults.length > 0) {
-                for (const tr of toolResults) {
-                    const output = typeof (tr as any).output === 'string' ? (tr as any).output.slice(0, 100) : JSON.stringify((tr as any).output).slice(0, 100);
-                    console.log(`  ↳ ${(tr as any).toolName}: ${output}`);
-                }
-            }
-        },
-        onFinish: ({ text, steps, usage }: any) => {
-            const summary = getReasoningSummary(reasoningCtx);
-            console.log(`[Agent]: Done (${steps?.length || 0} step(s), tier: ${summary.finalTier}, failures: ${summary.toolFailures}${summary.escalated ? ', ESCALATED' : ''})`);
-            if (usage) {
-                agent.getRouter().recordUsage(reasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
-            }
-            if (text) {
-                agent.saveToMemory('assistant', text);
-                console.log(`[Agent]: ${text.slice(0, 200)}${text.length > 200 ? '…' : ''}`);
-            }
-            // Learn from failures
-            const failureObs = buildFailureObservation(reasoningCtx, text || '');
-            if (failureObs) {
-                try { agent.getMemoryManager().recordSelfObservation(failureObs, 'failure-learning'); } catch { /* non-critical */ }
-            }
+        onStepFinish: createStepLogger({ writer: { write: (part: any) => writerRef.current?.write(part) } }),
+        onFinish: async ({ text, steps, usage }: any) => {
+            await finalizeGeneration({ text, steps, usage, reasoningCtx, modelId: chatModelId, channel: ctx.channel, agent, ctx, userMessage: userText });
         },
     });
 
@@ -85,6 +64,7 @@ export async function handleChatStream(
     const ack = preflight.acknowledgment;
     const uiStream = createUIMessageStream({
         execute: async ({ writer }) => {
+            writerRef.current = writer; // Enable progress markers
             if (ack) {
                 const ackId = `ack-${Date.now()}`;
                 writer.write({ type: 'text-start', id: ackId });
@@ -136,7 +116,7 @@ export async function handleChatSync(
 
     try {
         // Create a per-request ToolLoopAgent via the centralized factory
-        const { agent: chatAgent, reasoningCtx, preflight: syncPreflight } = await agent.createChatAgent({ userText, ctx });
+        const { agent: chatAgent, reasoningCtx, modelId: syncModelId, preflight: syncPreflight } = await agent.createChatAgent({ userText, ctx });
 
         // Quick tasks with no tools needed — return the ack directly
         if (syncPreflight.effort === 'quick' && !syncPreflight.needsTools && syncPreflight.acknowledgment) {
@@ -145,23 +125,17 @@ export async function handleChatSync(
             return;
         }
 
-        // agent.generate() returns the same shape as generateText()
-        const { text, usage } = await chatAgent.generate({
+        const { text, usage, steps } = await chatAgent.generate({
             prompt: userText,
         });
 
-        if (usage) {
-            agent.getRouter().recordUsage(reasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
-        }
+        const { response: resolved } = await finalizeGeneration({
+            text, steps, usage, reasoningCtx,
+            modelId: syncModelId, channel: ctx.channel, agent, ctx,
+            userMessage: userText,
+        });
 
-        // Learn from failures
-        const syncFailureObs = buildFailureObservation(reasoningCtx, text || '');
-        if (syncFailureObs) {
-            try { agent.getMemoryManager().recordSelfObservation(syncFailureObs, 'failure-learning'); } catch { /* non-critical */ }
-        }
-
-        agent.saveToMemory('assistant', text);
-        sendJSON(res, 200, { response: text });
+        sendJSON(res, 200, { response: resolved });
     } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
         sendJSON(res, 500, { error: errMsg });

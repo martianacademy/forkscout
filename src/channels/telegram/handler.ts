@@ -5,15 +5,14 @@
 import type { UIMessage } from 'ai';
 import { getConfig } from '../../config';
 import { generateTextWithRetry, isVisionUnsupportedError } from '../../llm/retry';
-import { getReasoningSummary } from '../../llm/reasoning';
 import { buildStopConditions } from '../../llm/stop-conditions';
-import { buildFailureObservation } from '../../memory';
 import type { Agent, ChatContext } from '../../agent';
 import { requestTracker } from '../../request-tracker';
 import type { TelegramUpdate } from './types';
 import { describeToolCall, humanTimeAgo } from './types';
 import { downloadFile, sendMessage, sendTyping } from './api';
 import type { TelegramStateManager } from './state';
+import { finalizeGeneration } from '../../utils/generation-hooks';
 
 // ── Handler dependencies ─────────────────────────────
 
@@ -28,17 +27,6 @@ export interface TelegramHandlerDeps {
 }
 
 // ── Helpers ──────────────────────────────────────────
-
-/** Extract the last non-empty text from ToolLoopAgent steps (fallback when result.text is empty). */
-function extractTextFromSteps(steps: any[]): string {
-    const parts: string[] = [];
-    for (const step of steps) {
-        if (step.text?.trim()) {
-            parts.push(step.text.trim());
-        }
-    }
-    return parts.length > 0 ? parts[parts.length - 1] : '';
-}
 
 /** Produce a short text description for non-text messages (used for complexity detection & system prompt). */
 function describeMessageType(msg: { sticker?: any; document?: any; audio?: any; voice?: any; video?: any; video_note?: any; location?: any; contact?: any; poll?: any; photo?: any }): string {
@@ -201,7 +189,7 @@ export async function handleTelegramUpdate(
         });
 
         // Create a per-request ToolLoopAgent via the centralized factory
-        const { agent: chatAgent, reasoningCtx, preflight } = await agent.createChatAgent({
+        const { agent: chatAgent, reasoningCtx, modelId: chatModelId, preflight } = await agent.createChatAgent({
             userText: queryForPrompt,
             ctx,
             systemPromptSuffix: resumeContext,
@@ -312,6 +300,8 @@ export async function handleTelegramUpdate(
 
         clearInterval(typingInterval);
 
+        // ── Post-generation: finalize + send response ────────
+
         // Remove step checkpoints from history — they were only for crash recovery.
         // On a clean completion, the final assistant message replaces them.
         for (let i = history.length - 1; i >= 0; i--) {
@@ -320,27 +310,12 @@ export async function handleTelegramUpdate(
             }
         }
 
-        // Log reasoning summary
-        const tgSummary = getReasoningSummary(reasoningCtx);
-        if (tgSummary.escalated || tgSummary.toolFailures > 0) {
-            console.log(`[Telegram/Reasoning]: tier=${tgSummary.finalTier}, failures=${tgSummary.toolFailures}, escalated=${tgSummary.escalated}`);
-        }
-
-        // Record cost (use final tier in case of escalation)
-        if (usage) {
-            agent.getRouter().recordUsage(reasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
-        }
-
-        // Learn from failures
-        const tgFailureObs = buildFailureObservation(reasoningCtx, responseText || '');
-        if (tgFailureObs) {
-            try { agent.getMemoryManager().recordSelfObservation(tgFailureObs, 'failure-learning'); } catch (err) {
-                console.warn(`[Telegram]: Failure observation save failed: ${err instanceof Error ? err.message : err}`);
-            }
-        }
-
-        // Save response to memory
-        agent.saveToMemory('assistant', responseText);
+        // Centralised finalize: resolve response, record cost, activity log, failure learning, memory save
+        const { response: resolved } = await finalizeGeneration({
+            text: responseText, steps: agentSteps, usage,
+            reasoningCtx, modelId: chatModelId, channel: 'telegram', agent, ctx,
+            userMessage: queryText,
+        });
 
         // Mark in inbox as responded
         await state.addToInbox(msg, true);
@@ -349,18 +324,21 @@ export async function handleTelegramUpdate(
         const asstMsg: UIMessage = {
             id: `tg-resp-${msg.message_id}`,
             role: 'assistant' as const,
-            parts: [{ type: 'text' as const, text: responseText }],
+            parts: [{ type: 'text' as const, text: resolved }],
         };
         history.push(asstMsg);
         deps.trimHistory(chatId);
 
-        // Send response — skip text that was already streamed during steps
-        if (responseText.trim()) {
-            let finalText = responseText.trim();
+        if (resolved) {
+            let finalText = resolved;
 
-            // Strip all fragments that were already sent during onStepFinish.
-            // The final response often concatenates all step texts + a conclusion.
+            // Strip fragments that were already sent during onStepFinish
             for (const frag of sentFragments) {
+                // Only strip exact full-fragment matches (avoid partial stripping)
+                if (finalText === frag) {
+                    finalText = '';
+                    break;
+                }
                 const idx = finalText.indexOf(frag);
                 if (idx !== -1) {
                     finalText = (finalText.slice(0, idx) + finalText.slice(idx + frag.length)).trim();
@@ -370,22 +348,11 @@ export async function handleTelegramUpdate(
             if (finalText) {
                 await sendMessage(token, chatId, finalText);
                 console.log(`[Telegram/Agent → ${who}]: ${finalText.slice(0, 200)}${finalText.length > 200 ? '…' : ''}`);
-            } else if (sentFragments.length === 0) {
-                // Nothing was sent during steps — send the full response
-                await sendMessage(token, chatId, responseText);
-                console.log(`[Telegram/Agent → ${who}]: ${responseText.slice(0, 200)}${responseText.length > 200 ? '…' : ''}`);
-            } else {
+            } else if (sentFragments.length > 0) {
                 console.log(`[Telegram/Agent → ${who}]: (response already streamed in ${sentFragments.length} step(s))`);
             }
         } else {
-            // Fallback: extract text from steps when final result.text is empty
-            const fallbackText = extractTextFromSteps(agentSteps || []);
-            if (fallbackText) {
-                await sendMessage(token, chatId, fallbackText);
-                console.log(`[Telegram/Agent → ${who}]: (fallback from steps) ${fallbackText.slice(0, 200)}${fallbackText.length > 200 ? '…' : ''}`);
-            } else {
-                console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
-            }
+            console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
         }
 
         requestTracker.finish(tgReqId);

@@ -12,15 +12,14 @@ import {
     createUIMessageStreamResponse,
     type UIMessage,
 } from 'ai';
-import { getReasoningSummary } from './llm/reasoning';
-import { buildFailureObservation } from './memory';
 import { Agent, type AgentConfig, type ChatContext, type ChatChannel } from './agent';
 import type { ChannelAuthStore } from './channels/auth';
 import { TelegramBridge } from './channels/telegram';
 import { getConfig, watchConfig } from './config';
-import { logToolCall, logLLMCall, logChat, logShutdown, readRecentActivity, getActivitySummary, type ActivityEventType } from './activity-log';
+import { logChat, logShutdown, readRecentActivity, getActivitySummary, type ActivityEventType } from './activity-log';
 import { requestTracker } from './request-tracker';
 import { checkRateLimit } from './server/rate-limit';
+import { createStepLogger, finalizeGeneration } from './utils/generation-hooks';
 
 
 export interface ServerOptions {
@@ -187,20 +186,7 @@ function detectChatContext(req: IncomingMessage, body?: any, channelAuth?: Chann
 
 
 
-/**
- * Extract text from ToolLoopAgent steps when the final result.text is empty.
- * This happens when the model's last step is a tool call with no accompanying text.
- */
-function extractTextFromSteps(steps: any[]): string {
-    const parts: string[] = [];
-    for (const step of steps) {
-        if (step.text?.trim()) {
-            parts.push(step.text.trim());
-        }
-    }
-    // Return the last non-empty text (most likely the summary/conclusion)
-    return parts.length > 0 ? parts[parts.length - 1] : '';
-}
+// Post-generation logic centralised in utils/generation-hooks.ts
 
 /**
  * Extract the user's latest text from a UIMessage array.
@@ -284,64 +270,16 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 // Track request for abort capability
                 const { id: reqId, signal: abortSignal } = requestTracker.start('http-stream', ctx.sender);
 
+                // Mutable ref so the step logger can write progress to the stream
+                const writerRef: { current?: { write: (part: any) => void } } = {};
+
                 // Create a per-request ToolLoopAgent via the centralized factory
                 const { agent: chatAgent, reasoningCtx, modelId: chatModelId, preflight } = await agent.createChatAgent({
                     userText,
                     ctx,
-                    onStepFinish: ({ toolCalls, toolResults }: any) => {
-                        if (toolCalls && toolCalls.length > 0) {
-                            console.log(`[Agent]: Step — ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`);
-                        }
-                        if (toolResults && toolResults.length > 0) {
-                            for (const tr of toolResults) {
-                                const output = typeof (tr as any).output === 'string' ? (tr as any).output.slice(0, 100) : JSON.stringify((tr as any).output).slice(0, 100);
-                                console.log(`  ↳ ${(tr as any).toolName}: ${output}`);
-                            }
-                        }
-                        // Activity log: record each tool call
-                        if (toolCalls && toolCalls.length > 0) {
-                            for (let i = 0; i < toolCalls.length; i++) {
-                                const tc = toolCalls[i] as any;
-                                const tr = toolResults?.[i] as any;
-                                const resultStr = tr?.output ? (typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output)) : undefined;
-                                logToolCall(tc.toolName, tc.input, resultStr);
-                            }
-                        }
-                    },
-                    onFinish: ({ text, steps, usage }: any) => {
-                        const summary = getReasoningSummary(reasoningCtx);
-                        console.log(`[Agent]: Done (${steps?.length || 0} step(s), tier: ${summary.finalTier}, failures: ${summary.toolFailures}${summary.escalated ? ', ESCALATED' : ''})`);
-                        // Record cost
-                        let cost = 0;
-                        if (usage) {
-                            agent.getRouter().recordUsage(reasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
-                            const pricing = agent.getRouter().getTierPricing(reasoningCtx.tier);
-                            cost = ((usage.inputTokens || 0) * pricing.inputPer1M + (usage.outputTokens || 0) * pricing.outputPer1M) / 1_000_000;
-                        }
-                        // Activity log: record LLM call
-                        logLLMCall(
-                            chatModelId,
-                            summary.finalTier,
-                            usage?.inputTokens || 0,
-                            usage?.outputTokens || 0,
-                            cost,
-                            steps?.length || 0,
-                            ctx.channel,
-                        );
-                        if (text) {
-                            agent.saveToMemory('assistant', text);
-                            console.log(`[Agent]: ${text.slice(0, 200)}${text.length > 200 ? '…' : ''}`);
-                        }
-                        // Learn from failures — store in knowledge graph
-                        const failureObs = buildFailureObservation(reasoningCtx, text || '');
-                        if (failureObs) {
-                            try {
-                                agent.getMemoryManager().recordSelfObservation(failureObs, 'failure-learning');
-                                console.log(`[Reasoning]: Stored failure lesson in memory`);
-                            } catch (err) {
-                                console.warn(`[Server]: Stream failure observation save failed: ${err instanceof Error ? err.message : err}`);
-                            }
-                        }
+                    onStepFinish: createStepLogger({ activityLog: true, writer: { write: (part: any) => writerRef.current?.write(part) } }),
+                    onFinish: async ({ text, steps, usage }: any) => {
+                        await finalizeGeneration({ text, steps, usage, reasoningCtx, modelId: chatModelId, channel: ctx.channel, agent, ctx, userMessage: userText });
                     },
                 });
 
@@ -349,6 +287,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 const ack = preflight.acknowledgment;
                 const uiStream = createUIMessageStream({
                     execute: async ({ writer }) => {
+                        writerRef.current = writer; // Enable progress markers
                         // 1. Write acknowledgment text immediately so user sees it fast
                         if (ack) {
                             const ackId = `ack-${Date.now()}`;
@@ -421,30 +360,12 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                         abortSignal: syncAbortSignal,
                     });
 
-                    // Record cost + activity log
-                    const syncSummary = getReasoningSummary(syncReasoningCtx);
-                    let cost = 0;
-                    if (usage) {
-                        agent.getRouter().recordUsage(syncReasoningCtx.tier, usage.inputTokens || 0, usage.outputTokens || 0);
-                        const pricing = agent.getRouter().getTierPricing(syncReasoningCtx.tier);
-                        cost = ((usage.inputTokens || 0) * pricing.inputPer1M + (usage.outputTokens || 0) * pricing.outputPer1M) / 1_000_000;
-                    }
-                    logLLMCall(syncModelId, syncSummary.finalTier, usage?.inputTokens || 0, usage?.outputTokens || 0, cost, steps?.length || 0, ctx.channel);
+                    const { response: finalText } = await finalizeGeneration({
+                        text, steps, usage, reasoningCtx: syncReasoningCtx,
+                        modelId: syncModelId, channel: ctx.channel, agent, ctx,
+                        userMessage: userText,
+                    });
 
-                    // Learn from failures
-                    const syncFailureObs = buildFailureObservation(syncReasoningCtx, text || '');
-                    if (syncFailureObs) {
-                        try {
-                            agent.getMemoryManager().recordSelfObservation(syncFailureObs, 'failure-learning');
-                        } catch (err) {
-                            console.warn(`[Server]: Failure observation save failed: ${err instanceof Error ? err.message : err}`);
-                        }
-                    }
-
-                    // Fallback: if text is empty but steps ran, extract from step text
-                    const finalText = text?.trim() || extractTextFromSteps(steps || []);
-
-                    agent.saveToMemory('assistant', finalText);
                     requestTracker.finish(syncReqId);
                     sendJSON(res, 200, { response: finalText });
                 } catch (error) {

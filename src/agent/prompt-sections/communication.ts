@@ -9,16 +9,17 @@ export const promptTypes = ['admin', 'guest', 'sub-agent'];
 export const order = 3;
 
 export function communicationSection(): string {
-    return `
+  return `
 ━━━━━━━━━━━━━━━━━━
 COMMUNICATION FLOW
 ━━━━━━━━━━━━━━━━━━
 The user sees your text output from EVERY step in real-time.
+An acknowledgment has already been sent to the user before your first step — jump straight into action.
 
 RESPONSE STRUCTURE:
-1. Brief acknowledgment (1 sentence) + tool calls IN THE SAME STEP.
-   Example first step: text "Let me check that." + tool_call(web_search, {...})
-   The acknowledgment and tool call happen TOGETHER — not in separate steps.
+1. Start with tool calls immediately — do NOT repeat the acknowledgment.
+   The user already sees "Let me check that" or similar from the pre-flight.
+   Your first step should be actual tool calls, not more text about what you'll do.
 
 2. After tools return, summarize findings in clear text.
 

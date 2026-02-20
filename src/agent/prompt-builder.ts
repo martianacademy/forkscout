@@ -32,6 +32,7 @@ export async function buildSystemPrompt(
     userQuery: string,
     ctx?: ChatContext,
     guestTools?: Record<string, any>,
+    effort?: string,
 ): Promise<string> {
     const isAdmin = ctx?.isAdmin ?? false;
 
@@ -94,9 +95,10 @@ export async function buildSystemPrompt(
     alertSection += survivalAlerts;
 
     // Memory context — only injected for admin users (guests must not see private data)
+    // Lazy injection: quick = skip memory, moderate = recent history only, deep = full
     let memorySection = '';
     let selfSection = '';
-    if (isAdmin) {
+    if (isAdmin && effort !== 'quick') {
         try {
             // Self-identity — who am I? (async fetch from MCP, cached)
             const selfCtx = await memory.getSelfContextAsync();
@@ -104,17 +106,27 @@ export async function buildSystemPrompt(
                 selfSection = '\n\n[LEARNED BEHAVIORS — follow these rigorously, they come from your own experience and owner directives]\n' + selfCtx;
             }
 
-            const { recentHistory, relevantMemories, graphContext, skillContext, stats } =
-                await memory.buildContext(userQuery);
-            if (stats.retrievedCount > 0 || stats.graphEntities > 0 || stats.skillCount > 0) {
-                console.log(
-                    `[Memory]: ${stats.recentCount} recent + ${stats.retrievedCount} vector + ${stats.graphEntities} graph entities + ${stats.skillCount} skills | situation: [${stats.situation.primary.join(', ')}] ${stats.situation.goal}`,
-                );
+            if (effort === 'moderate') {
+                // Moderate: recent history only — skip vector search, graph, skills
+                const history = memory.getRecentHistory(10);
+                if (history.length > 0) {
+                    const lines = history.map(m => `${m.role}: ${m.content}`);
+                    memorySection += '\n\n[Recent Conversation]\n' + lines.join('\n');
+                }
+            } else {
+                // Deep (or unspecified): full memory injection
+                const { recentHistory, relevantMemories, graphContext, skillContext, stats } =
+                    await memory.buildContext(userQuery);
+                if (stats.retrievedCount > 0 || stats.graphEntities > 0 || stats.skillCount > 0) {
+                    console.log(
+                        `[Memory]: ${stats.recentCount} recent + ${stats.retrievedCount} vector + ${stats.graphEntities} graph entities + ${stats.skillCount} skills | situation: [${stats.situation.primary.join(', ')}] ${stats.situation.goal}`,
+                    );
+                }
+                if (recentHistory) memorySection += '\n\n[Recent Conversation]\n' + recentHistory;
+                if (graphContext) memorySection += graphContext;
+                if (skillContext) memorySection += '\n\n[Known Skills]\n' + skillContext;
+                if (relevantMemories) memorySection += relevantMemories;
             }
-            if (recentHistory) memorySection += '\n\n[Recent Conversation]\n' + recentHistory;
-            if (graphContext) memorySection += graphContext;
-            if (skillContext) memorySection += '\n\n[Known Skills]\n' + skillContext;
-            if (relevantMemories) memorySection += relevantMemories;
         } catch {
             /* memory unavailable — continue without it */
         }

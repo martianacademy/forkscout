@@ -15,6 +15,7 @@
 import { pruneMessages, type ModelMessage } from 'ai';
 import type { ModelRouter, ModelTier } from './router';
 import { getConfig } from '../config';
+import { compressLargeToolResults } from './compress';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -101,7 +102,7 @@ function pruneContextIfNeeded(
  * No phases. No tool filtering. The LLM decides everything.
  */
 export function createPrepareStep(tracker: TurnTracker) {
-    return (options: {
+    return async (options: {
         steps: Array<any>;
         stepNumber: number;
         model: any;
@@ -129,6 +130,9 @@ export function createPrepareStep(tracker: TurnTracker) {
 
         // ── Context management: prune messages in long loops ──
         const prunedMessages = pruneContextIfNeeded(messages, stepNumber);
+
+        // ── Tool result compression: shrink large outputs to save context ──
+        await compressLargeToolResults(prunedMessages || messages, stepNumber, tracker.router);
 
         // ── Mid-task escalation if too many failures ─────
         if (
