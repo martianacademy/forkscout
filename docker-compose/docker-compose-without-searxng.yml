@@ -3,9 +3,9 @@
 # Use when forkscout-searxng container is already running on forkscout_default network.
 #
 # Usage:
-#   docker compose -f docker/docker-compose-without-searxng.yml up -d --build
-#   docker compose -f docker/docker-compose-without-searxng.yml logs -f agent
-#   docker compose -f docker/docker-compose-without-searxng.yml down
+#   docker compose -f docker-compose/docker-compose-without-searxng.yml up -d --build
+#   docker compose -f docker-compose/docker-compose-without-searxng.yml logs -f agent
+#   docker compose -f docker-compose/docker-compose-without-searxng.yml down
 
 services:
     agent:

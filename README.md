@@ -36,19 +36,49 @@ ADMIN_SECRET=your-secret-here
 TELEGRAM_BOT_TOKEN=your-bot-token-here
 ```
 
-### 2. Build & start
+### 2. Choose your deployment
+
+Forkscout consists of three services. Depending on what you already have running, pick the right compose file:
+
+#### Option A: Full stack (nothing running yet)
+
+Starts all three containers — agent, memory MCP server, and SearXNG search engine:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
-
-This starts three containers:
 
 | Container           | Port | Description                             |
 | ------------------- | ---- | --------------------------------------- |
 | `forkscout-agent`   | 3210 | The AI agent (API + Telegram bridge)    |
 | `forkscout-memory`  | 3211 | Persistent memory MCP server            |
 | `forkscout-searxng` | 8888 | Private search engine (web search tool) |
+
+#### Option B: Agent only (memory + SearXNG already running)
+
+If both `forkscout-memory` and `forkscout-searxng` containers are already running:
+
+```bash
+docker compose -f docker-compose/docker-compose-agent-only.yml up -d --build
+```
+
+#### Option C: Agent + SearXNG (memory already running)
+
+If `forkscout-memory` is already running but you need SearXNG:
+
+```bash
+docker compose -f docker-compose/docker-compose-without-forkscout-mcp.yml up -d --build
+```
+
+#### Option D: Agent + Memory (SearXNG already running)
+
+If `forkscout-searxng` is already running but you need a memory server:
+
+```bash
+docker compose -f docker-compose/docker-compose-without-searxng.yml up -d --build
+```
+
+> **Note:** Options B, C, and D assume the existing containers are on the `forkscout_default` Docker network. The variant compose files automatically join that network so all services can communicate.
 
 ### 3. Verify
 
@@ -954,11 +984,16 @@ forkscout/
 ├── .env.example                # Environment template (secrets only)
 ├── forkscout.config.json       # All non-secret settings (hot-reloaded)
 ├── Dockerfile                  # Multi-stage build (Node 22 + Playwright)
-├── docker-compose.yml          # Agent + Memory + SearXNG stack
-├── docker-compose.dev.yml      # Dev override (bind mount)
+├── docker-compose.yml          # Full stack: Agent + Memory + SearXNG
+├── docker-compose.dev.yml      # Dev override (bind mount for live code)
 ├── watchdog.sh                 # Production process manager
 ├── package.json
 ├── tsconfig.json
+│
+├── docker-compose/             # Partial-stack compose variants
+│   ├── docker-compose-agent-only.yml           # Agent only (memory + searxng already running)
+│   ├── docker-compose-without-forkscout-mcp.yml # Agent + SearXNG (memory already running)
+│   └── docker-compose-without-searxng.yml       # Agent + Memory (searxng already running)
 │
 └── src/
     ├── serve.ts                # Entry point

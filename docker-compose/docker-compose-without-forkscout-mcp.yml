@@ -3,9 +3,9 @@
 # Use when forkscout-memory container is already running on forkscout_default network.
 #
 # Usage:
-#   docker compose -f docker/docker-compose-without-forkscout-mcp.yml up -d --build
-#   docker compose -f docker/docker-compose-without-forkscout-mcp.yml logs -f agent
-#   docker compose -f docker/docker-compose-without-forkscout-mcp.yml down
+#   docker compose -f docker-compose/docker-compose-without-forkscout-mcp.yml up -d --build
+#   docker compose -f docker-compose/docker-compose-without-forkscout-mcp.yml logs -f agent
+#   docker compose -f docker-compose/docker-compose-without-forkscout-mcp.yml down
 
 services:
     agent:

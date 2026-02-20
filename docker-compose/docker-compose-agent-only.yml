@@ -4,9 +4,9 @@
 # already running on the forkscout_default network.
 #
 # Usage:
-#   docker compose -f docker/docker-compose-agent-only.yml up -d --build
-#   docker compose -f docker/docker-compose-agent-only.yml logs -f agent
-#   docker compose -f docker/docker-compose-agent-only.yml down
+#   docker compose -f docker-compose/docker-compose-agent-only.yml up -d --build
+#   docker compose -f docker-compose/docker-compose-agent-only.yml logs -f agent
+#   docker compose -f docker-compose/docker-compose-agent-only.yml down
 
 services:
     agent:
