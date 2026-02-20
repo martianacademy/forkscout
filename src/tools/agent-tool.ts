@@ -240,7 +240,7 @@ function buildSubAgentPrompt(label: string, toolNames: string[], task: SubAgentT
     // Memory — split into read vs write capabilities
     const memTools = toolNames.filter(t => t.startsWith('forkscout-mem_'));
     const hasMemoryRead = memTools.some(t => /^forkscout-mem_(search_|get_|check_|memory_stats)/.test(t));
-    const hasMemoryWrite = memTools.some(t => /^forkscout-mem_(add_|save_|start_task|complete_task|abort_task|self_observe|consolidate)/.test(t));
+    const hasMemoryWrite = memTools.some(t => /^forkscout-mem_(add_|save_|update_|remove_|start_task|complete_task|abort_task|self_observe|consolidate)/.test(t));
 
     // File mutation
     const hasFileWrite = toolNames.includes('write_file') || toolNames.includes('append_file');
@@ -328,6 +328,7 @@ function buildSubAgentPrompt(label: string, toolNames: string[], task: SubAgentT
             'You have FULL access to the knowledge graph (read + write).',
             'READ: Use `forkscout-mem_search_*` and `forkscout-mem_get_*` to retrieve stored knowledge. Check memory BEFORE searching the web.',
             'WRITE: Use `forkscout-mem_save_knowledge` for reusable patterns and insights. Use `forkscout-mem_add_entity` for new entities with facts. Use `forkscout-mem_add_exchange` to record problem→solution pairs.',
+            'CORRECT: Use `forkscout-mem_update_entity` to replace wrong facts, or `forkscout-mem_remove_fact` to delete them. Never leave wrong facts in memory.',
             'Always `forkscout-mem_search_entities` before creating new entities to avoid duplicates.',
         );
     } else if (hasMemoryRead) {

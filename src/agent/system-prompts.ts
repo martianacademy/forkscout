@@ -54,10 +54,18 @@ KNOWLEDGE:
   search_knowledge — find prior knowledge by topic
 
 ENTITIES & RELATIONS:
-  add_entity — create/update an entity (person, project, file, service, etc.) with facts
+  add_entity — create/update an entity (person, project, file, service, etc.) with facts. Contradictory old facts are auto-superseded.
+  update_entity — replace a specific wrong fact with a correct one (by substring match)
+  remove_fact — delete specific facts from an entity by substring match
   get_entity / search_entities / get_all_entities — look up entities
   add_relation — link two entities (e.g. "file X" part-of "project Y")
   get_all_relations — see the relationship graph
+
+CORRECTING WRONG MEMORY:
+  When you discover information in memory is wrong:
+  1. Use update_entity to replace the specific wrong fact, OR
+  2. Use remove_fact to delete it, then add_entity with the correct fact.
+  Do NOT just add the correct fact alongside the wrong one — the old fact will persist.
 
 CONVERSATIONS:
   add_exchange — record a problem→solution pair (bug fixes, user confirmations)
