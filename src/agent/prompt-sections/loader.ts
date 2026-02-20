@@ -2,8 +2,8 @@
  * Prompt Section Auto-Loader — discovers all sections from the prompt-sections directory.
  *
  * Convention:
- *   - Each file can export `promptType` to declare its type explicitly.
- *   - If no promptType, file prefix determines type:
+ *   - Each file can export `promptType` (string) or `promptTypes` (string[]) to declare its type(s).
+ *   - If neither, file prefix determines type:
  *       guest-*.ts     → guest
  *       sub-agent-*.ts → sub-agent
  *       *.ts (other)   → admin
@@ -15,6 +15,7 @@
  * To remove: delete the file. Done.
  * To create a new prompt type: create files with `export const promptType = 'my-type'`
  *   (or use a consistent prefix like `my-type-*.ts`). Done.
+ * To share a section across types: `export const promptTypes = ['admin', 'guest', 'sub-agent']`
  *
  * @module agent/prompt-sections/loader
  */
@@ -73,12 +74,16 @@ export function discoverSections(): Map<string, DiscoveredSection[]> {
             const fn = Object.values(mod).find(v => typeof v === 'function') as ((...args: any[]) => string) | undefined;
             if (!fn) continue; // type-only file, skip
 
-            // Resolve type: explicit export > prefix inference
-            const type = typeof mod.promptType === 'string' ? mod.promptType : inferPromptType(file);
+            // Resolve type(s): promptTypes[] > promptType > prefix inference
             const order = typeof mod.order === 'number' ? mod.order : 999;
+            const types: string[] = Array.isArray(mod.promptTypes)
+                ? mod.promptTypes
+                : [typeof mod.promptType === 'string' ? mod.promptType : inferPromptType(file)];
 
-            if (!grouped.has(type)) grouped.set(type, []);
-            grouped.get(type)!.push({ file, type, order, fn });
+            for (const type of types) {
+                if (!grouped.has(type)) grouped.set(type, []);
+                grouped.get(type)!.push({ file, type, order, fn });
+            }
         } catch (err) {
             console.error(`[PromptLoader]: Failed to load ${file}:`, err instanceof Error ? err.message : err);
         }

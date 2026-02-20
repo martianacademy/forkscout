@@ -5,6 +5,7 @@
  * @module agent/prompt-sections/communication
  */
 
+export const promptTypes = ['admin', 'guest', 'sub-agent'];
 export const order = 3;
 
 export function communicationSection(): string {
