@@ -427,7 +427,7 @@ export async function handleTelegramUpdate(
                 );
 
                 await sendTyping(token, chatId);
-                const { model: retryModel } = agent.getModelForChat(text || 'image message');
+                const { model: retryModel } = agent.getModelForChat();
                 const retrySystemPrompt = await agent.buildSystemPrompt(text || 'User sent an image', ctx);
 
                 const typingInterval2 = setInterval(() => sendTyping(token, chatId), 4000);

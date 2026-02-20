@@ -1,7 +1,6 @@
 import { ToolLoopAgent, type ToolSet } from 'ai';
 import { LLMClient } from '../llm/client';
 import { ModelRouter, createRouterFromEnv, type ModelPurpose, type ModelTier } from '../llm/router';
-import { classifyComplexity, type ComplexityResult } from '../llm/complexity';
 import { MemoryManager } from '../memory';
 import type { Scheduler, CronAlert } from '../scheduler';
 import { McpConnector } from '../mcp/connector';
@@ -17,7 +16,7 @@ import { createMemoryManager, createScheduler } from './factories';
 import { registerDefaultTools } from './tools-setup';
 import { resolveApiKeyForProvider, getConfig } from '../config';
 import { buildStopConditions } from '../llm/stop-conditions';
-import { createReasoningContext, createPrepareStep, type ReasoningContext } from '../llm/reasoning';
+import { createTurnTracker, createPrepareStep, type TurnTracker } from '../llm/reasoning';
 import type { SubAgentDeps, SubAgentProgressCallback } from '../tools/agent-tool';
 
 // Re-export all types from the barrel
@@ -28,7 +27,7 @@ import type { AgentConfig, AgentState, ChatContext } from './types';
  * Options for creating a per-request ToolLoopAgent via `agent.createChatAgent()`.
  */
 export interface ChatAgentOptions {
-    /** The user's text message (used for complexity routing and system prompt) */
+    /** The user's text message */
     userText: string;
     /** Chat context (channel, sender, admin status) */
     ctx?: ChatContext;
@@ -55,8 +54,8 @@ export interface ChatAgentOptions {
 export interface ChatAgentResult {
     /** The configured ToolLoopAgent ready for .generate() or .stream() */
     agent: ToolLoopAgent<never, ToolSet>;
-    /** The reasoning context (for post-generation logging/failure learning) */
-    reasoningCtx: ReasoningContext;
+    /** Turn tracker (for post-generation logging/failure learning) */
+    reasoningCtx: TurnTracker;
     /** Resolved model tier */
     tier: string;
     /** Resolved model ID */
@@ -139,36 +138,21 @@ export class Agent {
         return this.router.getModel(purpose);
     }
 
-    /**
-     * Smart model selection for chat — escalates to powerful tier for
-     * complex tasks (debugging, investigation, multi-step reasoning).
-     */
-    getModelForChat(userMessage: string): { model: any; tier: string; modelId: string; complexity: ComplexityResult } {
-        const complexity = classifyComplexity(userMessage);
-
-        if (complexity.tier === 'powerful') {
-            const result = this.router.getModelByTier('powerful');
-            console.log(`[Complexity]: Escalated to powerful tier — ${complexity.reason}`);
-            return { ...result, complexity };
-        }
-
-        const result = this.router.getModel('chat');
-        return { ...result, complexity };
+    /** Get the chat model — always balanced tier. The LLM decides what to do. */
+    getModelForChat(): { model: any; tier: string; modelId: string } {
+        return this.router.getModel('chat');
     }
 
     /**
      * Create a fully configured ToolLoopAgent for a single chat request.
      *
-     * Centralizes the ~15 parameters that every call site needs into one factory:
-     *   - Model selection (complexity-based routing)
+     * Centralizes the parameters every call site needs:
+     *   - Model selection (balanced tier by default)
      *   - System prompt (memory-enriched)
      *   - Tools (access-level filtered)
      *   - Stop conditions (budget, idle, token limit, step count)
-     *   - PrepareStep (multi-phase reasoning: plan → execute → reflect → wrapup)
+     *   - PrepareStep (context pruning + failure escalation)
      *   - onStepFinish / onFinish callbacks
-     *
-     * Call sites use: `agent.createChatAgent(opts)` → `result.agent.generate(...)` or
-     * `createAgentUIStreamResponse({ agent: result.agent, uiMessages })`.
      */
     async createChatAgent(opts: ChatAgentOptions): Promise<ChatAgentResult> {
         const { userText, ctx, onStepFinish, onFinish } = opts;
@@ -179,31 +163,26 @@ export class Agent {
             systemPrompt += '\n\n' + opts.systemPromptSuffix;
         }
 
-        // 2. Model selection — use override or complexity-based routing
+        // 2. Model selection — use override or balanced tier
         let chatModel = opts.model;
         let chatTier = opts.tier || 'balanced';
         let chatModelId = opts.modelId || '';
-        let complexity: ComplexityResult;
 
-        if (chatModel) {
-            complexity = classifyComplexity(userText);
-        } else {
-            const selection = this.getModelForChat(userText);
+        if (!chatModel) {
+            const selection = this.getModelForChat();
             chatModel = selection.model;
             chatTier = selection.tier;
             chatModelId = selection.modelId;
-            complexity = selection.complexity;
-            console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [${complexity.reason}]`);
+            console.log(`[Router]: Using ${chatTier} tier (${chatModelId})`);
         }
 
         // 3. Tools — filtered by access level
         const tools = this.getToolsForContext(ctx);
-        const toolNames = Object.keys(tools);
 
-        // 4. Reasoning context — drives the multi-phase prepareStep
-        const reasoningCtx = createReasoningContext(
-            userText, complexity, chatTier as ModelTier,
-            systemPrompt, this.router, toolNames,
+        // 4. Turn tracker — handles context pruning + failure escalation
+        const reasoningCtx = createTurnTracker(
+            userText, chatTier as ModelTier,
+            systemPrompt, this.router,
         );
 
         // 5. Build the ToolLoopAgent with all configuration

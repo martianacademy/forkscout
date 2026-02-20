@@ -146,7 +146,7 @@ export async function buildSystemPrompt(
                 `  fast: ${status.tiers.fast.modelId} (${status.tiers.fast.provider})`,
                 `  balanced: ${status.tiers.balanced.modelId} (${status.tiers.balanced.provider})`,
                 `  powerful: ${status.tiers.powerful.modelId} (${status.tiers.powerful.provider})`,
-                `You are currently running on the balanced tier model unless complexity escalated you.`,
+                `You are currently running on the balanced tier model (may escalate to powerful on repeated tool failures).`,
                 `Temperature: ${cfg.temperature ?? 'default'}`,
                 `Budget: $${budgetStatus.todayUSD.toFixed(2)}/$${budgetStatus.dailyLimitUSD}/day, $${budgetStatus.monthUSD.toFixed(2)}/$${budgetStatus.monthlyLimitUSD}/month (${budgetStatus.dailyPct.toFixed(0)}% daily used)`,
             ];

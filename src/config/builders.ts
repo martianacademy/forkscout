@@ -149,7 +149,6 @@ export function buildAgentConfig(file: any): AgentSettings {
             maxInbox: file?.telegram?.maxInbox ?? DEFAULTS.agent.telegram.maxInbox,
             maxHistory: file?.telegram?.maxHistory ?? DEFAULTS.agent.telegram.maxHistory,
         },
-        reflectStep: file?.reflectStep ?? DEFAULTS.agent.reflectStep,
         failureEscalationThreshold: file?.failureEscalationThreshold ?? DEFAULTS.agent.failureEscalationThreshold,
         browserIdleMs: file?.browserIdleMs ?? DEFAULTS.agent.browserIdleMs,
         activityLogMaxBytes: file?.activityLogMaxBytes ?? DEFAULTS.agent.activityLogMaxBytes,

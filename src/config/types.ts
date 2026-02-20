@@ -120,8 +120,6 @@ export interface AgentSettings {
     server: ServerConfig;
     /** Telegram channel configuration */
     telegram: TelegramConfig;
-    /** Step at which to inject a reflection prompt */
-    reflectStep: number;
     /** Number of consecutive tool failures before tier escalation */
     failureEscalationThreshold: number;
     /** Browser idle timeout in ms before closing headless browser */
@@ -267,7 +265,6 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
             maxInbox: 200,
             maxHistory: 20,
         },
-        reflectStep: 15,
         failureEscalationThreshold: 3,
         browserIdleMs: 60_000,
         activityLogMaxBytes: 5 * 1024 * 1024,

@@ -100,7 +100,6 @@
             "maxInbox": 200,
             "maxHistory": 20
         },
-        "reflectStep": 15,
         "failureEscalationThreshold": 3,
         "browserIdleMs": 60000,
         "activityLogMaxBytes": 5242880
