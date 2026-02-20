@@ -47,8 +47,10 @@ const COMPLEX_KEYWORDS: [string, number][] = [
     ['delete', 1], ['remove', 1], ['clean up', 1], ['cleanup', 1],
     ['move', 1], ['rename', 1], ['restructure', 2], ['reorganize', 2],
     // Research & web
-    ['search for', 1], ['find me', 1], ['look up', 1], ['research', 2],
+    ['search for', 1], ['search the', 2], ['find me', 1], ['look up', 1], ['research', 2],
     ['scrape', 2], ['crawl', 2], ['fetch', 1], ['download', 1],
+    // Agent/multi-agent
+    ['spawn', 3], ['sub-agent', 2], ['agents', 2], ['parallel', 2],
     // Security & auth
     ['security', 2], ['vulnerability', 3], ['auth', 1], ['permission', 2], ['access', 1],
     ['encrypt', 2], ['decrypt', 2], ['token', 1], ['credential', 2],

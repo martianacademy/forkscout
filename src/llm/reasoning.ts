@@ -309,7 +309,7 @@ export function createPrepareStep(context: ReasoningContext) {
             const modelInfo = context.router.getModelByTier(context.tier);
             const providerOpts = getThinkingOptions(context.tier, context.complexity, modelInfo.modelId);
 
-            // Complex: detailed planning + forced tool use. Moderate: quick ack.
+            // Complex: detailed planning + forced tool use. Moderate: quick ack + forced tool use.
             const isComplex = context.complexity.complexity === 'complex';
             const injection = isComplex ? PLANNING_INJECTION : ACKNOWLEDGE_INJECTION;
 
@@ -319,8 +319,8 @@ export function createPrepareStep(context: ReasoningContext) {
             return {
                 system: context.baseSystemPrompt + injection,
                 ...(activeTools ? { activeTools } : {}),
-                // Force tools for complex tasks to prevent text-only responses
-                ...(isComplex ? { toolChoice: 'required' as const } : {}),
+                // Force tools for complex AND moderate tasks to prevent text-only responses
+                toolChoice: 'required' as const,
                 ...(providerOpts ? { providerOptions: providerOpts } : {}),
             };
         }
