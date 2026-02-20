@@ -54,6 +54,6 @@ packages/agent/custom/
 forkscout-memory-mcp/
 forkscout-memory-mcp-rust/
 temp_voice.oga
-moltbook-*.png
+*.png
 packages/frontend/.next/
-screenshots/*.png
+screenshots/
