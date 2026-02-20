@@ -6,6 +6,7 @@ import type { ModelRouter } from '../llm/router';
 import { getConfig } from '../config';
 import { getDefaultSystemPrompt, getPublicSystemPrompt } from './system-prompts';
 import { getCurrentTodos } from '../tools/todo-tool';
+import * as personalities from './personalities';
 
 /**
  * Mutable cache object — owned by the Agent instance, passed by reference.
@@ -156,5 +157,19 @@ export async function buildSystemPrompt(
         } catch { /* config unavailable — skip */ }
     }
 
-    return base + channelSection + alertSection + configSection + selfSection + todoSection + memorySection;
+    // Available personalities — inject so the agent knows what styles it can adopt
+    let personalitySection = '';
+    if (isAdmin) {
+        try {
+            const available = await personalities.list();
+            if (available.length > 0) {
+                const lines = available.map(p => {
+                    return `  • ${p.name} — ${p.description} (${p.sectionCount} sections)`;
+                });
+                personalitySection = '\n\n[Available Personalities — adopt these based on context, person, and situation]\n' + lines.join('\n');
+            }
+        } catch { /* personalities unavailable */ }
+    }
+
+    return base + channelSection + alertSection + configSection + selfSection + personalitySection + todoSection + memorySection;
 }
