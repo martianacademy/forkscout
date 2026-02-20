@@ -99,19 +99,20 @@ export class MemoryManager {
     }
 
     getRecentHistory(limit?: number): Array<{ role: 'user' | 'assistant'; content: string }> {
-        const n = limit ?? this.config.recentWindowSize ?? 6;
+        const n = limit ?? this.config.recentWindowSize ?? 20;
         return this.recentMessages.slice(-n).map(({ role, content }) => ({ role, content }));
     }
 
     getRecentHistoryWithTimestamps(limit?: number): RecentMsg[] {
-        const n = limit ?? this.config.recentWindowSize ?? 6;
+        const n = limit ?? this.config.recentWindowSize ?? 20;
         return this.recentMessages.slice(-n);
     }
 
     // ── Context building ─────────────────────────────
 
     async buildContext(query: string): Promise<ContextResult> {
-        const windowSize = this.config.recentWindowSize ?? 6;
+        const windowSize = this.config.recentWindowSize ?? 20;
+        const budget = this.config.contextBudget ?? 8000;
         const recent = this.recentMessages.slice(-windowSize);
         const recentStr = recent
             .map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`)
@@ -122,8 +123,9 @@ export class MemoryManager {
         let retrievedCount = 0;
         let graphEntities = 0;
 
+        // 1. Knowledge search — graph entities + some exchanges
         try {
-            const results = await this.store.searchKnowledgeAsync(query, 10);
+            const results = await this.store.searchKnowledgeAsync(query, 20);
             const graphLines: string[] = [];
             const exchangeLines: string[] = [];
             for (const r of results) {
@@ -134,6 +136,46 @@ export class MemoryManager {
             if (exchangeLines.length) relevantMemories = '\n\nRelevant memories from past conversations:\n' + exchangeLines.join('\n\n');
         } catch (err) {
             console.warn(`[Memory]: Knowledge search failed for "${query.slice(0, 50)}": ${err instanceof Error ? err.message : err}`);
+        }
+
+        // 2. Dedicated exchange search — ensures past conversations are always represented
+        //    Uses a broader query so context-light messages ("continue", "yes") still retrieve history
+        try {
+            const exchangeQuery = query.length < 20 ? '*' : query;
+            const exchanges = await this.store.searchExchangesAsync(exchangeQuery, 10);
+            if (exchanges.length > 0) {
+                const seen = new Set(relevantMemories.split('\n').map(l => l.trim()));
+                const newLines: string[] = [];
+                for (const ex of exchanges) {
+                    const userSnippet = (ex.user || '').slice(0, 200);
+                    const assistantSnippet = (ex.assistant || '').slice(0, 300);
+                    const line = `[Exchange] User: ${userSnippet} → Assistant: ${assistantSnippet}`;
+                    if (!seen.has(line)) { newLines.push(line); retrievedCount++; }
+                }
+                if (newLines.length) {
+                    relevantMemories += (relevantMemories ? '\n\n' : '\n\nRelevant memories from past conversations:\n') + newLines.join('\n\n');
+                }
+            }
+        } catch (err) {
+            console.warn(`[Memory]: Exchange search failed: ${err instanceof Error ? err.message : err}`);
+        }
+
+        // 3. Enforce context budget — rough char estimate (1 token ≈ 4 chars)
+        const totalChars = recentStr.length + graphContext.length + relevantMemories.length;
+        const charBudget = budget * 4;
+        if (totalChars > charBudget) {
+            // Trim relevant memories first (least critical), then graph
+            const overhead = totalChars - charBudget;
+            if (relevantMemories.length > overhead) {
+                relevantMemories = relevantMemories.slice(0, relevantMemories.length - overhead) + '\n[...truncated]';
+            } else {
+                const savedLen = relevantMemories.length;
+                relevantMemories = '';
+                const remaining = overhead - savedLen;
+                if (graphContext.length > remaining) {
+                    graphContext = graphContext.slice(0, graphContext.length - remaining) + '\n[...truncated]';
+                }
+            }
         }
 
         return {

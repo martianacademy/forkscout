@@ -24,8 +24,8 @@ export function createMemoryManager(_llm: LLMClient, _router: ModelRouter): Memo
     return new MemoryManager({
         storagePath,
         ownerName: config.agent.owner,
-        recentWindowSize: 6,
-        contextBudget: 4000,
+        recentWindowSize: 20,
+        contextBudget: 8000,
         mcpUrl,
     });
 }

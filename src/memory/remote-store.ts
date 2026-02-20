@@ -183,7 +183,7 @@ export class RemoteMemoryStore {
     getExchanges(): Exchange[] { return []; }
 
     /** Fetch recent exchanges from MCP for conversation restoration */
-    async getRecentExchangesAsync(limit = 6): Promise<Array<{ user: string; assistant: string; timestamp?: number }>> {
+    async getRecentExchangesAsync(limit = 20): Promise<Array<{ user: string; assistant: string; timestamp?: number }>> {
         try {
             const text = await this.callTool('search_exchanges', { query: '*', limit });
             if (text.includes('No ') || !text.trim()) return [];
@@ -194,7 +194,14 @@ export class RemoteMemoryStore {
             } catch {
                 // TS server returns formatted text — parse it
             }
-            return [];
+            // Fallback: parse "User: ... | Assistant: ..." text format
+            const exchanges: Array<{ user: string; assistant: string; timestamp?: number }> = [];
+            const lines = text.split('\n').filter(l => l.trim());
+            for (const line of lines) {
+                const m = line.match(/User:\s*(.+?)\s*(?:\||\u2192|\u2192)\s*Assistant:\s*(.+)/i);
+                if (m) exchanges.push({ user: m[1].trim(), assistant: m[2].trim() });
+            }
+            return exchanges;
         } catch { return []; }
     }
 

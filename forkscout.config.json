@@ -5,13 +5,13 @@
     "router": {
         "openrouter": {
             "fast": {
-                "model": "moonshotai/kimi-k2.5"
+                "model": "google/gemini-3-flash-preview"
             },
             "balanced": {
-                "model": "moonshotai/kimi-k2.5"
+                "model": "google/gemini-3-flash-preview"
             },
             "powerful": {
-                "model": "moonshotai/kimi-k2.5"
+                "model": "google/gemini-3-flash-preview"
             }
         },
         "google": {
