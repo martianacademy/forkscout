@@ -29,6 +29,17 @@ export interface TelegramHandlerDeps {
 
 // ── Helpers ──────────────────────────────────────────
 
+/** Extract the last non-empty text from ToolLoopAgent steps (fallback when result.text is empty). */
+function extractTextFromSteps(steps: any[]): string {
+    const parts: string[] = [];
+    for (const step of steps) {
+        if (step.text?.trim()) {
+            parts.push(step.text.trim());
+        }
+    }
+    return parts.length > 0 ? parts[parts.length - 1] : '';
+}
+
 /** Produce a short text description for non-text messages (used for complexity detection & system prompt). */
 function describeMessageType(msg: { sticker?: any; document?: any; audio?: any; voice?: any; video?: any; video_note?: any; location?: any; contact?: any; poll?: any; photo?: any }): string {
     if (msg.sticker) return `Sticker: ${msg.sticker.emoji || 'unknown'}`;
@@ -196,7 +207,7 @@ export async function handleTelegramUpdate(
             systemPromptSuffix: resumeContext,
         });
 
-        const { text: responseText, usage } = await chatAgent.generate({
+        const { text: responseText, usage, steps: agentSteps } = await chatAgent.generate({
             messages: history.map(m => {
                 const contentParts: any[] = [];
                 for (const p of (m.parts || []) as any[]) {
@@ -349,7 +360,14 @@ export async function handleTelegramUpdate(
                 console.log(`[Telegram/Agent → ${who}]: (response already streamed in ${sentFragments.length} step(s))`);
             }
         } else {
-            console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
+            // Fallback: extract text from steps when final result.text is empty
+            const fallbackText = extractTextFromSteps(agentSteps || []);
+            if (fallbackText) {
+                await sendMessage(token, chatId, fallbackText);
+                console.log(`[Telegram/Agent → ${who}]: (fallback from steps) ${fallbackText.slice(0, 200)}${fallbackText.length > 200 ? '…' : ''}`);
+            } else {
+                console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
+            }
         }
 
         requestTracker.finish(tgReqId);
