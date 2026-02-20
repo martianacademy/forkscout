@@ -10,6 +10,7 @@ import { MemoryManager } from '../memory';
 import { Scheduler, type CronAlert } from '../scheduler';
 import { exec } from 'child_process';
 import { getShell, unescapeShellCommand } from '../utils/shell';
+import { resolveTemplates, scrubSecrets } from '../tools/_helpers';
 import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT } from '../paths';
 import { getConfig } from '../config';
@@ -34,16 +35,27 @@ export function createScheduler(router: ModelRouter, onUrgent: (alert: CronAlert
     const persistPath = resolvePath(AGENT_ROOT, '.forkscout', 'scheduler-jobs.json');
 
     const scheduler = new Scheduler(
-        // Command runner — unescape HTML entities LLMs may inject
+        // Command runner — resolve {{SECRET}} templates + unescape HTML entities
         (command: string) =>
             new Promise((resolve, reject) => {
-                const safeCmd = unescapeShellCommand(command);
+                let safeCmd: string;
+                try {
+                    // Resolve {{SECRET_NAME}} placeholders (same syntax as http_request)
+                    safeCmd = resolveTemplates(unescapeShellCommand(command));
+                } catch (err) {
+                    reject(new Error(`Failed to resolve command secrets: ${err instanceof Error ? err.message : String(err)}`));
+                    return;
+                }
                 exec(
                     safeCmd,
                     { timeout: 30_000, maxBuffer: 1024 * 1024, shell: getShell() },
                     (error: Error | null, stdout: string, stderr: string) => {
                         if (error && !stdout && !stderr) reject(error);
-                        else resolve((stdout || '').trim() + (stderr ? `\n[stderr]: ${stderr.trim()}` : ''));
+                        else {
+                            // Scrub secrets from output before returning to the LLM
+                            const output = (stdout || '').trim() + (stderr ? `\n[stderr]: ${stderr.trim()}` : '');
+                            resolve(scrubSecrets(output));
+                        }
                     },
                 );
             }),
