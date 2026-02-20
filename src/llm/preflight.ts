@@ -7,6 +7,7 @@
  *   - Whether tools are needed
  *   - Brief plan (ordered steps)
  *   - Tool category hints
+ *   - Acknowledgment (immediate response to show the user)
  *
  * This replaces the old keyword-based complexity classifier with an
  * actual LLM judgment. The structured output also doubles as a plan
@@ -37,6 +38,12 @@ export const PreflightSchema = z.object({
     toolHints: z.array(
         z.enum(['memory', 'filesystem', 'web', 'shell', 'agents', 'none']),
     ).describe('Categories of tools likely needed'),
+    acknowledgment: z.string().describe(
+        'A brief 1-2 sentence immediate response to let the user know you understood. ' +
+        'For quick tasks: this IS the full answer (e.g. "Hello!", "12", "Yes, that\'s correct."). ' +
+        'For moderate/deep tasks: a short acknowledgment of what you\'re about to do ' +
+        '(e.g. "Let me search for that.", "I\'ll investigate the error and fix it.").',
+    ),
 });
 
 export type PreflightResult = z.infer<typeof PreflightSchema>;
@@ -49,6 +56,7 @@ const FALLBACK: PreflightResult = {
     needsTools: true,
     plan: [],
     toolHints: [],
+    acknowledgment: '',
 };
 
 // ── Effort → Tier mapping ──────────────────────────────
@@ -69,7 +77,8 @@ Rules:
 - "deep" = multi-step work — debugging, writing code across files, research with multiple sources, spawning parallel agents
 - Be conservative: if unsure between moderate and deep, pick moderate
 - plan should have 1–5 short action items (verb phrases), empty for quick tasks
-- toolHints: pick from [memory, filesystem, web, shell, agents, none]`;
+- toolHints: pick from [memory, filesystem, web, shell, agents, none]
+- acknowledgment: For quick tasks, write the FULL answer directly. For moderate/deep, write a brief 1-2 sentence acknowledgment of what you'll do. Be natural and conversational. Match the user's language and tone.`;
 
 // ── Main Function ──────────────────────────────────────
 

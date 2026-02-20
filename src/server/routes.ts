@@ -11,7 +11,9 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { Readable } from 'stream';
 import {
-    createAgentUIStreamResponse,
+    createAgentUIStream,
+    createUIMessageStream,
+    createUIMessageStreamResponse,
     type UIMessage,
 } from 'ai';
 import { getReasoningSummary } from '../llm/reasoning';
@@ -47,7 +49,7 @@ export async function handleChatStream(
     agent.saveToMemory('user', userText, ctx);
 
     // Create a per-request ToolLoopAgent with all configuration
-    const { agent: chatAgent, reasoningCtx } = await agent.createChatAgent({
+    const { agent: chatAgent, reasoningCtx, preflight } = await agent.createChatAgent({
         userText,
         ctx,
         onStepFinish: ({ toolCalls, toolResults }: any) => {
@@ -79,11 +81,24 @@ export async function handleChatStream(
         },
     });
 
-    // Use createAgentUIStreamResponse — handles agent.stream() + UIMessage serialization
-    const webResponse = await createAgentUIStreamResponse({
-        agent: chatAgent,
-        uiMessages: messages,
+    // Stream with ack-first: write acknowledgment immediately, then merge agent stream
+    const ack = preflight.acknowledgment;
+    const uiStream = createUIMessageStream({
+        execute: async ({ writer }) => {
+            if (ack) {
+                const ackId = `ack-${Date.now()}`;
+                writer.write({ type: 'text-start', id: ackId });
+                writer.write({ type: 'text-delta', delta: ack + '\n\n', id: ackId });
+                writer.write({ type: 'text-end', id: ackId });
+            }
+            const agentStream = await createAgentUIStream({
+                agent: chatAgent,
+                uiMessages: messages,
+            });
+            writer.merge(agentStream);
+        },
     });
+    const webResponse = createUIMessageStreamResponse({ stream: uiStream });
 
     // Pipe the web Response to the Node.js ServerResponse
     const headers: Record<string, string> = {};
@@ -121,7 +136,14 @@ export async function handleChatSync(
 
     try {
         // Create a per-request ToolLoopAgent via the centralized factory
-        const { agent: chatAgent, reasoningCtx } = await agent.createChatAgent({ userText, ctx });
+        const { agent: chatAgent, reasoningCtx, preflight: syncPreflight } = await agent.createChatAgent({ userText, ctx });
+
+        // Quick tasks with no tools needed — return the ack directly
+        if (syncPreflight.effort === 'quick' && !syncPreflight.needsTools && syncPreflight.acknowledgment) {
+            agent.saveToMemory('assistant', syncPreflight.acknowledgment);
+            sendJSON(res, 200, { response: syncPreflight.acknowledgment });
+            return;
+        }
 
         // agent.generate() returns the same shape as generateText()
         const { text, usage } = await chatAgent.generate({
