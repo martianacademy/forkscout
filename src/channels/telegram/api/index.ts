@@ -14,4 +14,5 @@ export { sanitizeTelegramMarkdown } from './sanitize-markdown';
 export { sendPhoto } from './send-photo';
 export { sendDocument } from './send-document';
 export { sendTyping } from './send-typing';
+export { createTypingGuard, type TypingGuard } from './typing-guard';
 export { splitMessage } from './split-message';

@@ -10,7 +10,7 @@ import type { Agent, ChatContext } from '../../agent';
 import { requestTracker } from '../../request-tracker';
 import type { TelegramUpdate } from './types';
 import { describeToolCall, humanTimeAgo } from './types';
-import { downloadFile, sendMessage, sendTyping } from './api';
+import { downloadFile, sendMessage, sendTyping, createTypingGuard } from './api';
 import type { TelegramStateManager } from './state';
 import { finalizeGeneration } from '../../utils/generation-hooks';
 
@@ -138,6 +138,10 @@ export async function handleTelegramUpdate(
     await sendTyping(token, chatId);
     const history = deps.getOrCreateHistory(chatId);
 
+    // Rate-limited typing guard — replaces raw setInterval + sendTyping spam.
+    // Auto-backs-off on 429, auto-stops after 5 min, deduplicates rapid nudges.
+    const typing = createTypingGuard(token, chatId);
+
     // Pass the raw Telegram message as JSON — LLMs can extract all context
     // (reply chains, forwards, file metadata, stickers, locations, polls, etc.)
     const parts: any[] = [];
@@ -171,8 +175,8 @@ export async function handleTelegramUpdate(
 
         agent.saveToMemory('user', queryText, ctx);
 
-        // Refresh typing every ~4 seconds during generation
-        const typingInterval = setInterval(() => sendTyping(token, chatId), 4000);
+        // Start the typing indicator (rate-limited, auto-backing-off)
+        typing.start();
 
         // Track ALL text fragments sent during generation so we don't double-send
         const sentFragments: string[] = [];
@@ -204,13 +208,14 @@ export async function handleTelegramUpdate(
 
         // Quick tasks with no tools needed — we're done
         if (plan.effort === 'quick' && !plan.needsTools && plan.acknowledgment) {
+            typing.stop();
             agent.clearSubAgentProgress();
             requestTracker.finish(tgReqId);
             agent.saveToMemory('assistant', plan.acknowledgment, ctx);
             return;
         }
 
-        await sendTyping(token, chatId);
+        typing.nudge();
 
         const { text: responseText, usage, steps: agentSteps } = await chatAgent.generate({
             messages: history.map(m => {
@@ -256,7 +261,7 @@ export async function handleTelegramUpdate(
                     sendMessage(token, chatId, unique.join('\n')).catch(err =>
                         console.warn(`[Telegram]: Tool description send failed: ${err instanceof Error ? err.message : err}`),
                     );
-                    sendTyping(token, chatId);
+                    typing.nudge();
                 }
 
                 // Save step checkpoint for mid-task crash recovery.
@@ -297,7 +302,7 @@ export async function handleTelegramUpdate(
             },
         });
 
-        clearInterval(typingInterval);
+        typing.stop();
 
         // ── Post-generation: finalize + send response ────────
 
@@ -357,6 +362,7 @@ export async function handleTelegramUpdate(
         requestTracker.finish(tgReqId);
         agent.clearSubAgentProgress();
     } catch (err) {
+        typing.stop();
         agent.clearSubAgentProgress();
         const errMsg = err instanceof Error ? err.message : String(err);
 
@@ -414,7 +420,8 @@ export async function handleTelegramUpdate(
                 const { model: retryModel } = agent.getModelForTier('balanced');
                 const retrySystemPrompt = await agent.buildSystemPrompt(text || 'User sent an image', ctx);
 
-                const typingInterval2 = setInterval(() => sendTyping(token, chatId), 4000);
+                const typingRetry = createTypingGuard(token, chatId);
+                typingRetry.start();
                 const { text: retryText } = await generateTextWithRetry({
                     model: retryModel,
                     system: retrySystemPrompt,
@@ -435,7 +442,7 @@ export async function handleTelegramUpdate(
                     tools: agent.getToolsForContext(ctx),
                     stopWhen: buildStopConditions(getConfig().agent),
                 });
-                clearInterval(typingInterval2);
+                typingRetry.stop();
 
                 if (retryText?.trim()) {
                     await sendMessage(token, chatId, retryText);
