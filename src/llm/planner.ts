@@ -154,27 +154,17 @@ async function gatherContext(
 ): Promise<PlannerContext> {
     const cfg = getConfig().agent;
     const chatLimit = cfg.plannerChatHistoryLimit ?? 5;
-    const isAdmin = ctx?.isAdmin ?? false;
     const channel = ctx?.channel;
 
     // Run in parallel: recent chat + knowledge search + entity search
     const [recentHistory, knowledgeHits, entityHits] = await Promise.allSettled([
         // Last N exchanges — channel-aware
+        // For planner: always use CURRENT channel's history for planning accuracy.
+        // Cross-channel raw messages must NOT leak into the plan (which feeds the prompt).
         (async () => {
-            if (isAdmin) {
-                // Admins see all channels with labels
-                const history = memory.getRecentHistoryLabeled(chatLimit * 2);
-                if (history.length === 0) return '';
-                return history.map(m => {
-                    const tag = m.channel ? `[${m.channel}] ` : '';
-                    return `${tag}${m.role}: ${m.content}`;
-                }).join('\n');
-            } else {
-                // Guests see only their own channel
-                const history = memory.getRecentHistory(chatLimit * 2, channel);
-                if (history.length === 0) return '';
-                return history.map(m => `${m.role}: ${m.content}`).join('\n');
-            }
+            const history = memory.getRecentHistory(chatLimit * 2, channel);
+            if (history.length === 0) return '';
+            return history.map(m => `${m.role}: ${m.content}`).join('\n');
         })(),
         // Knowledge search
         (async () => {

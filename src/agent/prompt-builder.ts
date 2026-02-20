@@ -69,42 +69,58 @@ export async function buildSystemPrompt(
         }
     }
 
-    // Cross-channel awareness — admins are trusted friends, they see everything.
-    // When an admin asks "what are you doing?" they deserve full transparency:
-    // who you're chatting with on other channels, what tasks are running, etc.
+    // Cross-channel awareness — admins are trusted friends, they can know what's
+    // happening on other channels.  BUT we never inject raw message text — only
+    // brief topic hints — so the model paraphrases naturally instead of quoting.
     let crossChannelSection = '';
     if (isAdmin) {
         const activeReqs = requestTracker.list();
         // Show requests on OTHER channels (not the current one)
         const otherReqs = activeReqs.filter(r => {
-            // Don't show the current request itself
             if (ctx?.channel && r.channel.startsWith(ctx.channel)) return false;
             return true;
         });
+
         if (otherReqs.length > 0) {
             const lines = otherReqs.map(r => {
                 const elapsed = Math.round(r.elapsedMs / 1000);
                 const who = r.sender ? `with ${r.sender}` : '';
                 return `  • ${r.channel} ${who} (running for ${elapsed}s)`;
             });
-            crossChannelSection = '\n\n[Active Conversations — be transparent about these with trusted people]\n' +
-                'You are simultaneously handling these other conversations. ' +
-                'If a trusted person (admin/owner) asks what you\'re doing, be honest and share — ' +
-                'like a buddy who says "oh I\'m also chatting with X about Y". ' +
-                'For non-admin users, NEVER mention other channels or conversations.\n' +
-                lines.join('\n');
+            crossChannelSection = '\n\n[Active Conversations]\n' +
+                lines.join('\n') + '\n\n' +
+                'RULES for cross-channel transparency:\n' +
+                '• When a trusted person (admin/owner) asks what you are doing, describe your other activities ' +
+                'naturally in your own words — like a friend would ("I am also helping someone with code analysis").\n' +
+                '• NEVER quote, copy, paste, or forward the actual messages from other conversations. ' +
+                'Summarize the general topic/intent only — keep other users\' exact words private.\n' +
+                '• For non-admin users, NEVER mention other channels or conversations at all.\n' +
+                '• You are aware of WHO is talking to you right now. Tailor your response to THIS conversation.';
         }
 
-        // For admins, show cross-channel recent history with labels so they get full picture
+        // Provide only brief topic hints from other channels — NOT raw message content.
+        // This gives the model enough context to describe what it's working on
+        // without being able to quote or relay verbatim messages.
         const labeledHistory = memory.getRecentHistoryLabeled(10);
         const crossChannelMsgs = labeledHistory.filter(m =>
             m.channel && ctx?.channel && m.channel !== ctx.channel,
         );
         if (crossChannelMsgs.length > 0) {
-            const lines = crossChannelMsgs.map(m =>
-                `[${m.channel}] ${m.role}: ${m.content.slice(0, 200)}`,
-            );
-            crossChannelSection += '\n\n[Recent Activity on Other Channels]\n' + lines.join('\n');
+            // Extract unique channels and only the most recent user topic per channel
+            const topicByChannel = new Map<string, string>();
+            for (const m of crossChannelMsgs) {
+                if (m.role === 'user' && m.channel) {
+                    // Take first 40 chars as a vague topic hint
+                    const topic = m.content.slice(0, 40).replace(/\n/g, ' ').trim();
+                    topicByChannel.set(m.channel, topic + (m.content.length > 40 ? '…' : ''));
+                }
+            }
+            if (topicByChannel.size > 0) {
+                const hints = [...topicByChannel.entries()].map(
+                    ([ch, topic]) => `  • ${ch}: topic is roughly "${topic}"`,
+                );
+                crossChannelSection += '\n[Topic hints — paraphrase these, NEVER relay exact wording]\n' + hints.join('\n');
+            }
         }
     }
 
