@@ -181,18 +181,17 @@ export async function handleTelegramUpdate(
         // Track request for abort capability
         const { id: tgReqId, signal: tgAbortSignal } = requestTracker.start('telegram', who);
 
-        // Wire sub-agent live progress to this chat
-        agent.setSubAgentProgress((agentLabel, message) => {
-            sendMessage(token, chatId, `🤖 *${agentLabel}*: ${message}`).catch(err =>
-                console.warn(`[Telegram]: Sub-agent progress send failed: ${err instanceof Error ? err.message : err}`),
-            );
-        });
-
         // Create a per-request ToolLoopAgent via the centralized factory
+        // Sub-agent progress is wired per-request via onSubAgentProgress (no singleton).
         const { agent: chatAgent, reasoningCtx, modelId: chatModelId, plan } = await agent.createChatAgent({
             userText: queryForPrompt,
             ctx,
             systemPromptSuffix: resumeContext,
+            onSubAgentProgress: (agentLabel, message) => {
+                sendMessage(token, chatId, `🤖 *${agentLabel}*: ${message}`).catch(err =>
+                    console.warn(`[Telegram]: Sub-agent progress send failed: ${err instanceof Error ? err.message : err}`),
+                );
+            },
         });
 
         // Send ack immediately so the user sees a fast response
@@ -207,7 +206,7 @@ export async function handleTelegramUpdate(
         if (plan.effort === 'quick' && !plan.needsTools && plan.acknowledgment) {
             agent.clearSubAgentProgress();
             requestTracker.finish(tgReqId);
-            agent.saveToMemory('assistant', plan.acknowledgment);
+            agent.saveToMemory('assistant', plan.acknowledgment, ctx);
             return;
         }
 
@@ -443,7 +442,7 @@ export async function handleTelegramUpdate(
                     console.log(`[Telegram/Agent → ${who} (vision-fallback)]: ${retryText.slice(0, 200)}`);
                 }
 
-                agent.saveToMemory('assistant', retryText || '');
+                agent.saveToMemory('assistant', retryText || '', ctx);
                 const asstMsg2: UIMessage = {
                     id: `tg-resp-${msg.message_id}`,
                     role: 'assistant' as const,

@@ -24,14 +24,15 @@ export function buildFailureObservation(
         : `[FAILURE→UNRESOLVED] "${ctx.userMessage.slice(0, 100)}": ${failures}`;
 }
 
-interface RecentMsg { role: 'user' | 'assistant'; content: string; timestamp: Date }
+interface RecentMsg { role: 'user' | 'assistant'; content: string; timestamp: Date; channel?: string }
 
 export class MemoryManager {
     private store: RemoteMemoryStore;
     private config: MemoryConfig;
     private sessionId = `session_${Date.now()}`;
     private recentMessages: RecentMsg[] = [];
-    private pendingUser: string | null = null;
+    /** Per-channel pending user messages — prevents cross-channel exchange pairing corruption. */
+    private pendingUser = new Map<string, string>();
     private selfContextCache: string | null = null;
     private selfContextLastFetch = 0;
     private static readonly SELF_CACHE_TTL_MS = 60_000; // refresh self-entity every 60s
@@ -73,39 +74,68 @@ export class MemoryManager {
     }
 
     async flush(): Promise<void> {
-        if (this.pendingUser) {
-            this.store.addExchange(this.pendingUser, '', this.sessionId);
-            this.pendingUser = null;
+        for (const [_ch, content] of this.pendingUser) {
+            this.store.addExchange(content, '', this.sessionId);
         }
+        this.pendingUser.clear();
         await this.store.flush();
     }
 
     async clear(): Promise<void> {
         this.recentMessages = [];
-        this.pendingUser = null;
+        this.pendingUser.clear();
         await this.store.clear();
     }
 
     // ── Message handling ─────────────────────────────
 
-    addMessage(role: 'user' | 'assistant', content: string): void {
-        this.recentMessages.push({ role, content, timestamp: new Date() });
+    /**
+     * Add a message to recent history. Channel tag enables per-channel isolation:
+     * - pendingUser pairing is per-channel (no cross-channel exchange corruption)
+     * - getRecentHistory can filter by channel for guest isolation
+     */
+    addMessage(role: 'user' | 'assistant', content: string, channel?: string): void {
+        this.recentMessages.push({ role, content, timestamp: new Date(), channel });
+        const key = channel || '_default';
         if (role === 'user') {
-            this.pendingUser = content;
-        } else if (role === 'assistant' && this.pendingUser) {
-            this.store.addExchange(this.pendingUser, content, this.sessionId);
-            this.pendingUser = null;
+            this.pendingUser.set(key, content);
+        } else if (role === 'assistant' && this.pendingUser.has(key)) {
+            this.store.addExchange(this.pendingUser.get(key)!, content, this.sessionId);
+            this.pendingUser.delete(key);
         }
     }
 
-    getRecentHistory(limit?: number): Array<{ role: 'user' | 'assistant'; content: string }> {
+    /**
+     * Get recent history, optionally filtered by channel.
+     * - No channel filter: returns all messages (for admins who see everything)
+     * - With channel filter: returns only that channel's messages (for guests/isolation)
+     */
+    getRecentHistory(limit?: number, channel?: string): Array<{ role: 'user' | 'assistant'; content: string }> {
         const n = limit ?? this.config.recentWindowSize ?? 20;
-        return this.recentMessages.slice(-n).map(({ role, content }) => ({ role, content }));
+        const msgs = channel
+            ? this.recentMessages.filter(m => m.channel === channel)
+            : this.recentMessages;
+        return msgs.slice(-n).map(({ role, content }) => ({ role, content }));
     }
 
-    getRecentHistoryWithTimestamps(limit?: number): RecentMsg[] {
+    getRecentHistoryWithTimestamps(limit?: number, channel?: string): RecentMsg[] {
         const n = limit ?? this.config.recentWindowSize ?? 20;
-        return this.recentMessages.slice(-n);
+        const msgs = channel
+            ? this.recentMessages.filter(m => m.channel === channel)
+            : this.recentMessages;
+        return msgs.slice(-n);
+    }
+
+    /**
+     * Get recent history with channel labels — for admin cross-channel awareness.
+     * Returns messages from ALL channels with [channel] prefix so the model knows
+     * who said what and where.
+     */
+    getRecentHistoryLabeled(limit?: number): Array<{ role: 'user' | 'assistant'; content: string; channel?: string }> {
+        const n = limit ?? this.config.recentWindowSize ?? 20;
+        return this.recentMessages.slice(-n).map(({ role, content, channel: ch }) => ({
+            role, content, channel: ch,
+        }));
     }
 
     // ── Context building ─────────────────────────────

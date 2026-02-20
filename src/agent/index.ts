@@ -38,6 +38,8 @@ export interface ChatAgentOptions {
     onFinish?: (result: any) => void | Promise<void>;
     /** Callback fired on stream errors */
     onError?: (event: { error: unknown }) => void;
+    /** Per-request sub-agent progress callback — replaces the old singleton pattern. */
+    onSubAgentProgress?: SubAgentProgressCallback;
     /** Override model (skip complexity routing) */
     model?: any;
     /** Override model tier label (for logging) */
@@ -160,10 +162,15 @@ export class Agent {
      *   - onStepFinish / onFinish callbacks
      */
     async createChatAgent(opts: ChatAgentOptions): Promise<ChatAgentResult> {
-        const { userText, ctx, onStepFinish, onFinish } = opts;
+        const { userText, ctx, onStepFinish, onFinish, onSubAgentProgress } = opts;
+
+        // Wire per-request sub-agent progress callback (replaces old singleton)
+        if (onSubAgentProgress && this.subAgentDeps) {
+            this.subAgentDeps.onProgress = onSubAgentProgress;
+        }
 
         // 1. Planning Agent: context-aware structured analysis
-        const { plan, preFetched } = await runPlanner(userText, this.router, this.memory);
+        const { plan, preFetched } = await runPlanner(userText, this.router, this.memory, ctx);
         console.log(`[Planner]: effort=${plan.effort} tasks=${plan.tasks.length} tools=[${plan.recommendedTools.join(', ')}]`);
 
         // 2. Build enriched system prompt — planner already gathered memory context
@@ -267,14 +274,9 @@ export class Agent {
     }
 
     /**
-     * Set a progress callback for sub-agents. Call before each request,
-     * clear after. Sub-agents will send live step-by-step updates.
+     * Clear the sub-agent progress callback after a request completes.
+     * Called by channel handlers in their finally blocks.
      */
-    setSubAgentProgress(cb: SubAgentProgressCallback): void {
-        if (this.subAgentDeps) this.subAgentDeps.onProgress = cb;
-    }
-
-    /** Clear the sub-agent progress callback (call after request completes). */
     clearSubAgentProgress(): void {
         if (this.subAgentDeps) this.subAgentDeps.onProgress = undefined;
     }
@@ -296,10 +298,11 @@ export class Agent {
     // ── Memory ─────────────────────────────────────────
 
     saveToMemory(role: 'user' | 'assistant', content: string, ctx?: ChatContext): void {
+        const channel = ctx?.channel;
         if (ctx && role === 'user' && ctx.sender) {
-            this.memory.addMessage(role, `[${ctx.sender} via ${ctx.channel}] ${content}`);
+            this.memory.addMessage(role, `[${ctx.sender} via ${ctx.channel}] ${content}`, channel);
         } else {
-            this.memory.addMessage(role, content);
+            this.memory.addMessage(role, content, channel);
         }
 
         if (role === 'assistant' && ctx?.sender) {

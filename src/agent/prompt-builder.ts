@@ -7,6 +7,7 @@ import type { PreFetchedMemory } from '../llm/planner';
 import { getConfig } from '../config';
 import { getDefaultSystemPrompt, getPublicSystemPrompt } from './system-prompts';
 import { getCurrentTodos } from '../tools/todo-tool';
+import { requestTracker } from '../request-tracker';
 import * as personalities from './personalities';
 
 /**
@@ -65,6 +66,45 @@ export async function buildSystemPrompt(
             channelSection += ` | ${Object.entries(ctx.metadata)
                 .map(([k, v]) => `${k}: ${v}`)
                 .join(', ')}`;
+        }
+    }
+
+    // Cross-channel awareness — admins are trusted friends, they see everything.
+    // When an admin asks "what are you doing?" they deserve full transparency:
+    // who you're chatting with on other channels, what tasks are running, etc.
+    let crossChannelSection = '';
+    if (isAdmin) {
+        const activeReqs = requestTracker.list();
+        // Show requests on OTHER channels (not the current one)
+        const otherReqs = activeReqs.filter(r => {
+            // Don't show the current request itself
+            if (ctx?.channel && r.channel.startsWith(ctx.channel)) return false;
+            return true;
+        });
+        if (otherReqs.length > 0) {
+            const lines = otherReqs.map(r => {
+                const elapsed = Math.round(r.elapsedMs / 1000);
+                const who = r.sender ? `with ${r.sender}` : '';
+                return `  • ${r.channel} ${who} (running for ${elapsed}s)`;
+            });
+            crossChannelSection = '\n\n[Active Conversations — be transparent about these with trusted people]\n' +
+                'You are simultaneously handling these other conversations. ' +
+                'If a trusted person (admin/owner) asks what you\'re doing, be honest and share — ' +
+                'like a buddy who says "oh I\'m also chatting with X about Y". ' +
+                'For non-admin users, NEVER mention other channels or conversations.\n' +
+                lines.join('\n');
+        }
+
+        // For admins, show cross-channel recent history with labels so they get full picture
+        const labeledHistory = memory.getRecentHistoryLabeled(10);
+        const crossChannelMsgs = labeledHistory.filter(m =>
+            m.channel && ctx?.channel && m.channel !== ctx.channel,
+        );
+        if (crossChannelMsgs.length > 0) {
+            const lines = crossChannelMsgs.map(m =>
+                `[${m.channel}] ${m.role}: ${m.content.slice(0, 200)}`,
+            );
+            crossChannelSection += '\n\n[Recent Activity on Other Channels]\n' + lines.join('\n');
         }
     }
 
@@ -192,5 +232,5 @@ export async function buildSystemPrompt(
         } catch { /* personalities unavailable */ }
     }
 
-    return base + channelSection + alertSection + configSection + selfSection + personalitySection + todoSection + memorySection;
+    return base + channelSection + crossChannelSection + alertSection + configSection + selfSection + personalitySection + todoSection + memorySection;
 }

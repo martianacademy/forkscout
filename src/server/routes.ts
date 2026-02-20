@@ -120,7 +120,7 @@ export async function handleChatSync(
 
         // Quick tasks with no tools needed — return the ack directly
         if (syncPlan.effort === 'quick' && !syncPlan.needsTools && syncPlan.acknowledgment) {
-            agent.saveToMemory('assistant', syncPlan.acknowledgment);
+            agent.saveToMemory('assistant', syncPlan.acknowledgment, ctx);
             sendJSON(res, 200, { response: syncPlan.acknowledgment });
             return;
         }

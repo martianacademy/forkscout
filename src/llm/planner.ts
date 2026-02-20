@@ -22,6 +22,7 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 import type { ModelRouter, ModelTier } from './router';
 import type { MemoryManager } from '../memory';
+import type { ChatContext } from '../agent/types';
 import { getConfig } from '../config';
 
 // ── Available tool names (for recommendation) ──────────
@@ -141,21 +142,39 @@ interface PlannerContext {
 /**
  * Gather context from memory and state for the planner.
  * Runs memory queries in parallel for speed.
+ *
+ * Channel isolation:
+ * - Admin: sees ALL channels with [channel] labels (full transparency)
+ * - Guest: sees only their own channel's messages (strict isolation)
  */
 async function gatherContext(
     userMessage: string,
     memory: MemoryManager,
+    ctx?: ChatContext,
 ): Promise<PlannerContext> {
     const cfg = getConfig().agent;
     const chatLimit = cfg.plannerChatHistoryLimit ?? 5;
+    const isAdmin = ctx?.isAdmin ?? false;
+    const channel = ctx?.channel;
 
     // Run in parallel: recent chat + knowledge search + entity search
     const [recentHistory, knowledgeHits, entityHits] = await Promise.allSettled([
-        // Last N exchanges
+        // Last N exchanges — channel-aware
         (async () => {
-            const history = memory.getRecentHistory(chatLimit * 2); // pairs
-            if (history.length === 0) return '';
-            return history.map(m => `${m.role}: ${m.content}`).join('\n');
+            if (isAdmin) {
+                // Admins see all channels with labels
+                const history = memory.getRecentHistoryLabeled(chatLimit * 2);
+                if (history.length === 0) return '';
+                return history.map(m => {
+                    const tag = m.channel ? `[${m.channel}] ` : '';
+                    return `${tag}${m.role}: ${m.content}`;
+                }).join('\n');
+            } else {
+                // Guests see only their own channel
+                const history = memory.getRecentHistory(chatLimit * 2, channel);
+                if (history.length === 0) return '';
+                return history.map(m => `${m.role}: ${m.content}`).join('\n');
+            }
         })(),
         // Knowledge search
         (async () => {
@@ -262,12 +281,13 @@ export async function runPlanner(
     userMessage: string,
     router: ModelRouter,
     memory: MemoryManager,
+    ctx?: ChatContext,
 ): Promise<{ plan: PlannerResult; preFetched: PreFetchedMemory }> {
     const cfg = getConfig().agent;
 
     try {
-        // 1. Gather context (parallel memory + history reads)
-        const context = await gatherContext(userMessage, memory);
+        // 1. Gather context (parallel memory + history reads) — channel-aware
+        const context = await gatherContext(userMessage, memory, ctx);
 
         // 2. Build the enriched prompt
         const prompt = buildPlannerPrompt(userMessage, context);
