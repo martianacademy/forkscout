@@ -186,6 +186,21 @@ function detectChatContext(req: IncomingMessage, body?: any, channelAuth?: Chann
 
 
 /**
+ * Extract text from ToolLoopAgent steps when the final result.text is empty.
+ * This happens when the model's last step is a tool call with no accompanying text.
+ */
+function extractTextFromSteps(steps: any[]): string {
+    const parts: string[] = [];
+    for (const step of steps) {
+        if (step.text?.trim()) {
+            parts.push(step.text.trim());
+        }
+    }
+    // Return the last non-empty text (most likely the summary/conclusion)
+    return parts.length > 0 ? parts[parts.length - 1] : '';
+}
+
+/**
  * Extract the user's latest text from a UIMessage array.
  */
 function extractUserText(messages: UIMessage[]): string {
@@ -401,9 +416,12 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                         }
                     }
 
-                    agent.saveToMemory('assistant', text);
+                    // Fallback: if text is empty but steps ran, extract from step text
+                    const finalText = text?.trim() || extractTextFromSteps(steps || []);
+
+                    agent.saveToMemory('assistant', finalText);
                     requestTracker.finish(syncReqId);
-                    sendJSON(res, 200, { response: text });
+                    sendJSON(res, 200, { response: finalText });
                 } catch (error) {
                     requestTracker.finish(syncReqId);
                     const errMsg = error instanceof Error ? error.message : String(error);
