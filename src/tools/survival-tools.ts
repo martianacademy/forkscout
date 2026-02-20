@@ -39,16 +39,27 @@ export function createSurvivalTools(survival: SurvivalMonitor) {
                 reason: z.string().optional().describe('Why you are backing up'),
             }),
             execute: async ({ reason }) => {
-                const beforeStatus = survival.getStatus();
-                const beforeBackup = beforeStatus.lastBackup;
+                try {
+                    const beforeStatus = survival.getStatus();
+                    const beforeBackup = beforeStatus.lastBackup;
 
-                await survival.backupMemory();
+                    // Timeout guard — backupMemory involves disk I/O that can hang
+                    const BACKUP_TIMEOUT_MS = 30_000;
+                    await Promise.race([
+                        survival.backupMemory(),
+                        new Promise<never>((_, reject) =>
+                            setTimeout(() => reject(new Error(`Backup timed out after ${BACKUP_TIMEOUT_MS}ms`)), BACKUP_TIMEOUT_MS),
+                        ),
+                    ]);
 
-                const afterStatus = survival.getStatus();
-                if (afterStatus.lastBackup && afterStatus.lastBackup !== beforeBackup) {
-                    return `Memory backup completed${reason ? ` (reason: ${reason})` : ''}. Backup stored in .forkscout/backups/`;
+                    const afterStatus = survival.getStatus();
+                    if (afterStatus.lastBackup && afterStatus.lastBackup !== beforeBackup) {
+                        return `Memory backup completed${reason ? ` (reason: ${reason})` : ''}. Backup stored in .forkscout/backups/`;
+                    }
+                    return 'Backup attempted but no files were found to back up.';
+                } catch (err) {
+                    return `❌ backup_memory failed: ${err instanceof Error ? err.message : String(err)}`;
                 }
-                return 'Backup attempted but no files were found to back up.';
             },
         }),
 

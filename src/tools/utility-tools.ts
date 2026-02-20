@@ -22,15 +22,19 @@ export const generatePresentation = tool({
         outputPath: z.string().describe('Output Markdown file path (relative to project root)'),
     }),
     execute: async ({ title, slides, outputPath }) => {
-        const fs = await import('fs/promises');
-        const { dirname } = await import('path');
-        let md = `---\nmarp: true\ntheme: default\npaginate: true\n---\n# ${title}\n\n---\n\n`;
-        for (const slide of slides) {
-            md += `# ${slide.title}\n\n${slide.content.replace(/\n/g, '\n\n')}\n\n---\n\n`;
+        try {
+            const fs = await import('fs/promises');
+            const { dirname } = await import('path');
+            let md = `---\nmarp: true\ntheme: default\npaginate: true\n---\n# ${title}\n\n---\n\n`;
+            for (const slide of slides) {
+                md += `# ${slide.title}\n\n${slide.content.replace(/\n/g, '\n\n')}\n\n---\n\n`;
+            }
+            const absPath = resolveAgentPath(outputPath);
+            await fs.mkdir(dirname(absPath), { recursive: true });
+            await fs.writeFile(absPath, md, 'utf-8');
+            return `Presentation saved to ${absPath} (${slides.length} slides). Open in VS Code with Marp extension or convert with: npx @marp-team/marp-cli ${outputPath} --pptx`;
+        } catch (err) {
+            return `\u274c generatePresentation failed: ${err instanceof Error ? err.message : String(err)}`;
         }
-        const absPath = resolveAgentPath(outputPath);
-        await fs.mkdir(dirname(absPath), { recursive: true });
-        await fs.writeFile(absPath, md, 'utf-8');
-        return `Presentation saved to ${absPath} (${slides.length} slides). Open in VS Code with Marp extension or convert with: npx @marp-team/marp-cli ${outputPath} --pptx`;
     },
 });

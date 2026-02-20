@@ -12,9 +12,16 @@ export const readFile = tool({
         path: z.string().describe('File path to read (relative to project root or absolute)'),
     }),
     execute: async ({ path }) => {
-        const fs = await import('fs/promises');
-        const absPath = resolveAgentPath(path);
-        return await fs.readFile(absPath, 'utf-8');
+        try {
+            const fs = await import('fs/promises');
+            const absPath = resolveAgentPath(path);
+            return await fs.readFile(absPath, 'utf-8');
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('ENOENT')) return `❌ File not found: "${path}". Use list_directory to check what exists.`;
+            if (msg.includes('EISDIR')) return `❌ "${path}" is a directory, not a file. Use list_directory instead.`;
+            return `❌ read_file failed for "${path}": ${msg}`;
+        }
     },
 });
 
@@ -25,12 +32,16 @@ export const writeFile = tool({
         content: z.string().describe('Content to write to the file'),
     }),
     execute: async ({ path, content }) => {
-        const fs = await import('fs/promises');
-        const { dirname } = await import('path');
-        const absPath = resolveAgentPath(path);
-        await fs.mkdir(dirname(absPath), { recursive: true });
-        await fs.writeFile(absPath, content, 'utf-8');
-        return `File written: ${absPath} (${content.length} bytes)`;
+        try {
+            const fs = await import('fs/promises');
+            const { dirname } = await import('path');
+            const absPath = resolveAgentPath(path);
+            await fs.mkdir(dirname(absPath), { recursive: true });
+            await fs.writeFile(absPath, content, 'utf-8');
+            return `File written: ${absPath} (${content.length} bytes)`;
+        } catch (err) {
+            return `❌ write_file failed for "${path}": ${err instanceof Error ? err.message : String(err)}`;
+        }
     },
 });
 
@@ -41,12 +52,16 @@ export const appendFile = tool({
         content: z.string().describe('Content to append'),
     }),
     execute: async ({ path, content }) => {
-        const fs = await import('fs/promises');
-        const { dirname } = await import('path');
-        const absPath = resolveAgentPath(path);
-        await fs.mkdir(dirname(absPath), { recursive: true });
-        await fs.appendFile(absPath, content, 'utf-8');
-        return `Content appended to: ${absPath}`;
+        try {
+            const fs = await import('fs/promises');
+            const { dirname } = await import('path');
+            const absPath = resolveAgentPath(path);
+            await fs.mkdir(dirname(absPath), { recursive: true });
+            await fs.appendFile(absPath, content, 'utf-8');
+            return `Content appended to: ${absPath}`;
+        } catch (err) {
+            return `❌ append_file failed for "${path}": ${err instanceof Error ? err.message : String(err)}`;
+        }
     },
 });
 
@@ -56,10 +71,17 @@ export const listDirectory = tool({
         path: z.string().describe('Directory path to list (relative to project root or absolute)'),
     }),
     execute: async ({ path }) => {
-        const fs = await import('fs/promises');
-        const absPath = resolveAgentPath(path);
-        const entries = await fs.readdir(absPath, { withFileTypes: true });
-        return entries.map(e => (e.isDirectory() ? `${e.name}/` : e.name));
+        try {
+            const fs = await import('fs/promises');
+            const absPath = resolveAgentPath(path);
+            const entries = await fs.readdir(absPath, { withFileTypes: true });
+            return entries.map(e => (e.isDirectory() ? `${e.name}/` : e.name));
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('ENOENT')) return `❌ Directory not found: "${path}". Check the path and try again.`;
+            if (msg.includes('ENOTDIR')) return `❌ "${path}" is a file, not a directory.`;
+            return `❌ list_directory failed for "${path}": ${msg}`;
+        }
     },
 });
 
@@ -69,11 +91,17 @@ export const deleteFile = tool({
         path: z.string().describe('File or directory path to delete (relative to project root or absolute)'),
     }),
     execute: async ({ path }) => {
-        const absPath = resolveAgentPath(path);
-        const refusal = isProtectedPath(absPath);
-        if (refusal) return refusal;
-        const fs = await import('fs/promises');
-        await fs.rm(absPath, { recursive: true });
-        return `Deleted: ${absPath}`;
+        try {
+            const absPath = resolveAgentPath(path);
+            const refusal = isProtectedPath(absPath);
+            if (refusal) return refusal;
+            const fs = await import('fs/promises');
+            await fs.rm(absPath, { recursive: true });
+            return `Deleted: ${absPath}`;
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('ENOENT')) return `❌ Cannot delete "${path}" — file not found.`;
+            return `❌ delete_file failed for "${path}": ${msg}`;
+        }
     },
 });

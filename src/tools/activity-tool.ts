@@ -13,10 +13,14 @@ export const viewActivityLog = tool({
         format: z.enum(['summary', 'json']).default('summary').describe('Output format: summary (human-readable) or json (raw events)'),
     }),
     execute: async ({ count, type, format }) => {
-        if (format === 'json') {
-            const events = readRecentActivity(count, type as ActivityEventType | undefined);
-            return { events, count: events.length, logPath: getLogPath() };
+        try {
+            if (format === 'json') {
+                const events = readRecentActivity(count, type as ActivityEventType | undefined);
+                return { events, count: events.length, logPath: getLogPath() };
+            }
+            return getActivitySummary(count);
+        } catch (err) {
+            return `❌ viewActivityLog failed: ${err instanceof Error ? err.message : String(err)}`;
         }
-        return getActivitySummary(count);
     },
 });

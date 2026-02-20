@@ -115,7 +115,12 @@ export const browseWeb = tool({
         selector: z.string().describe('Optional CSS selector to extract specific content').optional(),
     }),
     execute: async ({ url, selector }) => {
-        const page = await createPage();
+        let page: any;
+        try {
+            page = await createPage();
+        } catch (err) {
+            return `\u274c Browse failed: Could not launch browser — ${err instanceof Error ? err.message : String(err)}`;
+        }
         try {
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
@@ -136,9 +141,15 @@ export const browseWeb = tool({
                 });
             }
 
-            return content;
+            return content || 'Page loaded but no text content was extracted.';
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('timeout') || msg.includes('Timeout')) {
+                return `\u274c Browse timed out loading ${url}. The page may be too slow or blocking automated browsers.`;
+            }
+            return `\u274c Browse failed for ${url}: ${msg}`;
         } finally {
-            await page.context().close();
+            try { await page.context().close(); } catch { /* already closed */ }
         }
     },
 });
@@ -151,13 +162,20 @@ export const browserScreenshot = tool({
         viewport: z.object({ width: z.number(), height: z.number() }).describe('Viewport size').optional(),
     }),
     execute: async ({ url, outputPath, viewport }) => {
-        const page = await createPage(viewport || { width: 1280, height: 720 });
+        let page: any;
+        try {
+            page = await createPage(viewport || { width: 1280, height: 720 });
+        } catch (err) {
+            return `\u274c Screenshot failed: Could not launch browser — ${err instanceof Error ? err.message : String(err)}`;
+        }
         try {
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
             await page.screenshot({ path: outputPath });
             return `Screenshot saved to ${outputPath}`;
+        } catch (err) {
+            return `\u274c Screenshot failed for ${url}: ${err instanceof Error ? err.message : String(err)}`;
         } finally {
-            await page.context().close();
+            try { await page.context().close(); } catch { /* already closed */ }
         }
     },
 });
