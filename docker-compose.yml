@@ -23,6 +23,8 @@ services:
             - AGENT_PORT=3210
             # Point SearXNG to the compose service
             - SEARXNG_URL=http://searxng:8080
+            # Point Memory MCP to the compose service
+            - MEMORY_MCP_URL=http://memory:3211/mcp
         volumes:
             # Named volume at /app: on first run Docker copies everything from the image.
             # All agent changes persist — source code, node_modules, memory, cron jobs, auth.
@@ -31,6 +33,8 @@ services:
             - app-data:/app
         depends_on:
             searxng:
+                condition: service_healthy
+            memory:
                 condition: service_healthy
 
     # SearXNG — private search engine (used by web_search tool)
@@ -54,6 +58,7 @@ services:
     # Memory MCP Server — persistent memory + knowledge graph
     memory:
         image: ghcr.io/martianacademy/forkscout-memory-mcp:latest
+        build: ./forkscout-memory-mcp
         container_name: forkscout-memory
         restart: unless-stopped
         ports:

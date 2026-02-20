@@ -3,6 +3,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import type { LanguageModel, EmbeddingModel } from 'ai';
 import { getConfig } from '../config';
+import { createFallbackModel } from './fallback-model';
 
 /** Get OpenRouter app identification headers from config */
 function openRouterHeaders() {
@@ -17,7 +18,7 @@ function openRouterHeaders() {
  * LLM Configuration
  */
 export interface LLMConfig {
-    provider: 'openai' | 'ollama' | 'anthropic' | 'google' | 'openrouter' | 'custom';
+    provider: 'openai' | 'ollama' | 'anthropic' | 'google' | 'openrouter' | 'openai-compatible' | 'custom';
     model: string;
     baseURL?: string;
     apiKey?: string;
@@ -62,8 +63,13 @@ export class LLMClient {
         return this.getConfig();
     }
 
-    /** Get the AI SDK model instance for the current config */
+    /** Get the AI SDK model instance for the current config, wrapped with provider fallback. */
     getModel(): LanguageModel {
+        return createFallbackModel(this._getModelRaw());
+    }
+
+    /** Get the raw AI SDK model instance (no fallback wrapper). */
+    private _getModelRaw(): LanguageModel {
         switch (this.config.provider) {
             case 'openai': {
                 const p = createOpenAI({
@@ -87,6 +93,14 @@ export class LLMClient {
                     baseURL: 'https://openrouter.ai/api/v1',
                     apiKey: this.config.apiKey || getConfig().secrets.openrouterApiKey || '',
                     headers: openRouterHeaders(),
+                });
+                return p.chat(this.config.model);
+            }
+
+            case 'openai-compatible': {
+                const p = createOpenAI({
+                    baseURL: this.config.baseURL || getConfig().secrets.openApiCompatibleApiUrl || 'https://api.openai.com/v1',
+                    apiKey: this.config.apiKey || getConfig().secrets.openApiCompatibleApiKey || '',
                 });
                 return p.chat(this.config.model);
             }
@@ -145,6 +159,18 @@ export class LLMClient {
                     apiKey: this.config.apiKey || getConfig().secrets.openaiApiKey || '',
                 });
                 return p.embedding(embeddingModelId.replace('openai/', ''));
+            }
+
+            case 'openai-compatible': {
+                try {
+                    const p = createOpenAI({
+                        baseURL: this.config.baseURL || getConfig().secrets.openApiCompatibleApiUrl || 'https://api.openai.com/v1',
+                        apiKey: this.config.apiKey || getConfig().secrets.openApiCompatibleApiKey || '',
+                    });
+                    return p.embedding(embeddingModelId);
+                } catch {
+                    return undefined;
+                }
             }
 
             case 'custom': {

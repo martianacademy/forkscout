@@ -1,17 +1,21 @@
 /**
  * LLM Retry & Failover — wraps AI SDK generateText/streamText with
- * exponential backoff, error classification, and automatic recovery.
+ * exponential backoff, error classification, and automatic provider fallback.
  *
  * Error handling strategy:
  *   - Rate limit (429) → backoff + retry
  *   - Timeout / overloaded → backoff + retry
- *   - Auth error (401/403) → fail immediately (no point retrying)
+ *   - Auth error (401/403) → try fallback providers, then fail
  *   - Context overflow → fail immediately (caller must compact)
- *   - Network error → backoff + retry
+ *   - Network error → try fallback providers, then backoff + retry
  *   - Unknown → retry up to max attempts
  */
 
 import { generateText, streamText, type GenerateTextResult } from 'ai';
+import type { LanguageModel } from 'ai';
+import { getConfig } from '../config';
+import { resolveApiKeyForProvider, resolveApiUrlForProvider } from '../config/loader';
+import { createProviderModel } from './router/provider';
 
 export interface RetryConfig {
     /** Max retry attempts (default: 3) */
@@ -83,10 +87,16 @@ function classifyError(error: unknown): ErrorType {
     return 'unknown';
 }
 
-/** Whether this error type should be retried */
+/** Whether this error type should be retried (without fallback) */
 function shouldRetry(errorType: ErrorType): boolean {
-    // Auth, context overflow, and unsupported input should NOT be retried
+    // Auth and network trigger fallback (handled separately), not plain retry
+    // Context overflow and unsupported input should NOT be retried at all
     return errorType !== 'auth' && errorType !== 'context_overflow' && errorType !== 'unsupported_input';
+}
+
+/** Whether this error type should trigger a provider fallback */
+function shouldFallback(errorType: ErrorType): boolean {
+    return errorType === 'auth' || errorType === 'network';
 }
 
 /**
@@ -112,7 +122,46 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * generateText with automatic retry and exponential backoff.
+ * Try to create a fallback model from the configured fallback providers.
+ * Returns the first provider that has a valid API key, or null if none available.
+ * Exported so callers using generateObject (planner, etc.) can also fall back.
+ */
+export function tryFallbackModel(originalModelId: string): { model: LanguageModel; provider: string } | null {
+    const cfg = getConfig();
+    const fallbacks = cfg.fallbackProviders;
+    if (!fallbacks || fallbacks.length === 0) return null;
+
+    for (const fbProvider of fallbacks) {
+        const apiKey = resolveApiKeyForProvider(fbProvider, cfg);
+        if (!apiKey) {
+            console.warn(`[Fallback]: Skipping ${fbProvider} — no API key configured`);
+            continue;
+        }
+
+        // Resolve the model for this provider from router presets (use balanced tier)
+        const presets = cfg.routerPresets?.[fbProvider];
+        const fallbackModelId = presets?.balanced?.model || originalModelId;
+        const baseURL = resolveApiUrlForProvider(fbProvider, cfg);
+
+        try {
+            const model = createProviderModel(fbProvider, fallbackModelId, apiKey, baseURL);
+            console.log(`[Fallback]: ✓ Switching to ${fbProvider} (${fallbackModelId})`);
+            return { model, provider: fbProvider };
+        } catch (e) {
+            console.warn(`[Fallback]: Failed to create model for ${fbProvider}: ${e instanceof Error ? e.message : e}`);
+        }
+    }
+
+    return null;
+}
+
+/**
+ * generateText with automatic retry, exponential backoff, and provider fallback.
+ *
+ * On auth (401/403) or network errors, automatically tries fallback providers
+ * from config.fallbackProviders before giving up. This ensures the agent stays
+ * operational even when the primary provider is down or misconfigured.
+ *
  * Use this for all non-streaming LLM calls.
  */
 export async function generateTextWithRetry<T extends Parameters<typeof generateText>[0]>(
@@ -121,17 +170,36 @@ export async function generateTextWithRetry<T extends Parameters<typeof generate
 ): Promise<GenerateTextResult<any, any>> {
     const config = { ...DEFAULT_RETRY, ...retryConfig };
     let lastError: unknown;
+    let currentParams = { ...params };
 
     for (let attempt = 0; attempt < config.maxAttempts; attempt++) {
         try {
-            return await generateText(params);
+            return await generateText(currentParams);
         } catch (error) {
             lastError = error;
             const errorType = classifyError(error);
             const errMsg = error instanceof Error ? error.message : String(error);
 
+            // On auth or network errors, try fallback providers before giving up
+            if (shouldFallback(errorType) && attempt === 0) {
+                console.warn(`[LLM Retry]: Primary provider failed [${errorType}]: ${errMsg.slice(0, 150)}. Trying fallback providers...`);
+
+                // Extract original model ID for logging
+                const originalModelId = (currentParams.model as any)?.modelId || 'unknown';
+                const fallback = tryFallbackModel(originalModelId);
+
+                if (fallback) {
+                    // Swap model and retry immediately with the fallback
+                    currentParams = { ...currentParams, model: fallback.model as any };
+                    console.log(`[LLM Retry]: Retrying with fallback provider: ${fallback.provider}`);
+                    continue; // Go to next attempt with fallback model
+                }
+
+                console.error(`[LLM Retry]: No fallback providers available. Failing.`);
+                throw error;
+            }
+
             if (!shouldRetry(errorType) || attempt >= config.maxAttempts - 1) {
-                // Don't retry auth/context errors, or if out of attempts
                 if (attempt > 0) {
                     console.error(`[LLM Retry]: Failed after ${attempt + 1} attempt(s) [${errorType}]: ${errMsg.slice(0, 200)}`);
                 }

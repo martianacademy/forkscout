@@ -63,12 +63,20 @@ export function loadConfig(force = false): ForkscoutConfig {
         || router.balanced.model
         || DEFAULTS.model;
 
+    // Parse fallback providers — filter to valid ProviderType values
+    const validProviders: Set<string> = new Set(['openrouter', 'openai', 'anthropic', 'google', 'ollama', 'openai-compatible']);
+    const fallbackProviders: ProviderType[] = Array.isArray(fileConfig.fallbackProviders)
+        ? (fileConfig.fallbackProviders as string[])
+            .filter((p): p is ProviderType => validProviders.has(p) && p !== provider)
+        : [];
+
     const config: ForkscoutConfig = {
         provider,
         model,
         baseURL,
         temperature: fileConfig.temperature ?? DEFAULTS.temperature,
         maxTokens: fileConfig.maxTokens ?? DEFAULTS.maxTokens,
+        fallbackProviders,
 
         router,
         ...(routerPresets ? { routerPresets } : {}),
@@ -169,7 +177,7 @@ export function watchConfig(onChange: (cfg: ForkscoutConfig) => void): () => voi
     const configPath = findConfigFile();
     if (!configPath) {
         console.warn('[Config↻] No config file found — hot-reload disabled');
-        return () => {};
+        return () => { };
     }
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;

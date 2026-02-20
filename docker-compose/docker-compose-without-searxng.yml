@@ -1,0 +1,64 @@
+# ─── Forkscout Agent + Memory MCP (SearXNG already running) ───
+#
+# Use when forkscout-searxng container is already running on forkscout_default network.
+#
+# Usage:
+#   docker compose -f docker/docker-compose-without-searxng.yml up -d --build
+#   docker compose -f docker/docker-compose-without-searxng.yml logs -f agent
+#   docker compose -f docker/docker-compose-without-searxng.yml down
+
+services:
+    agent:
+        image: ghcr.io/martianacademy/forkscout:latest
+        build:
+            context: ..
+            dockerfile: Dockerfile
+        container_name: forkscout-agent
+        restart: unless-stopped
+        ports:
+            - '${AGENT_PORT:-3210}:3210'
+        env_file:
+            - ../.env
+        environment:
+            - AGENT_PORT=3210
+            - SEARXNG_URL=http://forkscout-searxng:8080
+            - MEMORY_MCP_URL=http://forkscout-memory:3211/mcp
+        volumes:
+            - app-data:/app
+        networks:
+            - default
+            - forkscout-external
+        depends_on:
+            memory:
+                condition: service_healthy
+
+    # Memory MCP Server — persistent memory + knowledge graph
+    memory:
+        image: ghcr.io/martianacademy/forkscout-memory-mcp:latest
+        build:
+            context: ../forkscout-memory-mcp
+            dockerfile: Dockerfile
+        container_name: forkscout-memory
+        restart: unless-stopped
+        ports:
+            - '${MEMORY_PORT:-3211}:3211'
+        environment:
+            - MEMORY_PORT=3211
+            - MEMORY_STORAGE=/data
+        volumes:
+            - memory-data:/data
+        healthcheck:
+            test: ['CMD', 'wget', '-qO-', 'http://localhost:3211/health']
+            interval: 15s
+            timeout: 5s
+            start_period: 10s
+            retries: 3
+
+volumes:
+    app-data:
+    memory-data:
+
+networks:
+    forkscout-external:
+        external: true
+        name: forkscout_default

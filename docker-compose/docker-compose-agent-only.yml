@@ -1,0 +1,38 @@
+# ─── Forkscout Agent Only (Memory MCP + SearXNG already running) ───
+#
+# Use when both forkscout-memory and forkscout-searxng containers are
+# already running on the forkscout_default network.
+#
+# Usage:
+#   docker compose -f docker/docker-compose-agent-only.yml up -d --build
+#   docker compose -f docker/docker-compose-agent-only.yml logs -f agent
+#   docker compose -f docker/docker-compose-agent-only.yml down
+
+services:
+    agent:
+        image: ghcr.io/martianacademy/forkscout:latest
+        build:
+            context: ..
+            dockerfile: Dockerfile
+        container_name: forkscout-agent
+        restart: unless-stopped
+        ports:
+            - '${AGENT_PORT:-3210}:3210'
+        env_file:
+            - ../.env
+        environment:
+            - AGENT_PORT=3210
+            - SEARXNG_URL=http://forkscout-searxng:8080
+            - MEMORY_MCP_URL=http://forkscout-memory:3211/mcp
+        volumes:
+            - app-data:/app
+        networks:
+            - forkscout-external
+
+volumes:
+    app-data:
+
+networks:
+    forkscout-external:
+        external: true
+        name: forkscout_default

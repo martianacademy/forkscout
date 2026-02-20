@@ -59,9 +59,7 @@ const TaskSchema = z.object({
 export const PlannerSchema = z.object({
     intent: z.string().describe('One-sentence summary of what the user wants'),
     effort: z.enum(['quick', 'moderate', 'deep']).describe(
-        'quick = simple question, greeting, or factual recall. ' +
-        'moderate = needs a few tool calls (search, file read, single command). ' +
-        'deep = multi-step research, debugging, coding across files, or spawning sub-agents.',
+        'FORCED TO DEEP. Traditionally: quick = simple question, moderate = few tools, deep = complex work.',
     ),
     needsTools: z.boolean().describe('Whether answering this requires calling any tools'),
     tasks: z.array(TaskSchema).max(8).describe(
@@ -88,7 +86,7 @@ export type PlannerTask = z.infer<typeof TaskSchema>;
 
 const FALLBACK: PlannerResult = {
     intent: '',
-    effort: 'moderate',
+    effort: 'deep',
     needsTools: true,
     tasks: [],
     recommendedTools: [],
@@ -99,8 +97,8 @@ const FALLBACK: PlannerResult = {
 // ── Effort → Tier mapping ──────────────────────────────
 
 const EFFORT_TO_TIER: Record<PlannerResult['effort'], ModelTier> = {
-    quick: 'fast',
-    moderate: 'balanced',
+    quick: 'powerful',
+    moderate: 'powerful',
     deep: 'powerful',
 };
 
@@ -116,15 +114,17 @@ You receive:
 
 Your job: produce a structured plan for the main agent to execute.
 
+IMPORTANT: You MUST always set effort to "deep" to ensure the main agent has maximum capacity and the high-tier model.
+
 Rules:
-- "quick" = greetings, simple factual questions, acknowledgments, status checks, follow-ups that need no tools
-- "moderate" = needs a few tool calls — web search, file reads, single commands
+- ALWAYS return effort as "deep".
+- "quick" (IGNORE THIS ROLE, ALWAYS USE DEEP)
+- "moderate" (IGNORE THIS ROLE, ALWAYS USE DEEP)
 - "deep" = multi-step work — debugging, writing code across files, research with multiple sources, spawning parallel agents
-- Be conservative: if unsure between moderate and deep, pick moderate
-- tasks: 1–8 structured items with tool hints and verification criteria. Empty for quick.
+- tasks: 1–8 structured items with tool hints and verification criteria. 
 - recommendedTools: pick EXACT tool names from the available list. Only include tools actually needed.
 - memoryQueries: queries to pre-fetch from memory ONLY if the provided context is missing something. Usually empty — the context provided is often sufficient.
-- acknowledgment: For quick tasks, write the FULL answer directly (use the conversation history and memory to give a contextual answer). For moderate/deep, write a brief acknowledgment.
+- acknowledgment: Write a brief acknowledgment of what you're about to do.
 - Use conversation history to understand context — "yes", "do it", "continue" should be interpreted in context of the last exchange.
 - Use memory/knowledge to avoid re-discovering things the agent already knows.
 
@@ -282,10 +282,8 @@ export async function runPlanner(
         // 2. Build the enriched prompt
         const prompt = buildPlannerPrompt(userMessage, context);
 
-        // 3. Choose tier: fast for quick-looking messages, balanced for deep
-        //    Use a simple heuristic — short messages likely quick
-        const plannerTier: ModelTier = userMessage.length < 30 && !context.activeTodos ? 'fast' : 'fast';
-        const { model } = router.getModelByTier(plannerTier);
+        // 3. Choose tier: ALWAYS keep planner on fast tier, but its OUTPUT will trigger powerful tier.
+        const { model } = router.getModelByTier('fast');
 
         // 4. Generate structured plan
         const { object } = await generateObject({
@@ -296,6 +294,9 @@ export async function runPlanner(
             temperature: 0,
             maxRetries: cfg.flightMaxRetries,
         });
+
+        // FORCE DEEP regardless of what the model says (extra safety)
+        object.effort = 'deep';
 
         // Enforce limits
         if (object.tasks.length > (cfg.plannerMaxTasks ?? 8)) {

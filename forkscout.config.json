@@ -1,7 +1,18 @@
 {
     "$schema": "./packages/agent/src/config.schema.json",
-    "provider": "openrouter",
+    "provider": "openai-compatible",
+    "baseURL": "https://api.aimlapi.com/v1",
+    "fallbackProviders": [
+        "openrouter",
+        "google",
+        "anthropic"
+    ],
     "temperature": 0.7,
+    "budget": {
+        "dailyUSD": 5,
+        "monthlyUSD": 50,
+        "warningPct": 80
+    },
     "router": {
         "openrouter": {
             "fast": {
@@ -12,6 +23,17 @@
             },
             "powerful": {
                 "model": "google/gemini-3-flash-preview"
+            }
+        },
+        "openai": {
+            "fast": {
+                "model": "gpt-5-mini"
+            },
+            "balanced": {
+                "model": "gpt-5"
+            },
+            "powerful": {
+                "model": "gpt-5.2-codex"
             }
         },
         "google": {
@@ -36,15 +58,15 @@
                 "model": "claude-opus-4.6"
             }
         },
-        "openai": {
+        "openai-compatible": {
             "fast": {
-                "model": "gpt-5-mini"
+                "model": "claude-sonnet-4-5-20250929"
             },
             "balanced": {
-                "model": "gpt-5"
+                "model": "claude-sonnet-4-5-20250929"
             },
             "powerful": {
-                "model": "gpt-5.2-codex"
+                "model": "claude-sonnet-4-5-20250929"
             }
         }
     },
@@ -58,9 +80,6 @@
         "appUrl": "https://github.com/martianacademy/forkscout",
         "forkscoutMemoryMcpUrl": "http://localhost:3211/mcp",
         "mcpServers": {
-            "forkscout-memory": {
-                "url": "http://localhost:3211/mcp"
-            },
             "sequential-thinking": {
                 "command": "npx",
                 "args": [
@@ -68,15 +87,15 @@
                     "@modelcontextprotocol/server-sequential-thinking"
                 ]
             },
+            "deepwiki": {
+                "url": "https://mcp.deepwiki.com/mcp"
+            },
             "context7": {
                 "command": "npx",
                 "args": [
                     "-y",
                     "@upstash/context7-mcp"
                 ]
-            },
-            "deepwiki": {
-                "url": "https://mcp.deepwiki.com/mcp"
             }
         },
         "subAgent": {
@@ -103,11 +122,6 @@
         "failureEscalationThreshold": 3,
         "browserIdleMs": 60000,
         "activityLogMaxBytes": 5242880
-    },
-    "budget": {
-        "dailyUSD": 5,
-        "monthlyUSD": 50,
-        "warningPct": 80
     },
     "searxng": {
         "url": "http://localhost:8888"

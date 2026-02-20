@@ -12,6 +12,7 @@ import type {
 } from './types';
 import { PURPOSE_TO_TIER, KNOWN_PRICES } from './types';
 import { createProviderModel } from './provider';
+import { createFallbackModel } from '../fallback-model';
 
 export class ModelRouter {
     private config: RouterConfig;
@@ -102,7 +103,8 @@ export class ModelRouter {
     }
 
     private createModel(tierConfig: ModelTierConfig): LanguageModel {
-        return createProviderModel(tierConfig.provider, tierConfig.modelId, tierConfig.apiKey, tierConfig.baseURL);
+        const model = createProviderModel(tierConfig.provider, tierConfig.modelId, tierConfig.apiKey, tierConfig.baseURL);
+        return createFallbackModel(model);
     }
 
     private findTierPricing(modelId: string): ModelPricing | undefined {

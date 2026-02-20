@@ -194,6 +194,14 @@ export interface ForkscoutConfig {
     /** Max tokens per response */
     maxTokens: number;
 
+    /**
+     * Ordered list of fallback providers to try when the primary provider fails
+     * with auth (401/403) or network errors. Each entry is a ProviderType string.
+     * The system will try them in order until one succeeds.
+     * Example: ["openrouter", "google", "anthropic"]
+     */
+    fallbackProviders: ProviderType[];
+
     /** Multi-model router tiers (resolved from active provider's preset) */
     router: RouterConfig;
 
@@ -258,6 +266,7 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
     baseURL: 'https://openrouter.ai/api/v1',
     temperature: 0.7,
     maxTokens: 2000,
+    fallbackProviders: [],
     router: PROVIDER_ROUTER_DEFAULTS.openrouter,
     budget: { dailyUSD: 5, monthlyUSD: 50, warningPct: 80 },
     agent: {
