@@ -17,6 +17,7 @@ import { registerDefaultTools } from './tools-setup';
 import { resolveApiKeyForProvider, getConfig } from '../config';
 import { buildStopConditions } from '../llm/stop-conditions';
 import { createTurnTracker, createPrepareStep, type TurnTracker } from '../llm/reasoning';
+import { runPreflight, effortToTier, formatPlanForPrompt, type PreflightResult } from '../llm/preflight';
 import type { SubAgentDeps, SubAgentProgressCallback } from '../tools/agent-tool';
 
 // Re-export all types from the barrel
@@ -64,6 +65,8 @@ export interface ChatAgentResult {
     systemPrompt: string;
     /** The tools given to this agent */
     tools: Record<string, any>;
+    /** Pre-flight analysis result */
+    preflight: PreflightResult;
 }
 /**
  * Forkscout Agent — AI SDK v6 powered agent with tools, memory, and MCP.
@@ -138,9 +141,9 @@ export class Agent {
         return this.router.getModel(purpose);
     }
 
-    /** Get the chat model — always balanced tier. The LLM decides what to do. */
-    getModelForChat(): { model: any; tier: string; modelId: string } {
-        return this.router.getModel('chat');
+    /** Get the chat model for a given tier (default: balanced). */
+    getModelForTier(tier: ModelTier = 'balanced'): { model: any; tier: string; modelId: string } {
+        return this.router.getModelByTier(tier);
     }
 
     /**
@@ -157,29 +160,36 @@ export class Agent {
     async createChatAgent(opts: ChatAgentOptions): Promise<ChatAgentResult> {
         const { userText, ctx, onStepFinish, onFinish } = opts;
 
-        // 1. Build enriched system prompt with memory + urgent alerts
+        // 1. Pre-flight: fast structured analysis for effort routing + plan
+        const preflight = await runPreflight(userText, this.router);
+        console.log(`[Preflight]: effort=${preflight.effort} needsTools=${preflight.needsTools} plan=[${preflight.plan.join(', ')}]`);
+
+        // 2. Build enriched system prompt with memory + urgent alerts
         let systemPrompt = await this.buildSystemPrompt(userText, ctx);
+        // Inject the pre-flight plan so the model knows the approach
+        const planInjection = formatPlanForPrompt(preflight);
+        if (planInjection) systemPrompt += planInjection;
         if (opts.systemPromptSuffix) {
             systemPrompt += '\n\n' + opts.systemPromptSuffix;
         }
 
-        // 2. Model selection — use override or balanced tier
+        // 3. Model selection — use override or effort-based tier routing
         let chatModel = opts.model;
-        let chatTier = opts.tier || 'balanced';
+        let chatTier = opts.tier || effortToTier(preflight.effort);
         let chatModelId = opts.modelId || '';
 
         if (!chatModel) {
-            const selection = this.getModelForChat();
+            const selection = this.getModelForTier(chatTier as ModelTier);
             chatModel = selection.model;
             chatTier = selection.tier;
             chatModelId = selection.modelId;
-            console.log(`[Router]: Using ${chatTier} tier (${chatModelId})`);
+            console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [effort: ${preflight.effort}]`);
         }
 
-        // 3. Tools — filtered by access level
+        // 4. Tools — filtered by access level
         const tools = this.getToolsForContext(ctx);
 
-        // 4. Turn tracker — handles context pruning + failure escalation
+        // 5. Turn tracker — handles context pruning + failure escalation
         const reasoningCtx = createTurnTracker(
             userText, chatTier as ModelTier,
             systemPrompt, this.router,
@@ -198,7 +208,7 @@ export class Agent {
             onFinish: onFinish ? (result: any) => { onFinish(result); } : undefined,
         });
 
-        return { agent, reasoningCtx, tier: chatTier, modelId: chatModelId, systemPrompt, tools };
+        return { agent, reasoningCtx, tier: chatTier, modelId: chatModelId, systemPrompt, tools, preflight };
     }
 
     getRouter(): ModelRouter {
