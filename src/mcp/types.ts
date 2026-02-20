@@ -4,10 +4,19 @@
  * @module mcp/types
  */
 
-import type { Tool } from '../tools/registry';
+import type { z } from 'zod';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+// ── Tool interface (moved from tools/registry.ts) ──────
+
+export interface Tool {
+    name: string;
+    description: string;
+    parameters: z.ZodObject<any>;
+    execute: (params: any) => Promise<any>;
+}
 
 // ── Server config ──────────────────────────────────────
 

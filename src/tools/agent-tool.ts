@@ -22,7 +22,15 @@ import { z } from 'zod';
 import type { ModelRouter } from '../llm/router';
 import { getConfig } from '../config';
 import { describeToolCall } from '../utils/describe-tool-call';
-import { coreTools } from './ai-tools';
+import { getSubAgentSystemPrompt } from '../agent/system-prompts';
+import type { ToolDeps } from './deps';
+
+/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
+export function register(deps: ToolDeps) {
+    const subAgentDeps: SubAgentDeps = { router: deps.router, toolSet: deps.toolSet };
+    deps.subAgentDeps = subAgentDeps;
+    return { spawn_agents: createSubAgentTool(subAgentDeps) };
+}
 
 /**
  * Tools that sub-agents must NEVER get — only recursion and self-modification are blocked.
@@ -55,6 +63,8 @@ export interface SubAgentDeps {
     router: ModelRouter;
     /** The full toolSet from the parent agent */
     toolSet: Record<string, any>;
+    /** Names of built-in (non-MCP) tools — set by tools-setup after registration */
+    builtinToolNames?: Set<string>;
     /**
      * Optional progress callback — set per-request by the channel handler.
      * When set, sub-agents send live step-by-step updates to the user.
@@ -223,172 +233,6 @@ function extractFromSteps(steps: any[]): string {
     return parts.join('\n\n');
 }
 
-// ── Sub-agent system prompt ────────────────────────────
-
-/**
- * Build a rich system prompt for sub-agents, adapted from best practices
- * in autonomous coding agents. Sub-agents aren't just coders — they research,
- * browse, analyze, run commands, and query memory.
- */
-function buildSubAgentPrompt(label: string, toolNames: string[], task: SubAgentTask): string {
-    const hasWebSearch = toolNames.includes('web_search');
-    const hasBrowse = toolNames.includes('browse_web');
-    const hasReadFile = toolNames.includes('read_file');
-    const hasRunCommand = toolNames.includes('run_command');
-    const hasThink = toolNames.includes('think');
-
-    // Memory — split into read vs write capabilities
-    const memTools = toolNames.filter(t => t.startsWith('forkscout-mem_'));
-    const hasMemoryRead = memTools.some(t => /^forkscout-mem_(search_|get_|check_|memory_stats)/.test(t));
-    const hasMemoryWrite = memTools.some(t => /^forkscout-mem_(add_|save_|update_|remove_|start_task|complete_task|abort_task|self_observe|consolidate)/.test(t));
-
-    // File mutation
-    const hasFileWrite = toolNames.includes('write_file') || toolNames.includes('append_file');
-    const hasFileDelete = toolNames.includes('delete_file');
-
-    // MCP tools — anything not in the known built-in set and not forkscout-mem_*
-    // Auto-derived from coreTools keys + known dynamic tool names to avoid manual drift
-    const KNOWN_BUILTINS = new Set([
-        ...Object.keys(coreTools),
-        // Dynamic tools registered at runtime (not in coreTools barrel)
-        'spawn_agents', 'self_rebuild',
-        'check_budget', 'set_model_tier', 'set_budget_limit',
-        'add_mcp_server', 'remove_mcp_server', 'list_mcp_servers',
-        'schedule_job', 'list_jobs', 'remove_job',
-        'channel_auth', 'send_telegram', 'telegram_set_typing',
-        'check_survival', 'check_battery', 'check_disk',
-        'grant_channel_access', 'revoke_channel_access', 'list_channel_users',
-        'send_telegram_message', 'send_telegram_photo', 'send_telegram_file',
-    ]);
-
-    const mcpToolNames = toolNames.filter(t => !KNOWN_BUILTINS.has(t) && !t.startsWith('forkscout-mem_'));
-    const hasMcpTools = mcpToolNames.length > 0;
-
-    const sections: string[] = [];
-
-    // ── Role & identity
-    sections.push(
-        `You are "${label}", an autonomous worker agent spawned to handle a specific subtask.`,
-        'You are precise, resourceful, and persistent. You work independently to deliver thorough results.',
-        'Your parent agent delegated this task to you — deliver results they can act on immediately.',
-    );
-
-    // ── Autonomy & persistence
-    sections.push(
-        '',
-        '## Execution',
-        'Keep going until the task is FULLY resolved. Do not stop at partial results or surface-level answers.',
-        'If a tool call fails, try an alternative approach. Do not give up after a single failure.',
-        'Don\'t make assumptions — gather context first, then act.',
-        'Never invent file paths, URLs, or facts. Verify with tools before claiming.',
-    );
-
-    // ── Reasoning guidance
-    sections.push(
-        '',
-        '## Reasoning',
-        'For SIMPLE lookups: Act directly, minimal overhead.',
-        'For COMPLEX tasks: Break down into steps, work through them systematically.',
-        'When uncertain: List options, pick the best one, proceed. Don\'t stall.',
-    );
-    if (hasThink) {
-        sections.push('Use the `think` tool to organize your reasoning before acting on complex problems.');
-    }
-
-    // ── Tool-specific guidance
-    sections.push('', '## Tools');
-    sections.push(`You have access to: ${toolNames.join(', ')}`);
-    sections.push('Call multiple tools in parallel when they are independent of each other.');
-
-    if (hasWebSearch && hasBrowse) {
-        sections.push(
-            'For research tasks: Start with `web_search` to find relevant sources, then `browse_web` to extract details from the best results.',
-            'Cross-reference multiple sources when accuracy matters. Don\'t rely on a single search result.',
-        );
-    } else if (hasWebSearch) {
-        sections.push('Use `web_search` for web research. Refine queries if initial results are not relevant.');
-    }
-
-    if (hasReadFile) {
-        sections.push(
-            'Read large file sections at once rather than many small reads.',
-            'If you need multiple file sections, read them in parallel.',
-        );
-    }
-
-    if (hasRunCommand) {
-        sections.push(
-            'Use `run_command` for shell operations. Run one command at a time and wait for output.',
-            'Prefer targeted commands (grep, find, head/tail) over reading entire files via shell.',
-        );
-    }
-
-    if (hasMemoryRead && hasMemoryWrite) {
-        sections.push(
-            'You have FULL access to the knowledge graph (read + write).',
-            'READ: Use `forkscout-mem_search_*` and `forkscout-mem_get_*` to retrieve stored knowledge. Check memory BEFORE searching the web.',
-            'WRITE: Use `forkscout-mem_save_knowledge` for reusable patterns and insights. Use `forkscout-mem_add_entity` for new entities with facts. Use `forkscout-mem_add_exchange` to record problem→solution pairs.',
-            'CORRECT: Use `forkscout-mem_update_entity` to replace wrong facts, or `forkscout-mem_remove_fact` to delete them. Never leave wrong facts in memory.',
-            'Always `forkscout-mem_search_entities` before creating new entities to avoid duplicates.',
-        );
-    } else if (hasMemoryRead) {
-        sections.push(
-            'You have READ access to the knowledge graph. Use `forkscout-mem_search_*` and `forkscout-mem_get_*` to retrieve stored knowledge.',
-            'Check memory BEFORE searching the web — the answer may already be stored.',
-        );
-    }
-
-    if (hasFileWrite || hasFileDelete) {
-        const ops = [hasFileWrite && 'write', hasFileDelete && 'delete'].filter(Boolean).join('/');
-        sections.push(
-            `You have ${ops.toUpperCase()} access to the filesystem. Make changes minimal, focused, and correct.`,
-            'Before writing: read the existing file to understand context. After writing: verify the change (read back, compile check, etc.).',
-            'Never overwrite entire files when you can make targeted edits.',
-        );
-    }
-
-    if (hasMcpTools) {
-        sections.push(
-            `You have access to external MCP tools: ${mcpToolNames.join(', ')}`,
-            'These tools connect to external services (documentation lookup, structured thinking, deep analysis).',
-            'Use them when your task benefits from specialized domain knowledge or structured reasoning.',
-        );
-    }
-
-    // ── Output requirements
-    sections.push(
-        '',
-        '## Output',
-        'CRITICAL: You MUST end with a clear text summary of your findings. NEVER end with just tool calls.',
-        'Structure your output for the parent agent to consume:',
-        '- Lead with the direct answer or key finding.',
-        '- Follow with supporting evidence, data, or details.',
-        '- Note any caveats, uncertainties, or items that need follow-up.',
-        'Be concise but complete. The parent agent needs actionable information, not filler.',
-        'Use Markdown formatting: headers for sections, bullets for lists, backticks for code/paths.',
-    );
-
-    // ── Constraints
-    sections.push(
-        '',
-        '## Constraints',
-        'Do NOT attempt to spawn further sub-agents.',
-        `You have a limited number of steps — be efficient, don't waste steps on redundant actions.`,
-        'If you cannot complete the task with available tools, explain exactly what\'s missing and what you tried.',
-    );
-
-    // ── Context injection
-    if (task.context) {
-        sections.push(
-            '',
-            '## Context from Parent Agent',
-            task.context,
-        );
-    }
-
-    return sections.join('\n');
-}
-
 /** Run a single sub-agent to completion. Returns structured result for accurate success/failure counting. */
 async function runSubAgent(deps: SubAgentDeps, task: SubAgentTask, batchSignal?: AbortSignal): Promise<SubAgentResult> {
     const label = task.label || 'worker';
@@ -402,7 +246,12 @@ async function runSubAgent(deps: SubAgentDeps, task: SubAgentTask, batchSignal?:
     const toolNames = Object.keys(subAgentTools);
     console.log(`[SubAgent:${label}]: Tools (${toolNames.length}): ${toolNames.join(', ')}`);
 
-    const systemPrompt = buildSubAgentPrompt(label, toolNames, task);
+    const systemPrompt = getSubAgentSystemPrompt({
+        label,
+        toolNames,
+        taskContext: task.context,
+        builtinToolNames: deps.builtinToolNames,
+    });
 
     // Per-agent tier override → config default → 'fast' fallback
     const subAgentCfg = getConfig().agent.subAgent;

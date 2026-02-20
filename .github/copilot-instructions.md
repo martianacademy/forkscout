@@ -11,13 +11,13 @@ At the start of every session or when switching context:
 
 ## Project Quick Reference
 
-- **Stack:** TypeScript (strict), Node.js, Vercel AI SDK v6, pnpm monorepo
+- **Stack:** TypeScript (strict), Node.js, Vercel AI SDK v6, pnpm
 - **Entrypoint:** `src/serve.ts` → `src/server.ts` → `src/agent/index.ts`
-- **Config:** `forkscout.config.json` (hot-reloaded via fs.watch)
+- **Config:** `forkscout.config.json` (hot-reloaded via fs.watch) — read for current ports, models, provider
 - **Env secrets:** `.env` — never commit (`OPENROUTER_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`)
-- **Memory MCP:** Docker on port 3211, tools prefixed `forkscout-mem_`
-- **Agent server:** Port 3210
-- **Branch:** `feat/plugin-system`
+- **Memory MCP:** Docker — check `docker-compose.yml` for port, tools prefixed `forkscout-mem_`
+- **Agent server:** Check `forkscout.config.json` agent.port
+- **Branch:** Run `git branch --show-current` (don't assume)
 - **Verify:** `npx tsc --noEmit` (must be 0 errors after every change)
 
 ## During Work

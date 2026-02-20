@@ -1,77 +1,13 @@
 /**
- * Forkscout Agent Engine
+ * Forkscout Agent Engine — entry point.
  *
- * Main entry point for the AI agent system with RAG and memory capabilities.
+ * This package is private. Only cli.ts and serve.ts consume this module.
+ * Import directly from source files for anything not listed here.
  */
 
 import { Agent, type AgentConfig } from './agent';
 
-// Export main classes
-export { Agent, type AgentConfig, type ChatContext, type ChatChannel, type ChatAgentOptions, type ChatAgentResult } from './agent';
-
-// Re-export key AI SDK v6 agent primitives for consumers
-export { ToolLoopAgent, createAgentUIStreamResponse, type InferAgentUIMessage } from 'ai';
-export { LLMClient, type LLMConfig } from './llm/client';
-export {
-    MemoryManager,
-    type MemoryConfig,
-    type ContextResult,
-    type SearchResult,
-    type Entity,
-    type EntityType,
-    type Relation,
-    type RelationType,
-    RELATION_TYPES,
-    SELF_ENTITY_NAME,
-    buildFailureObservation,
-} from './memory';
-export { generateTextWithRetry, streamTextWithRetry, generateTextQuiet, type RetryConfig } from './llm/retry';
-export { buildStopConditions, budgetExceeded, idleDetected, tokenLimitExceeded, repeatedToolFailure, type LoopControlConfig } from './llm/stop-conditions';
-export { createReasoningContext, createPrepareStep, getReasoningSummary, type ReasoningContext, type ToolFailureRecord } from './llm/reasoning';
-export { countTokens, truncateToTokens } from './utils/tokens';
-export {
-    coreTools,
-    createSchedulerTools,
-    createMcpTools,
-    createSurvivalTools,
-    createChannelAuthTools,
-    createBudgetTools,
-} from './tools/ai-tools';
-export {
-    ModelRouter,
-    createRouterFromEnv,
-    getModelPricing,
-    type ModelPurpose,
-    type ModelTier,
-    type ModelTierConfig,
-    type ModelPricing,
-    type RouterConfig,
-} from './llm/router';
-export {
-    loadConfig,
-    getConfig,
-    resolveApiKeyForProvider,
-    resolveApiUrlForProvider,
-    type ForkscoutConfig,
-    type ProviderType,
-    type TierConfig,
-    type BudgetConfig,
-    type AgentSettings,
-    type SearxngConfig,
-} from './config';
-export { BudgetTracker, type BudgetData, type BudgetLimits, type BudgetStatus, type SpendRecord } from './llm/budget';
-export { McpConnector, loadMcpConfig, type McpConfig, type McpServerConfig } from './mcp/connector';
-export {
-    createSurvivalMonitor,
-    type SurvivalMonitor,
-    type SurvivalStatus,
-    type SurvivalConfig,
-    type VitalSign,
-    type ThreatEvent,
-    type ThreatLevel,
-} from './survival';
-export { ChannelAuthStore, type ChannelGrant, type ChannelSession, type ChannelType } from './channels/auth';
-export { TelegramBridge, type TelegramBridgeConfig } from './channels/telegram';
+export { Agent, type AgentConfig } from './agent';
 export { startServer, type ServerOptions } from './server';
 
 /**

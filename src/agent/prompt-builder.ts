@@ -14,6 +14,7 @@ import { getCurrentTodos } from '../tools/todo-tool';
 export interface PromptCache {
     defaultPrompt: string | null;
     publicPrompt: string | null;
+    publicPromptToolHash: string | null;
 }
 
 /**
@@ -29,11 +30,26 @@ export async function buildSystemPrompt(
     router: ModelRouter,
     userQuery: string,
     ctx?: ChatContext,
+    guestTools?: Record<string, any>,
 ): Promise<string> {
     const isAdmin = ctx?.isAdmin ?? false;
-    const base = isAdmin
-        ? config.systemPrompt || (cache.defaultPrompt ??= getDefaultSystemPrompt())
-        : (cache.publicPrompt ??= getPublicSystemPrompt());
+
+    // Resolve the base prompt — admin uses full prompt, guest gets tool-aware public prompt
+    let base: string;
+    if (isAdmin) {
+        base = config.systemPrompt || (cache.defaultPrompt ??= getDefaultSystemPrompt());
+    } else {
+        // Guest tools may change at runtime (MCP add/remove), so rebuild when the set changes
+        const guestToolNames = Object.keys(guestTools ?? {}).sort();
+        const toolHash = guestToolNames.join(',');
+        if (cache.publicPrompt && cache.publicPromptToolHash === toolHash) {
+            base = cache.publicPrompt;
+        } else {
+            base = getPublicSystemPrompt(guestToolNames);
+            cache.publicPrompt = base;
+            cache.publicPromptToolHash = toolHash;
+        }
+    }
 
     // Channel/sender awareness
     let channelSection = '';

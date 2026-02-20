@@ -8,6 +8,12 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
+import type { ToolDeps } from './deps';
+
+/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
+export function register(_deps: ToolDeps) {
+    return createMoltbookTools();
+}
 
 const MOLTBOOK_API_BASE = 'https://www.moltbook.com/api/v1';
 

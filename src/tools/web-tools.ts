@@ -4,6 +4,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { getConfig } from '../config';
+import { withAccess } from './access';
 
 // ── Reusable Browser Pool ──────────────────────────────
 
@@ -43,7 +44,7 @@ async function createPage(viewport?: { width: number; height: number }): Promise
     return context.newPage();
 }
 
-export const webSearch = tool({
+export const webSearch = withAccess('guest', tool({
     description: 'Search the web for information. Uses SearXNG if available, otherwise falls back to scraping a search engine with Chromium.',
     inputSchema: z.object({
         query: z.string().describe('Search query'),
@@ -106,9 +107,9 @@ export const webSearch = tool({
             await page.context().close();
         }
     },
-});
+}));
 
-export const browseWeb = tool({
+export const browseWeb = withAccess('guest', tool({
     description: 'Browse a webpage and extract its text content. Use this to read articles, documentation, or any web page.',
     inputSchema: z.object({
         url: z.string().describe('URL to browse'),
@@ -152,7 +153,7 @@ export const browseWeb = tool({
             try { await page.context().close(); } catch { /* already closed */ }
         }
     },
-});
+}));
 
 export const browserScreenshot = tool({
     description: 'Take a screenshot of a webpage',

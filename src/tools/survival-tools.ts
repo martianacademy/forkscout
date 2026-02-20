@@ -4,6 +4,12 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { SurvivalMonitor } from '../survival';
+import type { ToolDeps } from './deps';
+
+/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
+export function register(deps: ToolDeps) {
+    return createSurvivalTools(deps.survival);
+}
 
 export function createSurvivalTools(survival: SurvivalMonitor) {
     return {

@@ -14,7 +14,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Tool } from '../tools/registry';
+import type { Tool } from './types';
 import type { McpServerConfig, McpConfig, ConnectedServer } from './types';
 import { jsonSchemaToZod } from './schema';
 

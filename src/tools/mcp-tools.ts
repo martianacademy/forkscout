@@ -5,6 +5,17 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { McpConnector, loadMcpConfig, saveMcpConfig, type McpServerConfig } from '../mcp/connector';
 import { enhanceToolSet } from './error-enhancer';
+import type { ToolDeps } from './deps';
+
+/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
+export function register(deps: ToolDeps) {
+    return createMcpTools(
+        deps.mcpConnector,
+        (newTools) => Object.assign(deps.toolSet, newTools),
+        (names) => { for (const n of names) delete deps.toolSet[n]; },
+        deps.mcpConfigPath,
+    );
+}
 
 export function createMcpTools(
     connector: McpConnector,

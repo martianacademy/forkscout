@@ -4,6 +4,12 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ModelRouter, ModelTier } from '../llm/router';
+import type { ToolDeps } from './deps';
+
+/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
+export function register(deps: ToolDeps) {
+    return createBudgetTools(deps.router);
+}
 
 /**
  * Create tools for budget monitoring and model tier management.

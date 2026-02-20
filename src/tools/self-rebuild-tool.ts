@@ -13,6 +13,12 @@ import { z } from 'zod';
 import { exec } from 'child_process';
 import { getShell } from '../utils/shell';
 import { AGENT_ROOT } from '../paths';
+import type { ToolDeps } from './deps';
+
+/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
+export function register(deps: ToolDeps) {
+    return { self_rebuild: createSelfRebuildTool(() => deps.memory.flush()) };
+}
 
 /** Exit code the watchdog recognizes as "rebuild & restart me" */
 const RELOAD_EXIT_CODE = 10;

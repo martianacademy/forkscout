@@ -19,6 +19,7 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
+import { withAccess } from './access';
 
 const todoItemSchema = z.object({
     id: z.number().describe('Unique numeric identifier (sequential, starting from 1)'),
@@ -50,8 +51,8 @@ function formatTodos(todos: TodoItem[]): string {
     for (const t of todos) {
         const icon =
             t.status === 'completed' ? '✅' :
-            t.status === 'in-progress' ? '🔄' :
-            '⬜';
+                t.status === 'in-progress' ? '🔄' :
+                    '⬜';
         const line = `${icon} ${t.id}. ${t.title}`;
         lines.push(t.notes ? `${line} — *${t.notes}*` : line);
     }
@@ -59,7 +60,7 @@ function formatTodos(todos: TodoItem[]): string {
     return lines.join('\n');
 }
 
-export const manageTodos = tool({
+export const manageTodos = withAccess('guest', tool({
     description:
         'Manage a structured todo list to plan and track multi-step work. ' +
         'Use this FREQUENTLY during complex tasks to: (1) break work into actionable steps, ' +
@@ -88,7 +89,7 @@ export const manageTodos = tool({
 
         return formatTodos(todos);
     },
-});
+}));
 
 /** Get current todos (for system prompt injection or status checks) */
 export function getCurrentTodos(): TodoItem[] {

@@ -4,14 +4,15 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { resolveAgentPath } from '../paths';
+import { withAccess } from './access';
 
-export const getCurrentDate = tool({
+export const getCurrentDate = withAccess('guest', tool({
     description: 'Returns the current date in YYYY-MM-DD format',
     inputSchema: z.object({}),
     execute: async () => new Date().toISOString().split('T')[0],
-});
+}));
 
-export const generatePresentation = tool({
+export const generatePresentation = withAccess('guest', tool({
     description: 'Generate a presentation in Marp Markdown format (easily convertible to PPTX/PDF). Specify title, array of slides (each with title/content), and output file path.',
     inputSchema: z.object({
         title: z.string().describe('Presentation title'),
@@ -37,4 +38,4 @@ export const generatePresentation = tool({
             return `\u274c generatePresentation failed: ${err instanceof Error ? err.message : String(err)}`;
         }
     },
-});
+}));

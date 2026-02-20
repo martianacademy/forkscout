@@ -4,6 +4,12 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ChannelAuthStore } from '../channels/auth';
+import type { ToolDeps } from './deps';
+
+/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
+export function register(deps: ToolDeps) {
+    return createChannelAuthTools(deps.channelAuth);
+}
 
 /**
  * Create tools for managing channel user authorization.

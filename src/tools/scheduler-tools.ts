@@ -4,6 +4,12 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { Scheduler } from '../scheduler';
+import type { ToolDeps } from './deps';
+
+/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
+export function register(deps: ToolDeps) {
+    return createSchedulerTools(deps.scheduler);
+}
 
 export function createSchedulerTools(scheduler: Scheduler) {
     return {

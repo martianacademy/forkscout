@@ -5,7 +5,8 @@ import { classifyComplexity, type ComplexityResult } from '../llm/complexity';
 import { MemoryManager } from '../memory';
 import type { Scheduler, CronAlert } from '../scheduler';
 import { McpConnector } from '../mcp/connector';
-import { createTelegramTools } from '../tools/ai-tools';
+import { createTelegramTools } from '../tools/telegram-tools';
+import { getToolAccess } from '../tools/access';
 import { resolve as resolvePath } from 'path';
 import { AGENT_ROOT } from '../paths';
 import { createSurvivalMonitor, type SurvivalMonitor } from '../survival';
@@ -90,8 +91,9 @@ export class Agent {
     private channelAuth: ChannelAuthStore;
     private telegramBridge: any = null;
     private router: ModelRouter;
-    private promptCache: PromptCache = { defaultPrompt: null, publicPrompt: null };
+    private promptCache: PromptCache = { defaultPrompt: null, publicPrompt: null, publicPromptToolHash: null };
     private subAgentDeps: SubAgentDeps | null = null;
+    private discoveredMcpServers: import('../tools/deps').McpDeclaration[] = [];
 
     constructor(config: AgentConfig) {
         this.config = config;
@@ -116,12 +118,14 @@ export class Agent {
         });
         this.channelAuth = new ChannelAuthStore(storagePath);
 
-        // Register tools
+        // Register tools (auto-discovered from src/tools/)
         if (config.autoRegisterDefaultTools !== false) {
-            this.subAgentDeps = registerDefaultTools(
+            const result = registerDefaultTools(
                 this.toolSet, this.scheduler, this.mcpConnector, this.mcpConfigPath,
                 this.memory, this.survival, this.channelAuth, this.router,
             );
+            this.subAgentDeps = result.subAgentDeps;
+            this.discoveredMcpServers = result.mcpServers;
         }
     }
 
@@ -281,7 +285,8 @@ export class Agent {
     // ── System Prompt ──────────────────────────────────
 
     async buildSystemPrompt(userQuery: string, ctx?: ChatContext): Promise<string> {
-        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, this.router, userQuery, ctx);
+        const guestTools = ctx?.isAdmin ? undefined : this.getToolsForContext(ctx);
+        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, this.router, userQuery, ctx, guestTools);
     }
 
     // ── Memory ─────────────────────────────────────────
@@ -310,7 +315,7 @@ export class Agent {
         await this.memory.init();
         await this.channelAuth.init();
         const mcpCfg = typeof this.config.mcpConfig === 'object' ? this.config.mcpConfig : undefined;
-        await connectMcpServers(mcpCfg, this.mcpConfigPath, this.mcpConnector, this.toolSet);
+        await connectMcpServers(mcpCfg, this.mcpConfigPath, this.mcpConnector, this.toolSet, this.discoveredMcpServers);
         await this.survival.start();
         this.state.running = true;
     }
@@ -335,10 +340,9 @@ export class Agent {
 
     getToolsForContext(ctx?: ChatContext): Record<string, any> {
         if (ctx?.isAdmin) return { ...this.toolSet };
-        const GUEST_TOOLS = new Set(['web_search', 'browse_web', 'get_current_date', 'think']);
         const filtered: Record<string, any> = {};
         for (const [name, t] of Object.entries(this.toolSet)) {
-            if (GUEST_TOOLS.has(name)) filtered[name] = t;
+            if (getToolAccess(t) === 'guest') filtered[name] = t;
         }
         return filtered;
     }

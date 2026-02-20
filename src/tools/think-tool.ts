@@ -18,8 +18,9 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
+import { withAccess } from './access';
 
-export const think = tool({
+export const think = withAccess('guest', tool({
     description: 'Use this tool to think through a problem step-by-step before acting. Your thoughts are private (not shown to the user) but returned as context for your next step. Use this when: (1) planning complex multi-step tasks, (2) evaluating multiple approaches, (3) checking assumptions before risky operations, (4) reasoning about errors before retrying.',
     inputSchema: z.object({
         thought: z.string().describe('Your internal reasoning, analysis, or plan. Be specific and structured.'),
@@ -29,4 +30,4 @@ export const think = tool({
         console.log(`[Think]: ${thought.slice(0, 200)}${thought.length > 200 ? '…' : ''}`);
         return `[Internal reasoning recorded. Continue with your plan.]`;
     },
-});
+}));

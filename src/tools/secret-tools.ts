@@ -3,6 +3,7 @@
  */
 import { tool } from 'ai';
 import { z } from 'zod';
+import { withAccess } from './access';
 import { readFile as fsReadFile } from 'fs/promises';
 import { basename } from 'path';
 import { getSecretNames, resolveTemplates, scrubSecrets } from './_helpers';
@@ -19,7 +20,7 @@ export const listSecrets = tool({
     },
 });
 
-export const httpRequest = tool({
+export const httpRequest = withAccess('guest', tool({
     description: `Make an HTTP request with automatic secret injection. Use {{SECRET_NAME}} placeholders in the URL, headers, or body — they will be resolved from environment variables server-side, so the actual secret NEVER enters the conversation or LLM context.
 
 Examples:
@@ -112,4 +113,4 @@ Use list_secrets first to discover available secret names.`,
             return { status: 0, error: scrubSecrets(msg) };
         }
     },
-});
+}));

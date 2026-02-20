@@ -1,16 +1,16 @@
 /**
- * Tool Registration — wires all default tool groups into the agent's toolSet.
+ * Tool Registration — auto-discovers and registers all tools.
+ *
+ * Everything is auto-discovered from src/tools/:
+ *   - Static tools (export const xxx = tool({...})) → immediate
+ *   - Factory tools (export function register(deps)) → called with ToolDeps
+ *   - MCP declarations (export const mcpServer) → stored for async init
+ *
+ * To add a new tool: create a file in src/tools/, export one of the above. Done.
  */
 
-import {
-    coreTools,
-    createSchedulerTools,
-    createMcpTools,
-    createSurvivalTools,
-    createChannelAuthTools,
-    createBudgetTools,
-    createSelfRebuildTool,
-} from '../tools/ai-tools';
+import { discoverAllTools } from '../tools/auto-loader';
+import type { ToolDeps, McpDeclaration } from '../tools/deps';
 import { enhanceToolSet } from '../tools/error-enhancer';
 import type { Scheduler } from '../scheduler';
 import type { McpConnector } from '../mcp/connector';
@@ -18,9 +18,14 @@ import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
 import type { ChannelAuthStore } from '../channels/auth';
 import type { ModelRouter } from '../llm/router';
-import { createSubAgentTool, type SubAgentDeps } from '../tools/agent-tool';
+import type { SubAgentDeps } from '../tools/agent-tool';
 
-/** Register all default tool groups into the toolSet. Returns the sub-agent deps ref for progress wiring. */
+export interface RegistrationResult {
+    subAgentDeps: SubAgentDeps;
+    mcpServers: McpDeclaration[];
+}
+
+/** Register all tools into the toolSet. Returns sub-agent deps + MCP declarations for async init. */
 export function registerDefaultTools(
     toolSet: Record<string, any>,
     scheduler: Scheduler,
@@ -30,49 +35,37 @@ export function registerDefaultTools(
     survival: SurvivalMonitor,
     channelAuth: ChannelAuthStore,
     router: ModelRouter,
-): SubAgentDeps {
-    // Core tools (file, shell, web, utility)
-    Object.assign(toolSet, coreTools);
+): RegistrationResult {
+    // Discover everything from src/tools/
+    const { staticTools, factories, mcpServers } = discoverAllTools();
 
-    // Scheduler tools (cron jobs)
-    Object.assign(toolSet, createSchedulerTools(scheduler));
+    // 1. Static tools — ready to use
+    Object.assign(toolSet, staticTools);
 
-    // MCP management tools (add/remove/list servers at runtime)
-    Object.assign(
-        toolSet,
-        createMcpTools(
-            mcpConnector,
-            (newTools) => Object.assign(toolSet, newTools),
-            (names) => {
-                for (const n of names) delete toolSet[n];
-            },
-            mcpConfigPath,
-        ),
-    );
+    // 2. Factory tools — call each register(deps) and merge returned tools
+    const deps: ToolDeps = {
+        scheduler, router, survival, channelAuth,
+        memory, mcpConnector, toolSet, mcpConfigPath,
+    };
 
-    // Memory tools — auto-bridged from the forkscout-memory MCP server
-    // via the MCP connector (prefixed as forkscout-memory_*).
-    // No local memory tools needed.
+    for (const { file, register } of factories) {
+        try {
+            const tools = register(deps);
+            if (tools && typeof tools === 'object') {
+                Object.assign(toolSet, tools);
+            }
+        } catch (err) {
+            console.error(`[Tools]: Factory register() failed in ${file}:`, err instanceof Error ? err.message : err);
+        }
+    }
 
-    // Survival tools (vitals, backup, status)
-    Object.assign(toolSet, createSurvivalTools(survival));
+    // 3. Snapshot built-in tool names BEFORE MCP bridge tools are loaded.
+    //    Used by sub-agent prompt to distinguish MCP tools from builtins.
+    const subAgentDeps: SubAgentDeps = deps.subAgentDeps ?? { router, toolSet };
+    subAgentDeps.builtinToolNames = new Set(Object.keys(toolSet));
 
-    // Channel authorization tools (list/grant/revoke channel users)
-    Object.assign(toolSet, createChannelAuthTools(channelAuth));
-
-    // Budget & model tier tools (check spending, switch models)
-    Object.assign(toolSet, createBudgetTools(router));
-
-    // Self-rebuild tool (build from source + graceful restart)
-    toolSet.self_rebuild = createSelfRebuildTool(() => memory.flush());
-
-    // Sub-agent tool (spawn 1-10 worker agents in parallel)
-    const subAgentDeps: SubAgentDeps = { router, toolSet };
-    toolSet.spawn_agents = createSubAgentTool(subAgentDeps);
-
-    // Wrap all tools with error enhancement — produces helpful diagnostics
-    // instead of raw stack traces when tools fail
+    // 4. Wrap all tools with error enhancement
     enhanceToolSet(toolSet);
 
-    return subAgentDeps;
+    return { subAgentDeps, mcpServers };
 }
