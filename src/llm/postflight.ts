@@ -16,6 +16,7 @@
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import type { ModelRouter } from './router';
+import { getConfig } from '../config';
 
 // ── Schema ─────────────────────────────────────────────
 
@@ -77,14 +78,15 @@ export async function runPostflight(
 
     try {
         const { model } = router.getModelByTier('fast');
+        const cfg = getConfig().agent;
 
         const { object } = await generateObject({
             model,
             schema: PostflightSchema,
             system: POSTFLIGHT_SYSTEM,
-            prompt: `User question: ${userMessage}\n\nAgent response: ${response.slice(0, 2000)}`,
+            prompt: `User question: ${userMessage}\n\nAgent response: ${response.slice(0, cfg.postflightMaxResponseChars)}`,
             temperature: 0,
-            maxRetries: 1,
+            maxRetries: cfg.flightMaxRetries,
         });
 
         return object;

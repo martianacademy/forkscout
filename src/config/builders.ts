@@ -158,6 +158,17 @@ export function buildAgentConfig(file: any): AgentSettings {
         maxToolRetries: file?.maxToolRetries ?? DEFAULTS.agent.maxToolRetries,
         contextPruneAfterStep: file?.contextPruneAfterStep ?? DEFAULTS.agent.contextPruneAfterStep,
         contextKeepLastMessages: file?.contextKeepLastMessages ?? DEFAULTS.agent.contextKeepLastMessages,
+        effortStepsQuick: file?.effortStepsQuick ?? DEFAULTS.agent.effortStepsQuick,
+        effortStepsModerate: file?.effortStepsModerate ?? DEFAULTS.agent.effortStepsModerate,
+        agentMaxRetries: file?.agentMaxRetries ?? DEFAULTS.agent.agentMaxRetries,
+        compressThreshold: file?.compressThreshold ?? DEFAULTS.agent.compressThreshold,
+        compressMaxSummary: file?.compressMaxSummary ?? DEFAULTS.agent.compressMaxSummary,
+        compressAfterStep: file?.compressAfterStep ?? DEFAULTS.agent.compressAfterStep,
+        compressInputMaxChars: file?.compressInputMaxChars ?? DEFAULTS.agent.compressInputMaxChars,
+        flightMaxRetries: file?.flightMaxRetries ?? DEFAULTS.agent.flightMaxRetries,
+        preflightMaxPlanSteps: file?.preflightMaxPlanSteps ?? DEFAULTS.agent.preflightMaxPlanSteps,
+        postflightMaxResponseChars: file?.postflightMaxResponseChars ?? DEFAULTS.agent.postflightMaxResponseChars,
+        resolveMinContentLength: file?.resolveMinContentLength ?? DEFAULTS.agent.resolveMinContentLength,
     };
 }
 

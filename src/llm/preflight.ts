@@ -21,6 +21,7 @@
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import type { ModelRouter, ModelTier } from './router';
+import { getConfig } from '../config';
 
 // ── Schema ─────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ export const PreflightSchema = z.object({
         'deep = multi-step research, debugging, coding across files, or spawning sub-agents.',
     ),
     needsTools: z.boolean().describe('Whether answering this requires calling any tools'),
-    plan: z.array(z.string()).max(5).describe(
+    plan: z.array(z.string()).max(10).describe(
         'Brief ordered steps to accomplish the task. Empty array if needsTools is false.',
     ),
     toolHints: z.array(
@@ -94,6 +95,7 @@ export async function runPreflight(
 ): Promise<PreflightResult> {
     try {
         const { model } = router.getModelByTier('fast');
+        const cfg = getConfig().agent;
 
         const { object } = await generateObject({
             model,
@@ -101,8 +103,13 @@ export async function runPreflight(
             system: PREFLIGHT_SYSTEM,
             prompt: userMessage,
             temperature: 0,
-            maxRetries: 1,
+            maxRetries: cfg.flightMaxRetries,
         });
+
+        // Enforce plan step limit from config
+        if (object.plan.length > cfg.preflightMaxPlanSteps) {
+            object.plan = object.plan.slice(0, cfg.preflightMaxPlanSteps);
+        }
 
         return object;
     } catch (error) {

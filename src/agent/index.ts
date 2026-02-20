@@ -197,7 +197,11 @@ export class Agent {
 
         // 5b. Adaptive step budget — effort-based maxSteps
         const agentCfg = getConfig().agent;
-        const effortMaxSteps: Record<string, number> = { quick: 3, moderate: 15, deep: agentCfg.maxSteps };
+        const effortMaxSteps: Record<string, number> = {
+            quick: agentCfg.effortStepsQuick,
+            moderate: agentCfg.effortStepsModerate,
+            deep: agentCfg.maxSteps,
+        };
         const adaptiveConfig: LoopControlConfig = {
             ...agentCfg,
             maxSteps: effortMaxSteps[preflight.effort] ?? agentCfg.maxSteps,
@@ -210,7 +214,7 @@ export class Agent {
             model: chatModel,
             instructions: systemPrompt,
             tools,
-            maxRetries: 3,
+            maxRetries: agentCfg.agentMaxRetries,
             stopWhen: buildStopConditions(adaptiveConfig),
             prepareStep: createPrepareStep(reasoningCtx),
             onStepFinish: onStepFinish ? (step: any) => { onStepFinish(step); } : undefined,

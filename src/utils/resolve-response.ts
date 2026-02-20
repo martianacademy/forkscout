@@ -13,6 +13,8 @@
  * @module utils/resolve-response
  */
 
+import { getConfig } from '../config';
+
 /** Tools whose output is structured enough to show the user directly. */
 const HIGH_VALUE_TOOLS = new Set([
     'spawn_agents',
@@ -61,7 +63,7 @@ export function resolveAgentResponse(
                 ? raw
                 : JSON.stringify(raw, null, 2);
 
-            if (!content || content.length < 20) continue;
+            if (!content || content.length < getConfig().agent.resolveMinContentLength) continue;
 
             // spawn_agents is already a well-formatted report — use immediately
             if (name === 'spawn_agents') return content;

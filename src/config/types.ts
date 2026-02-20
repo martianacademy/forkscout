@@ -138,6 +138,36 @@ export interface AgentSettings {
     contextPruneAfterStep: number;
     /** Number of recent messages to keep when pruning context */
     contextKeepLastMessages: number;
+
+    // ── Effort-based step budget ────────────────────
+    /** Max steps for quick-effort requests (greetings, factual) */
+    effortStepsQuick: number;
+    /** Max steps for moderate-effort requests (few tool calls) */
+    effortStepsModerate: number;
+    /** Max retries passed to ToolLoopAgent */
+    agentMaxRetries: number;
+
+    // ── Tool result compression ─────────────────────
+    /** Char threshold above which tool results get compressed */
+    compressThreshold: number;
+    /** Max length of compressed summaries */
+    compressMaxSummary: number;
+    /** Step number after which compression kicks in */
+    compressAfterStep: number;
+    /** Max chars of raw tool output sent to the compression model */
+    compressInputMaxChars: number;
+
+    // ── Pre-flight / Post-flight ────────────────────
+    /** Max retry attempts for preflight/postflight generateObject calls */
+    flightMaxRetries: number;
+    /** Max plan steps the preflight can suggest */
+    preflightMaxPlanSteps: number;
+    /** Max chars of agent response sent to the postflight evaluator */
+    postflightMaxResponseChars: number;
+
+    // ── Response resolution ─────────────────────────
+    /** Minimum char length to consider a tool result usable in response fallback */
+    resolveMinContentLength: number;
 }
 
 // ── SearXNG ────────────────────────────────────────────
@@ -274,6 +304,17 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         maxToolRetries: 4,
         contextPruneAfterStep: 8,
         contextKeepLastMessages: 6,
+        effortStepsQuick: 3,
+        effortStepsModerate: 15,
+        agentMaxRetries: 3,
+        compressThreshold: 2000,
+        compressMaxSummary: 800,
+        compressAfterStep: 2,
+        compressInputMaxChars: 6000,
+        flightMaxRetries: 1,
+        preflightMaxPlanSteps: 5,
+        postflightMaxResponseChars: 2000,
+        resolveMinContentLength: 20,
     },
     searxng: { url: 'http://localhost:8888' },
 };

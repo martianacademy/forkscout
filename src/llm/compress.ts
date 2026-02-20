@@ -13,14 +13,10 @@
 
 import { generateText } from 'ai';
 import type { ModelRouter } from './router';
+import { getConfig } from '../config';
 
-/** Tool results below this size pass through uncompressed */
-const COMPRESS_THRESHOLD = 2000;
-
-/** Maximum length of the compressed summary */
-const MAX_SUMMARY_LENGTH = 800;
-
-const COMPRESS_SYSTEM = `You are a tool-output summarizer. Given the raw output from a tool call, produce a concise summary that preserves all key information the AI agent needs to continue its task. Keep code snippets, error messages, file paths, URLs, and structured data intact. Drop boilerplate, repetition, and formatting noise. Be factual — never add information that isn't in the original.`;
+/** System prompt for the fast-tier compression model */
+const COMPRESS_SYSTEM = `You are a compression assistant. Summarize the tool output below into a concise version that preserves all key facts, data points, errors, and actionable information. Remove boilerplate, HTML tags, and repetition. Output ONLY the summary, no preamble.`;
 
 /**
  * Compress tool results in a step's messages if they exceed the threshold.
@@ -38,7 +34,8 @@ export async function compressLargeToolResults(
     stepNumber: number,
     router: ModelRouter,
 ): Promise<number> {
-    if (stepNumber < 2) return 0; // Don't compress on first steps
+    const cfg = getConfig().agent;
+    if (stepNumber < cfg.compressAfterStep) return 0;
 
     let compressed = 0;
     const { model } = router.getModelByTier('fast');
@@ -55,7 +52,7 @@ export async function compressLargeToolResults(
                 ? part.result
                 : JSON.stringify(part.result ?? '');
 
-            if (raw.length <= COMPRESS_THRESHOLD) continue;
+            if (raw.length <= cfg.compressThreshold) continue;
 
             // Already compressed in a previous step
             if (raw.startsWith('[Compressed]')) continue;
@@ -64,11 +61,11 @@ export async function compressLargeToolResults(
                 const { text: summary } = await generateText({
                     model,
                     system: COMPRESS_SYSTEM,
-                    prompt: `Tool: ${part.toolName || 'unknown'}\nOutput (${raw.length} chars):\n${raw.slice(0, 6000)}`,
+                    prompt: `Tool: ${part.toolName || 'unknown'}\nOutput (${raw.length} chars):\n${raw.slice(0, cfg.compressInputMaxChars)}`,
                     temperature: 0,
                 });
 
-                part.result = `[Compressed] ${summary.slice(0, MAX_SUMMARY_LENGTH)}`;
+                part.result = `[Compressed] ${summary.slice(0, cfg.compressMaxSummary)}`;
                 compressed++;
             } catch {
                 // Compression failed — leave original in place
