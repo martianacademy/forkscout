@@ -24,9 +24,12 @@ import type { ToolDeps, McpDeclaration } from './deps';
 /** Files that are utilities/infrastructure, not tool definitions */
 const SKIP_FILES = new Set([
     'access.ts', 'access.js',
+    'ai-tools.ts', 'ai-tools.js',          // legacy barrel re-export (deleted, dist/ artifact)
     'auto-loader.ts', 'auto-loader.js',
     'deps.ts', 'deps.js',
     'error-enhancer.ts', 'error-enhancer.js',
+    'memory-tools.ts', 'memory-tools.js',   // legacy (deleted, dist/ artifact)
+    'registry.ts', 'registry.js',           // legacy (deleted, dist/ artifact)
 ]);
 
 /** Result of scanning the tools directory */
@@ -82,6 +85,8 @@ export function discoverAllTools(): DiscoveryResult {
         if (f.startsWith('_')) return false;
         if (SKIP_FILES.has(f)) return false;
         if (!f.endsWith('.ts') && !f.endsWith('.js')) return false;
+        if (f.endsWith('.d.ts') || f.endsWith('.d.ts.map')) return false; // skip type declarations
+        if (f.endsWith('.js.map')) return false;                          // skip source maps
         if (f.includes('.test.') || f.includes('.spec.')) return false;
         return true;
     });
