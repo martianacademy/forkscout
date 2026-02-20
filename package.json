@@ -23,8 +23,8 @@
         "prompt": "tsx -e \"const { getDefaultSystemPrompt } = require('./src/agent/system-prompts'); console.log(getDefaultSystemPrompt())\"",
         "prompt:guest": "tsx -e \"const { getPublicSystemPrompt } = require('./src/agent/system-prompts'); console.log(getPublicSystemPrompt())\"",
         "prompt:agent": "tsx -e \"const { getSubAgentSystemPrompt } = require('./src/agent/system-prompts'); console.log(getSubAgentSystemPrompt({ label: 'worker-1', toolNames: ['web_search','browse_web','read_file','run_command','think'] }))\"",
-        "prompt:types": "tsx -e \"const { getPromptTypes } = require('./src/agent/system-prompts'); console.log(getPromptTypes().join(', '))\"",
-        "prompt:custom": "tsx -e \"const t = process.argv[1] || 'admin'; const { getPrompt } = require('./src/agent/system-prompts'); console.log(getPrompt(t))\"",
+        "prompt:types": "tsx -e \"const { getPromptTypes } = require('./src/agent/system-prompts'); getPromptTypes().then(t => console.log(t.join(', ')))\"",
+        "prompt:custom": "tsx -e \"const t = process.argv[1] || 'admin'; const { getPrompt } = require('./src/agent/system-prompts'); getPrompt(t).then(p => console.log(p))\"",
         "test": "vitest"
     },
     "dependencies": {

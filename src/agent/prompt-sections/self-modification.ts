@@ -74,17 +74,34 @@ EDITING YOUR OWN PROMPT:
   To REORDER:         change the order number → self_rebuild. (1 file)
 
 CREATING A NEW PROMPT TYPE (like admin, guest, sub-agent):
-  1. Create section files with 'export const promptType = "my-type"' (or use prefix convention 'my-type-*.ts')
-  2. Optionally add a context interface to prompt-sections/types.ts
-  3. Access via getPrompt('my-type', ctx) from system-prompts.ts — already works, no wiring needed
-  4. self_rebuild
 
-  Example — creating a "moderator" personality:
-    moderator-role.ts      → export const promptType = 'moderator'; export const order = 1;
-    moderator-rules.ts     → export const promptType = 'moderator'; export const order = 2;
-    moderator-tone.ts      → export const promptType = 'moderator'; export const order = 3;
-  These auto-group into a 'moderator' type. Call getPrompt('moderator') to compose.
-  Use getPromptTypes() to list all discovered types.
+  METHOD 1 — Data-driven personality (recommended, NO rebuild needed):
+    Use the manage_personality tool:
+      manage_personality({ action: 'create', name: 'moderator', description: '...', sections: [
+        { title: 'Role', order: 1, content: 'You are a content moderator...' },
+        { title: 'Rules', order: 2, content: 'Always be fair...' },
+        { title: 'Tone', order: 3, content: 'Speak calmly...' },
+      ]})
+    Stored in .forkscout/personalities/moderator.json — takes effect immediately.
+    Use getPrompt('moderator') to compose. No rebuild. No code. Instant.
+
+    manage_personality actions:
+      create  — new personality with name, description, and sections
+      list    — show all created personalities
+      get     — full details of a personality
+      update  — modify sections (match by title, empty content removes)
+      delete  — remove a personality
+      preview — see the composed prompt text
+
+  METHOD 2 — Code-based sections (for advanced logic, context-aware sections):
+    1. Create section files with 'export const promptType = "my-type"' (or prefix 'my-type-*.ts')
+    2. Optionally add a context interface to prompt-sections/types.ts
+    3. Access via getPrompt('my-type', ctx) — already works, no wiring needed
+    4. self_rebuild (required because it's TypeScript code)
+
+  When to use which:
+    • Data-driven (Method 1) — static persona text, tone, rules, instructions. 90% of cases.
+    • Code-based (Method 2) — sections that need runtime context (like guest tools list, sub-agent labels).
 
   You NEVER need to edit system-prompts.ts or loader.ts — everything is auto-discovered.
 
