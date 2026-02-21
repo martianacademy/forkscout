@@ -174,6 +174,7 @@ export function resolveProvider(raw: string): ProviderType {
         case 'anthropic': return 'anthropic';
         case 'google': case 'google-ai': case 'gemini': return 'google';
         case 'ollama': return 'ollama';
+        case 'github': case 'github-models': return 'github';
         case 'openai-compatible': case 'custom': return 'openai-compatible';
         default: return 'openrouter';
     }
@@ -189,6 +190,7 @@ export function resolveProviderUrl(provider: ProviderType): string | undefined {
         openai: 'OPENAI_API_URL',
         anthropic: 'ANTHROPIC_API_URL',
         google: 'GOOGLE_API_URL',
+        github: 'GITHUB_API_URL',
         'openai-compatible': 'OPEN_API_COMPATIBLE_API_URL',
     };
     const envKey = envUrlMap[provider];

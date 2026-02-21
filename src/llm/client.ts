@@ -18,7 +18,7 @@ function openRouterHeaders() {
  * LLM Configuration
  */
 export interface LLMConfig {
-    provider: 'openai' | 'ollama' | 'anthropic' | 'google' | 'openrouter' | 'openai-compatible' | 'custom';
+    provider: 'openai' | 'ollama' | 'anthropic' | 'google' | 'github' | 'openrouter' | 'openai-compatible' | 'custom';
     model: string;
     baseURL?: string;
     apiKey?: string;
@@ -97,6 +97,14 @@ export class LLMClient {
                 return p.chat(this.config.model);
             }
 
+            case 'github': {
+                const p = createOpenAI({
+                    baseURL: this.config.baseURL || getConfig().secrets.githubApiUrl || 'https://models.inference.ai.azure.com',
+                    apiKey: this.config.apiKey || getConfig().secrets.githubApiKey || '',
+                });
+                return p.chat(this.config.model);
+            }
+
             case 'openai-compatible': {
                 const p = createOpenAI({
                     baseURL: this.config.baseURL || getConfig().secrets.openApiCompatibleApiUrl || 'https://api.openai.com/v1',
@@ -159,6 +167,18 @@ export class LLMClient {
                     apiKey: this.config.apiKey || getConfig().secrets.openaiApiKey || '',
                 });
                 return p.embedding(embeddingModelId.replace('openai/', ''));
+            }
+
+            case 'github': {
+                try {
+                    const p = createOpenAI({
+                        baseURL: this.config.baseURL || getConfig().secrets.githubApiUrl || 'https://models.inference.ai.azure.com',
+                        apiKey: this.config.apiKey || getConfig().secrets.githubApiKey || '',
+                    });
+                    return p.embedding(embeddingModelId.replace('openai/', ''));
+                } catch {
+                    return undefined;
+                }
             }
 
             case 'openai-compatible': {

@@ -9,7 +9,7 @@
 
 // ── Provider types ─────────────────────────────────────
 
-export type ProviderType = 'openrouter' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'openai-compatible';
+export type ProviderType = 'openrouter' | 'openai' | 'anthropic' | 'google' | 'github' | 'ollama' | 'openai-compatible';
 
 // ── Tier & Router ──────────────────────────────────────
 
@@ -207,6 +207,8 @@ export interface ForkscoutConfig {
         anthropicApiUrl: string;
         googleApiKey: string;
         googleApiUrl: string;
+        githubApiKey: string;
+        githubApiUrl: string;
         openApiCompatibleApiKey: string;
         openApiCompatibleApiUrl: string;
         adminSecret: string;
@@ -237,6 +239,11 @@ export const PROVIDER_ROUTER_DEFAULTS: Record<string, RouterConfig> = {
         fast: { model: 'gpt-4.1-mini', provider: 'openai' },
         balanced: { model: 'gpt-4.1', provider: 'openai' },
         powerful: { model: 'o3', provider: 'openai' },
+    },
+    github: {
+        fast: { model: 'gpt-4o-mini', provider: 'github' },
+        balanced: { model: 'gpt-4o', provider: 'github' },
+        powerful: { model: 'o1', provider: 'github' },
     },
 };
 
@@ -316,5 +323,6 @@ export const PROVIDER_URLS: Record<string, string> = {
     openai: 'https://api.openai.com/v1',
     anthropic: 'https://api.anthropic.com/v1',
     google: 'https://generativelanguage.googleapis.com/v1beta',
+    github: 'https://models.inference.ai.azure.com',
     ollama: 'http://localhost:11434/v1',
 };

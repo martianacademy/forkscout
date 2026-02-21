@@ -64,7 +64,7 @@ export function loadConfig(force = false): ForkscoutConfig {
         || DEFAULTS.model;
 
     // Parse fallback providers — filter to valid ProviderType values
-    const validProviders: Set<string> = new Set(['openrouter', 'openai', 'anthropic', 'google', 'ollama', 'openai-compatible']);
+    const validProviders: Set<string> = new Set(['openrouter', 'openai', 'anthropic', 'google', 'github', 'ollama', 'openai-compatible']);
     const fallbackProviders: ProviderType[] = Array.isArray(fileConfig.fallbackProviders)
         ? (fileConfig.fallbackProviders as string[])
             .filter((p): p is ProviderType => validProviders.has(p) && p !== provider)
@@ -94,6 +94,8 @@ export function loadConfig(force = false): ForkscoutConfig {
             anthropicApiUrl: env('ANTHROPIC_API_URL') || PROVIDER_URLS.anthropic,
             googleApiKey: env('GOOGLE_API_KEY') || '',
             googleApiUrl: env('GOOGLE_API_URL') || PROVIDER_URLS.google,
+            githubApiKey: env('GITHUB_API_KEY') || '',
+            githubApiUrl: env('GITHUB_API_URL') || PROVIDER_URLS.github,
             openApiCompatibleApiKey: env('OPEN_API_COMPATIBLE_API_KEY') || '',
             openApiCompatibleApiUrl: env('OPEN_API_COMPATIBLE_API_URL') || '',
             adminSecret: env('ADMIN_SECRET') || '',
@@ -124,6 +126,7 @@ export function resolveApiKeyForProvider(provider: ProviderType, cfg?: Forkscout
         openai: c.secrets.openaiApiKey,
         anthropic: c.secrets.anthropicApiKey,
         google: c.secrets.googleApiKey,
+        github: c.secrets.githubApiKey,
         ollama: '',
         'openai-compatible': c.secrets.openApiCompatibleApiKey,
     };
@@ -152,6 +155,7 @@ export function resolveApiUrlForProvider(provider: ProviderType, cfg?: Forkscout
         openai: c.secrets.openaiApiUrl,
         anthropic: c.secrets.anthropicApiUrl,
         google: c.secrets.googleApiUrl,
+        github: c.secrets.githubApiUrl,
         ollama: PROVIDER_URLS.ollama,
         'openai-compatible': c.secrets.openApiCompatibleApiUrl,
     };

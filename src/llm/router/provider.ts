@@ -27,6 +27,7 @@ import { KNOWN_PRICES } from './types';
 const PROVIDER_BASE_URLS: Record<ProviderType, string> = {
     openrouter: 'https://openrouter.ai/api/v1',
     openai: 'https://api.openai.com/v1',
+    github: 'https://models.inference.ai.azure.com',
     ollama: 'http://localhost:11434/v1',
     anthropic: '',  // Anthropic SDK handles its own URL
     google: '',     // Google SDK handles its own URL
@@ -67,6 +68,7 @@ export function createProviderModel(
 
         case 'openrouter':
         case 'openai':
+        case 'github':
         case 'ollama':
         case 'openai-compatible':
         default: {
