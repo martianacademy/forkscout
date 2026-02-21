@@ -293,7 +293,7 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         maxToolRetries: 6,
         contextPruneAfterStep: 8,
         contextKeepLastMessages: 6,
-        effortStepsQuick: 3,
+        effortStepsQuick: 10,
         effortStepsModerate: 15,
         agentMaxRetries: 3,
         compressThreshold: 2000,

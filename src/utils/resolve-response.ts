@@ -1,12 +1,14 @@
 /**
  * Response Resolution — extract the agent's response from ToolLoopAgent output.
  *
- * With toolChoice:'required' on every step, the model must always call a tool.
- * The only valid "I'm done" signal is calling deliver_answer. If that didn't
- * happen, the turn is incomplete — return empty and let postflight retry.
+ * Priority chain:
+ *   1. deliver_answer tool result (canonical "I'm done" signal)
+ *   2. spawn_agents output (already user-formatted report)
+ *   3. result.text (model produced final text — happens when model ignores toolChoice:'required')
  *
- * Special case: spawn_agents output is already a user-formatted report,
- * so it's accepted as a fallback.
+ * Raw tool output (read_file, run_command, etc.) is NEVER used as a response.
+ * If nothing usable is found, returns empty string → postflight will detect
+ * the empty response.
  *
  * @module utils/resolve-response
  */
@@ -14,7 +16,7 @@
 /**
  * Resolve a final response from ToolLoopAgent generate() output.
  *
- * @param text    - `result.text` from generate() (usually empty with toolChoice:'required')
+ * @param text    - `result.text` from generate()
  * @param steps   - `result.steps` from generate()
  * @returns Non-empty string if a valid response was found, empty string otherwise.
  */
@@ -52,7 +54,11 @@ export function resolveAgentResponse(
         }
     }
 
-    // No deliver_answer, no spawn_agents → incomplete turn.
-    // Postflight quality gate will detect the empty response and retry.
+    // 3. result.text — model produced final text output.
+    //    This happens when the model ignores toolChoice:'required' and returns
+    //    text instead of calling deliver_answer. The text is often the actual answer.
+    if (text?.trim()) return text.trim();
+
+    // Nothing usable found.
     return '';
 }
