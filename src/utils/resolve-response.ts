@@ -15,14 +15,16 @@
 
 import { getConfig } from '../config';
 
-/** Tools whose output is structured enough to show the user directly. */
+/**
+ * Tools whose output is structured enough to show the user directly.
+ * NOTE: run_command and read_file are deliberately excluded — their raw
+ * output ({stdout,stderr,exitCode} / file content) is data for the agent
+ * to process, NOT a user-ready response.
+ */
 const HIGH_VALUE_TOOLS = new Set([
     'spawn_agents',
     'web_search',
     'browse_web',
-    'read_file',
-    'run_command',
-    'http_request',
 ]);
 
 /**

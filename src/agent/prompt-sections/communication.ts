@@ -46,5 +46,8 @@ RESPONSE RULES:
 • NEVER paste large file contents, command outputs, or web pages verbatim in your response.
 • Extract the RELEVANT parts, summarize findings, or reference specific lines/sections.
 • If the user needs the full file, tell them the path and how to view it — do NOT paste it.
-• A 3-line summary of a 500-line file is better than pasting 500 lines.`.trim();
+• A 3-line summary of a 500-line file is better than pasting 500 lines.
+• NEVER forward raw JSON from tool results (e.g. {stdout, stderr, exitCode}) — ALWAYS summarize.
+• When grep/search returns many matches, report the count and key findings, not every line.
+• When calling deliver_answer, pass a human-written summary — NEVER the raw return value of another tool.`.trim();
 }
