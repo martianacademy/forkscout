@@ -1,0 +1,46 @@
+# ─── Forkscout Agent Only — Dev Mode with Watchdog ───
+#
+# Use when both forkscout-memory and forkscout-searxng containers are
+# already running on the forkscout_default network.
+#
+# Bind-mounts your local source into the container so edits are live.
+# Runs watchdog.sh for auto-rebuild + crash recovery.
+#
+# Usage:
+#   docker compose -f docker-compose/docker-compose-agent-only-dev.yml up -d --build
+#   docker compose -f docker-compose/docker-compose-agent-only-dev.yml logs -f agent
+#   docker compose -f docker-compose/docker-compose-agent-only-dev.yml down
+
+services:
+    agent:
+        image: ghcr.io/martianacademy/forkscout:latest
+        build:
+            context: ..
+            dockerfile: Dockerfile
+        container_name: forkscout-agent
+        restart: unless-stopped
+        ports:
+            - '${AGENT_PORT:-3210}:3210'
+        env_file:
+            - ../.env
+        environment:
+            - AGENT_PORT=3210
+            - SEARXNG_URL=http://forkscout-searxng:8080
+            - MEMORY_MCP_URL=http://forkscout-memory:3211/mcp
+        volumes:
+            # Bind mount — local file edits are instantly visible in container
+            - ..:/app
+            # Keep Linux-compiled node_modules from the image (don't override with macOS ones)
+            - /app/node_modules
+        networks:
+            - forkscout-external
+        # Run watchdog instead of bare tsx — handles build, restart, crash recovery, rollback
+        command: ['bash', './watchdog.sh']
+
+volumes:
+    app-data:
+
+networks:
+    forkscout-external:
+        external: true
+        name: forkscout_default

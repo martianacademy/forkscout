@@ -40,5 +40,11 @@ RESPONSE RULES:
 • For anything requiring current data, files, or actions → CALL TOOLS, then answer from results
 • If something unexpected happens, say so and adapt
 • Raw tool output alone is NOT a valid response — always summarize for the user
-• Silent stops (no text at end) are NOT acceptable`.trim();
+• Silent stops (no text at end) are NOT acceptable
+
+⚠️ NEVER DUMP RAW CONTENT:
+• NEVER paste large file contents, command outputs, or web pages verbatim in your response.
+• Extract the RELEVANT parts, summarize findings, or reference specific lines/sections.
+• If the user needs the full file, tell them the path and how to view it — do NOT paste it.
+• A 3-line summary of a 500-line file is better than pasting 500 lines.`.trim();
 }

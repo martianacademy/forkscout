@@ -70,7 +70,7 @@ services:
             # Share memory.json with the agent via a named volume
             - memory-data:/data
         healthcheck:
-            test: ['CMD', 'wget', '-qO-', 'http://localhost:3211/health']
+            test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3211/health']
             interval: 15s
             timeout: 5s
             start_period: 10s

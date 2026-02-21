@@ -1,6 +1,6 @@
 {
     "$schema": "./packages/agent/src/config.schema.json",
-    "provider": "openai-compatible",
+    "provider": "openrouter",
     "baseURL": "https://api.aimlapi.com/v1",
     "fallbackProviders": [
         "openrouter",

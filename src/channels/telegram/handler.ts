@@ -350,6 +350,12 @@ export async function handleTelegramUpdate(
             }
 
             if (finalText) {
+                // Safety guard: truncate absurdly long responses (e.g. raw file dumps)
+                const MAX_RESPONSE_CHARS = 4000;
+                if (finalText.length > MAX_RESPONSE_CHARS) {
+                    console.warn(`[Telegram]: Response too long (${finalText.length} chars) — truncating to ${MAX_RESPONSE_CHARS}`);
+                    finalText = finalText.slice(0, MAX_RESPONSE_CHARS) + '\n\n[… response truncated — full output was too large]';
+                }
                 await sendMessage(token, chatId, finalText);
                 console.log(`[Telegram/Agent → ${who}]: ${finalText.slice(0, 200)}${finalText.length > 200 ? '…' : ''}`);
             } else if (sentFragments.length > 0) {

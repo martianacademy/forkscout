@@ -322,7 +322,7 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         agentMaxRetries: 3,
         compressThreshold: 2000,
         compressMaxSummary: 800,
-        compressAfterStep: 2,
+        compressAfterStep: 0,
         compressInputMaxChars: 6000,
         flightMaxRetries: 1,
         plannerMaxTasks: 8,
