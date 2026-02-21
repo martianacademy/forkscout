@@ -64,12 +64,21 @@ At the start of every session or when switching context:
 
 ### Mandatory writes:
 
-- Bug fix → `add_exchange` (problem + root cause + solution)
-- Code change → `add_entity` for modified files with updated facts
+- Bug fix → `add_exchange` (problem + root cause + solution) — ONLY for non-obvious root causes
+- Code change → `add_entity` for modified files — describe WHAT it does and WHY, not what changed today
 - Architecture decision → `save_knowledge` with rationale
-- Pattern discovered → `save_knowledge` (category: debugging/architecture)
+- Pattern discovered → `save_knowledge` (category: debugging/architecture/patterns/deployment/preferences)
 - Task done → `complete_task` with summary
 - Session learnings → `self_observe` with what worked and what didn't
+
+### Write quality (intelligence, not noise):
+
+- **Save conclusions, not observations.** "MCP tools need try-catch or model gives up" YES. "search_entities failed at 3pm" NO.
+- **Before saving, ask: "Would this help me 3 months from now?"** If no, skip it.
+- **One consolidated save_knowledge > five scattered exchanges.** Batch related learnings.
+- **search_knowledge before saving** — if an entry already exists on this topic, extend it, don't duplicate.
+- **Importance scores:** 0.9 = confirmed fix, 0.7 = reliable pattern, 0.5 = hypothesis.
+- **Prefer "where to check" over "what the value is"** — values change, sources of truth don't.
 
 **If you don't save it, it never happened.** The next session starts from zero on any unsaved topic.
 

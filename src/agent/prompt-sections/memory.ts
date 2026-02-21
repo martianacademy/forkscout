@@ -66,9 +66,28 @@ MAINTENANCE:
   get_stale_entities — find stale entities
   memory_stats — overall statistics
 
-RULES:
+WHAT TO SAVE (intelligence, not noise):
+• Save CONCLUSIONS, not observations. "readFile needs 15K cap because models dump full content" YES. "readFile returned 500 lines" NO.
+• Before saving, ask: "Would this help me 3 months from now?" If no, don't save.
+• One save_knowledge entry consolidating related learnings > five scattered add_exchange calls.
+• Consolidate after big sessions — merge redundant entries with consolidate_memory.
+
+WHAT GOES WHERE:
+• save_knowledge — Reusable patterns, debugging playbooks, architecture decisions. HIGHEST VALUE.
+  Categories: debugging | architecture | preferences | patterns | deployment
+• add_exchange — Bug report → root cause → fix pairs. ONLY when the cause was non-obvious.
+  Skip for trivial fixes (typos, missing imports). Save for "Docker IPv6 healthcheck failure on Alpine".
+  Importance: 0.9 = confirmed fix, 0.7 = pattern, 0.5 = hypothesis.
+• add_entity — File-level facts that describe WHAT it does and WHY, not what changed today.
+  Update when a file's role/behavior changes, not on every edit.
+• self_observe — Behavioral patterns that improve YOUR performance. "Checking docker ps before debugging MCP saves time" — not "I ran docker ps".
+• start_task — ONLY for multi-step work spanning sessions. Not for 2-minute fixes.
+
+QUALITY RULES:
 • Always search before creating entities (avoid duplicates)
-• Always add_exchange after fixing bugs (problem + root cause + solution)
+• Always add_exchange after fixing non-trivial bugs (problem + root cause + solution)
 • Never fabricate personal details — ask then store
-• save_knowledge for durable patterns and architecture decisions`.trim();
+• Prefer "where to check" over "what the value is" — values change, sources don't
+• When multiple related things are learned, batch into ONE save_knowledge, not many small saves
+• If a knowledge entry already exists on this topic (search_knowledge first), update or extend it — don't create a duplicate`.trim();
 }
