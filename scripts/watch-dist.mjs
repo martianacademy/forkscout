@@ -149,11 +149,23 @@ function stopChild() {
             resolve();
         });
         // Kill entire process group (npx → tsx → node) not just the direct child
-        try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
+        try {
+            process.kill(-child.pid, 'SIGTERM');
+        } catch {
+            child.kill('SIGTERM');
+        }
         // Force kill after 5s
         setTimeout(() => {
             if (child) {
-                try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already dead */ } }
+                try {
+                    process.kill(-child.pid, 'SIGKILL');
+                } catch {
+                    try {
+                        child.kill('SIGKILL');
+                    } catch {
+                        /* already dead */
+                    }
+                }
             }
             // Resolve even if SIGKILL — don't hang forever
             setTimeout(() => {

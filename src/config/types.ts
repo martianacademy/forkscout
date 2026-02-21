@@ -296,7 +296,7 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         failureEscalationThreshold: 3,
         browserIdleMs: 60_000,
         activityLogMaxBytes: 5 * 1024 * 1024,
-        idleStepThreshold: 3,
+        idleStepThreshold: 5,
         maxToolRetries: 6,
         contextPruneAfterStep: 8,
         contextKeepLastMessages: 6,

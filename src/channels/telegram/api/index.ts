@@ -12,6 +12,7 @@ export { downloadFile } from './download-file';
 export { sendMessage } from './send-message';
 export { sanitizeTelegramMarkdown } from './sanitize-markdown';
 export { sendPhoto } from './send-photo';
+export { sendVoice } from './send-voice';
 export { sendDocument } from './send-document';
 export { sendTyping } from './send-typing';
 export { createTypingGuard, type TypingGuard } from './typing-guard';

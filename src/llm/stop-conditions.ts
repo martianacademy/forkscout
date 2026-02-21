@@ -16,28 +16,40 @@ import { stepCountIs, hasToolCall, type StopCondition } from 'ai';
 // ── Idle-detection stop condition ──────────────────────
 
 /**
- * Stop the loop if the model produces N consecutive steps with no tool calls.
- *
- * This catches the "model writes tool calls as text instead of invoking them"
- * failure mode — if the model isn't calling tools for several steps in a row,
- * it's likely stuck in a text-generation loop.
- *
- * @param threshold - Number of consecutive no-tool-call steps before stopping (default: 2)
+ * Tools that represent internal reasoning/planning progress.
+ * Steps calling ONLY these tools are "thinking" — not idle, but not
+ * doing external work either. We allow some thinking steps before
+ * considering the model stuck.
  */
-export function idleDetected(threshold = 2): StopCondition<any> {
+const LOGIC_TOOLS = new Set(['manage_todos', 'think', 'deliver_answer']);
+
+/**
+ * Stop the loop if the model produces N consecutive steps with no meaningful tool calls.
+ *
+ * A step counts as "active" if it calls at least one tool that is NOT purely
+ * internal logic (manage_todos, think). Steps with only logic tools or no
+ * tool calls at all are "idle." This prevents the model from endlessly
+ * planning without acting, while still allowing a few reasoning steps.
+ *
+ * @param threshold - Number of consecutive idle steps before stopping (default: 5)
+ */
+export function idleDetected(threshold = 5): StopCondition<any> {
     return ({ steps }) => {
         if (steps.length < threshold) return false;
 
-        // Check last N steps for tool calls
+        // Check last N steps for meaningful (non-logic-only) tool calls
         const tail = steps.slice(-threshold);
-        const allIdle = tail.every(
-            step => !step.toolCalls || step.toolCalls.length === 0,
-        );
+        const allIdle = tail.every(step => {
+            const calls = step.toolCalls || [];
+            if (calls.length === 0) return true; // no tool calls at all → idle
+            // If every tool call is a logic tool, still counts as idle
+            return calls.every((tc: any) => LOGIC_TOOLS.has(tc.toolName));
+        });
 
-        if (allIdle && steps.length >= threshold) {
+        if (allIdle) {
             console.log(
-                `[StopCondition]: Idle detected — ${threshold} consecutive steps with no tool calls ` +
-                `(${steps.length} total steps). Model may be stuck.`,
+                `[StopCondition]: Idle detected — ${threshold} consecutive steps with no external tool calls ` +
+                `(${steps.length} total steps). Model may be stuck in a planning loop.`,
             );
             return true;
         }
