@@ -135,6 +135,14 @@ export async function handleTelegramUpdate(
         metadata,
     };
 
+    // ── Abort any in-flight request for THIS chat so the agent focuses on this message ──
+    const chatIdStr = String(chatId);
+    const activeInChat = requestTracker.countByChat('telegram', chatIdStr);
+    if (activeInChat > 0) {
+        console.log(`[Telegram]: New message from ${who} in chat ${chatId} — aborting ${activeInChat} active request(s)`);
+        requestTracker.abortByChat('telegram', chatIdStr);
+    }
+
     await sendTyping(token, chatId);
     const history = deps.getOrCreateHistory(chatId);
 
@@ -163,6 +171,9 @@ export async function handleTelegramUpdate(
     // On restart, the orphaned user message (no assistant reply) triggers auto-resume.
     await deps.flushHistory();
 
+    // Track request for abort capability (hoisted before try so catch can call finish)
+    const { id: tgReqId, signal: tgAbortSignal } = requestTracker.start('telegram', who, chatIdStr);
+
     try {
         // Build user query — include missed-message context for the system prompt
         const queryText = text || describeMessageType(msg);
@@ -181,9 +192,6 @@ export async function handleTelegramUpdate(
         // Track ALL text fragments sent during generation so we don't double-send
         const sentFragments: string[] = [];
         let stepCounter = 0;
-
-        // Track request for abort capability
-        const { id: tgReqId, signal: tgAbortSignal } = requestTracker.start('telegram', who);
 
         // Create a per-request ToolLoopAgent via the centralized factory
         // Sub-agent progress is wired per-request via onSubAgentProgress (no singleton).
@@ -356,6 +364,15 @@ export async function handleTelegramUpdate(
     } catch (err) {
         typing.stop();
         agent.clearSubAgentProgress();
+        requestTracker.finish(tgReqId);
+
+        // Clean up step checkpoints from the aborted/failed request
+        for (let i = history.length - 1; i >= 0; i--) {
+            if (history[i].id.startsWith('checkpoint-')) {
+                history.splice(i, 1);
+            }
+        }
+
         const errMsg = err instanceof Error ? err.message : String(err);
 
         // ── Vision unsupported: strip images and retry ──────────────────
@@ -451,8 +468,13 @@ export async function handleTelegramUpdate(
         }
 
         console.error(`[Telegram]: Error generating response for ${who}:`, errMsg);
-        // Check if it was an intentional abort
+        // Check if it was an intentional abort (new message arrived or manual cancel)
         const isAborted = errMsg.includes('aborted') || errMsg.includes('abort');
-        await sendMessage(token, chatId, isAborted ? '⏹️ Request was cancelled.' : 'Sorry, I hit an error processing that. Try again in a moment.');
+        if (isAborted) {
+            // Don't send any message — the user already moved on to a new conversation
+            console.log(`[Telegram]: Request for ${who} was aborted — suppressing error message`);
+        } else {
+            await sendMessage(token, chatId, 'Sorry, I hit an error processing that. Try again in a moment.');
+        }
     }
 }

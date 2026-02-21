@@ -20,6 +20,7 @@ import type { Agent } from '../agent';
 import type { ChannelAuthStore } from '../channels/auth';
 import type { TelegramBridge } from '../channels/telegram';
 import { getConfig } from '../config';
+import { requestTracker } from '../request-tracker';
 import { readBody, sendJSON } from './http-utils';
 import { detectChatContext, extractUserText } from './context';
 import { createStepLogger, finalizeGeneration } from '../utils/generation-hooks';
@@ -46,6 +47,13 @@ export async function handleChatStream(
     console.log(`\n[${who}${ctx.isAdmin ? ' (admin)' : ' (guest)'}]: ${userText}`);
 
     agent.saveToMemory('user', userText, ctx);
+
+    // Abort any in-flight request for this sender — new message takes priority
+    const httpChatId = ctx.sender || ctx.channel;
+    if (requestTracker.countByChat(ctx.channel, httpChatId) > 0) {
+        console.log(`[HTTP]: New request from ${who} — aborting ${requestTracker.countByChat(ctx.channel, httpChatId)} active request(s)`);
+        requestTracker.abortByChat(ctx.channel, httpChatId);
+    }
 
     // Mutable ref so the step logger can write progress to the stream
     const writerRef: { current?: { write: (part: any) => void } } = {};
@@ -113,6 +121,13 @@ export async function handleChatSync(
     }
 
     agent.saveToMemory('user', userText, ctx);
+
+    // Abort any in-flight sync request for this sender — new message takes priority
+    const syncChatId = ctx.sender || ctx.channel;
+    if (requestTracker.countByChat(ctx.channel, syncChatId) > 0) {
+        console.log(`[HTTP/Sync]: New request — aborting ${requestTracker.countByChat(ctx.channel, syncChatId)} active request(s)`);
+        requestTracker.abortByChat(ctx.channel, syncChatId);
+    }
 
     try {
         // Create a per-request ToolLoopAgent via the centralized factory

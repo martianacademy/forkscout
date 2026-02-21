@@ -19,6 +19,8 @@ export interface ActiveRequest {
     id: string;
     /** Channel (http-stream, http-sync, telegram) */
     channel: string;
+    /** Chat/conversation identifier (e.g. Telegram chatId, HTTP session) */
+    chatId?: string;
     /** Who initiated the request */
     sender?: string;
     /** When the request started */
@@ -35,19 +37,20 @@ export class RequestTracker {
      * Start tracking a new request. Returns a unique ID and an AbortSignal
      * to pass into generateText/streamText.
      */
-    start(channel: string, sender?: string): { id: string; signal: AbortSignal } {
+    start(channel: string, sender?: string, chatId?: string): { id: string; signal: AbortSignal } {
         const id = `req-${++this.counter}-${Date.now()}`;
         const controller = new AbortController();
 
         this.active.set(id, {
             id,
             channel,
+            chatId,
             sender,
             startedAt: Date.now(),
             controller,
         });
 
-        console.log(`[Tracker]: Started ${id} (${channel}${sender ? `, ${sender}` : ''})`);
+        console.log(`[Tracker]: Started ${id} (${channel}${chatId ? `, chat=${chatId}` : ''}${sender ? `, ${sender}` : ''})`);
         return { id, signal: controller.signal };
     }
 
@@ -87,6 +90,35 @@ export class RequestTracker {
             console.log(`  ↳ Aborted ${id} (${req.channel}, ${this.elapsed(req)}s)`);
         }
         this.active.clear();
+        return count;
+    }
+
+    /**
+     * Abort all active requests for a specific chat/conversation.
+     * Only aborts requests matching the given channel + chatId.
+     * Returns the count of aborted requests.
+     */
+    abortByChat(channel: string, chatId: string): number {
+        let count = 0;
+        for (const [id, req] of this.active) {
+            if (req.channel === channel && req.chatId === chatId) {
+                console.log(`[Tracker]: Aborting ${id} (${req.channel}, chat=${chatId}, ${this.elapsed(req)}s)`);
+                req.controller.abort();
+                this.active.delete(id);
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Count active requests for a specific chat/conversation.
+     */
+    countByChat(channel: string, chatId: string): number {
+        let count = 0;
+        for (const req of this.active.values()) {
+            if (req.channel === channel && req.chatId === chatId) count++;
+        }
         return count;
     }
 
