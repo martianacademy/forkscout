@@ -13,48 +13,6 @@
 
 import { stepCountIs, hasToolCall, type StopCondition } from 'ai';
 
-// ── Budget-exceeded stop condition ─────────────────────
-
-/**
- * Stop the loop if estimated cost exceeds a per-request budget.
- *
- * Uses token counts from step usage data and per-token pricing to estimate
- * cost across all steps in the current request. This is a safety net —
- * the primary budget tracking is in the ModelRouter.
- *
- * @param maxCostUSD - Maximum allowed cost in USD for this single request
- * @param inputPricePer1M - Cost per 1M input tokens (default: $0.50 — ~minimax pricing)
- * @param outputPricePer1M - Cost per 1M output tokens (default: $1.50 — ~minimax pricing)
- */
-export function budgetExceeded(
-    maxCostUSD: number,
-    inputPricePer1M = 0.50,
-    outputPricePer1M = 1.50,
-): StopCondition<any> {
-    return ({ steps }) => {
-        const totalUsage = steps.reduce(
-            (acc, step) => ({
-                inputTokens: acc.inputTokens + (step.usage?.inputTokens ?? 0),
-                outputTokens: acc.outputTokens + (step.usage?.outputTokens ?? 0),
-            }),
-            { inputTokens: 0, outputTokens: 0 },
-        );
-
-        const costEstimate =
-            (totalUsage.inputTokens * inputPricePer1M +
-                totalUsage.outputTokens * outputPricePer1M) / 1_000_000;
-
-        if (costEstimate > maxCostUSD) {
-            console.log(
-                `[StopCondition]: Budget exceeded — $${costEstimate.toFixed(4)} > $${maxCostUSD} limit ` +
-                `(${totalUsage.inputTokens} in + ${totalUsage.outputTokens} out tokens across ${steps.length} steps)`,
-            );
-            return true;
-        }
-        return false;
-    };
-}
-
 // ── Idle-detection stop condition ──────────────────────
 
 /**
@@ -80,35 +38,6 @@ export function idleDetected(threshold = 2): StopCondition<any> {
             console.log(
                 `[StopCondition]: Idle detected — ${threshold} consecutive steps with no tool calls ` +
                 `(${steps.length} total steps). Model may be stuck.`,
-            );
-            return true;
-        }
-        return false;
-    };
-}
-
-// ── Token-limit stop condition ─────────────────────────
-
-/**
- * Stop the loop if cumulative token usage exceeds a hard limit.
- *
- * Prevents runaway loops from consuming the entire context window.
- * Useful as a safety valve independent of cost.
- *
- * @param maxTotalTokens - Maximum combined input+output tokens across all steps
- */
-export function tokenLimitExceeded(maxTotalTokens: number): StopCondition<any> {
-    return ({ steps }) => {
-        const total = steps.reduce(
-            (sum, step) =>
-                sum + (step.usage?.inputTokens ?? 0) + (step.usage?.outputTokens ?? 0),
-            0,
-        );
-
-        if (total > maxTotalTokens) {
-            console.log(
-                `[StopCondition]: Token limit exceeded — ${total} > ${maxTotalTokens} ` +
-                `across ${steps.length} steps`,
             );
             return true;
         }
@@ -159,12 +88,8 @@ export function repeatedToolFailure(maxRepeats = 3): StopCondition<any> {
 
 export interface LoopControlConfig {
     maxSteps: number;
-    /** Max USD spend per single request. 0 = disabled. */
-    maxRequestCostUSD?: number;
     /** Consecutive no-tool-call steps before stopping. 0 = disabled. */
     idleStepThreshold?: number;
-    /** Max total tokens per request. 0 = disabled. */
-    maxRequestTokens?: number;
     /** Max times same tool can fail before stopping. 0 = disabled. */
     maxToolRetries?: number;
 }
@@ -174,7 +99,7 @@ export interface LoopControlConfig {
  *
  * Usage:
  *   import { stepCountIs } from 'ai';
- *   stopWhen: buildStopConditions({ maxSteps: 60, maxRequestCostUSD: 0.50, ... })
+ *   stopWhen: buildStopConditions({ maxSteps: 60, idleStepThreshold: 3, maxToolRetries: 6 })
  */
 export function buildStopConditions(config: LoopControlConfig): Array<StopCondition<any>> {
     const conditions: Array<StopCondition<any>> = [
@@ -183,16 +108,8 @@ export function buildStopConditions(config: LoopControlConfig): Array<StopCondit
         hasToolCall('deliver_answer'),
     ];
 
-    if (config.maxRequestCostUSD && config.maxRequestCostUSD > 0) {
-        conditions.push(budgetExceeded(config.maxRequestCostUSD));
-    }
-
     if (config.idleStepThreshold && config.idleStepThreshold > 0) {
         conditions.push(idleDetected(config.idleStepThreshold));
-    }
-
-    if (config.maxRequestTokens && config.maxRequestTokens > 0) {
-        conditions.push(tokenLimitExceeded(config.maxRequestTokens));
     }
 
     if (config.maxToolRetries && config.maxToolRetries > 0) {

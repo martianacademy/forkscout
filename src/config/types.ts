@@ -32,13 +32,6 @@ export interface RouterConfig {
  */
 export type ProviderRouterPresets = Partial<Record<ProviderType, RouterConfig>>;
 
-// ── Budget ─────────────────────────────────────────────
-
-export interface BudgetConfig {
-    dailyUSD: number;
-    monthlyUSD: number;
-    warningPct: number;
-}
 
 // ── MCP servers ────────────────────────────────────────
 
@@ -126,12 +119,8 @@ export interface AgentSettings {
     browserIdleMs: number;
     /** Activity log max size in bytes before rotation */
     activityLogMaxBytes: number;
-    /** Max USD spend per single request. 0 = disabled. (stop condition) */
-    maxRequestCostUSD: number;
     /** Consecutive no-tool-call steps before stopping. 0 = disabled. (stop condition) */
     idleStepThreshold: number;
-    /** Max total tokens per single request. 0 = disabled. (stop condition) */
-    maxRequestTokens: number;
     /** Max times same tool can fail before stopping. 0 = disabled. (stop condition) */
     maxToolRetries: number;
     /** Step number after which to start pruning old tool results from context. 0 = disabled. */
@@ -208,9 +197,6 @@ export interface ForkscoutConfig {
     /** Per-provider router presets (raw from config file, kept for hot-swap) */
     routerPresets?: ProviderRouterPresets;
 
-    /** Budget limits */
-    budget: BudgetConfig;
-
     /** Agent settings */
     agent: AgentSettings;
 
@@ -268,7 +254,6 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
     maxTokens: 2000,
     fallbackProviders: [],
     router: PROVIDER_ROUTER_DEFAULTS.openrouter,
-    budget: { dailyUSD: 5, monthlyUSD: 50, warningPct: 80 },
     agent: {
         maxIterations: 10,
         maxSteps: 60,
@@ -311,9 +296,7 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         failureEscalationThreshold: 3,
         browserIdleMs: 60_000,
         activityLogMaxBytes: 5 * 1024 * 1024,
-        maxRequestCostUSD: 0.50,
         idleStepThreshold: 3,
-        maxRequestTokens: 0,
         maxToolRetries: 6,
         contextPruneAfterStep: 8,
         contextKeepLastMessages: 6,

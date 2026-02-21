@@ -4,7 +4,7 @@
  * @module llm/router/types
  */
 
-import type { BudgetTracker } from '../budget';
+import type { UsageTracker } from '../usage-tracker';
 import type { ProviderType } from '../../config';
 
 // ── Purpose & Tier ─────────────────────────────────────
@@ -96,6 +96,6 @@ export interface RouterConfig {
     baseURL: string;
     /** Model for each tier — each tier can have its own provider */
     tiers: Record<ModelTier, ModelTierConfig>;
-    /** Budget tracker instance */
-    budget: BudgetTracker;
+    /** Usage analytics tracker */
+    usage: UsageTracker;
 }

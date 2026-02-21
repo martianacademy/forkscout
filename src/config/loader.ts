@@ -16,7 +16,7 @@ import { readFileSync, watch, type FSWatcher } from 'fs';
 import type { ProviderType, ForkscoutConfig } from './types';
 import { DEFAULTS, PROVIDER_URLS } from './types';
 import {
-    buildRouterConfig, buildBudgetConfig, buildAgentConfig,
+    buildRouterConfig, buildAgentConfig,
     resolveProvider, resolveProviderUrl, env, findConfigFile,
 } from './builders';
 
@@ -80,7 +80,6 @@ export function loadConfig(force = false): ForkscoutConfig {
 
         router,
         ...(routerPresets ? { routerPresets } : {}),
-        budget: buildBudgetConfig(fileConfig.budget),
         agent: buildAgentConfig(fileConfig.agent),
         searxng: {
             url: env('SEARXNG_URL') || fileConfig.searxng?.url || DEFAULTS.searxng.url,

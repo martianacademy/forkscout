@@ -1,14 +1,11 @@
 /**
- * Budget Tracker — cost control for multi-model LLM usage.
+ * Usage Tracker — analytics-only cost & token tracking for multi-model LLM usage.
  *
- * Tracks spending per model, per day, per month.
- * Enforces hard limits that downgrade model tiers when exceeded.
- * Persists to disk so budgets survive restarts.
+ * Tracks spending per model, per day, per month — purely for observability.
+ * No enforcement, no limits, no tier downgrades.
+ * Persists to disk so analytics survive restarts.
  *
- * Configuration via env vars:
- *   BUDGET_DAILY_USD    — daily hard limit (default: 5.00)
- *   BUDGET_MONTHLY_USD  — monthly hard limit (default: 50.00)
- *   BUDGET_WARNING_PCT  — warning threshold as % (default: 80)
+ * @module llm/usage-tracker
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -32,45 +29,28 @@ export interface SpendRecord {
     timestamp: number;
 }
 
-export interface BudgetData {
+interface UsageData {
     /** All spending records for the current billing period */
     records: SpendRecord[];
     /** When the records were last pruned (ISO date) */
     lastPruned: string;
 }
 
-export interface BudgetLimits {
-    dailyUSD: number;
-    monthlyUSD: number;
-    warningPct: number;
-}
-
-export interface BudgetStatus {
+export interface UsageStatus {
     todayUSD: number;
     monthUSD: number;
-    dailyLimitUSD: number;
-    monthlyLimitUSD: number;
-    dailyPct: number;
-    monthlyPct: number;
-    isWarning: boolean;
-    isDailyExceeded: boolean;
-    isMonthlyExceeded: boolean;
-    /** If budget forces a tier downgrade, which tier we're capped at */
-    cappedTier: ModelTier | null;
     todayByModel: Record<string, { cost: number; inputTokens: number; outputTokens: number; calls: number }>;
 }
 
-// ── Budget Tracker ─────────────────────────────────────
+// ── Usage Tracker ──────────────────────────────────────
 
-export class BudgetTracker {
-    private limits: BudgetLimits;
-    private data: BudgetData;
+export class UsageTracker {
+    private data: UsageData;
     private persistPath: string;
     private dirty = false;
     private flushTimer: ReturnType<typeof setInterval> | null = null;
 
-    constructor(limits: BudgetLimits, persistPath: string) {
-        this.limits = limits;
+    constructor(persistPath: string) {
         this.persistPath = persistPath;
         this.data = this.load();
 
@@ -80,27 +60,14 @@ export class BudgetTracker {
         }, 60_000);
     }
 
-    /** Create from env vars with sensible defaults */
-    static fromEnv(storagePath?: string): BudgetTracker {
-        const limits: BudgetLimits = {
-            dailyUSD: parseFloat(process.env.BUDGET_DAILY_USD || '5'),
-            monthlyUSD: parseFloat(process.env.BUDGET_MONTHLY_USD || '50'),
-            warningPct: parseFloat(process.env.BUDGET_WARNING_PCT || '80'),
-        };
-
+    /** Create with default storage path */
+    static create(storagePath?: string): UsageTracker {
         const dir = storagePath || resolve(process.cwd(), '.forkscout');
-        const path = resolve(dir, 'budget.json');
-        return new BudgetTracker(limits, path);
+        const path = resolve(dir, 'usage.json');
+        return new UsageTracker(path);
     }
 
-    /** Create from config object */
-    static fromConfig(budget: { dailyUSD: number; monthlyUSD: number; warningPct: number }, storagePath?: string): BudgetTracker {
-        const dir = storagePath || resolve(process.cwd(), '.forkscout');
-        const path = resolve(dir, 'budget.json');
-        return new BudgetTracker(budget, path);
-    }
-
-    /** Record a spend event */
+    /** Record a spend event (analytics only — no enforcement) */
     recordSpend(cost: number, modelId: string, inputTokens: number, outputTokens: number): void {
         if (cost <= 0) return;
 
@@ -115,26 +82,20 @@ export class BudgetTracker {
         });
         this.dirty = true;
 
-        // Log significant costs
+        // Log significant costs for observability
         if (cost > 0.01) {
             const status = this.getStatus();
-            console.log(`[Budget]: $${cost.toFixed(4)} (${modelId}) | Today: $${status.todayUSD.toFixed(2)}/$${status.dailyLimitUSD} | Month: $${status.monthUSD.toFixed(2)}/$${status.monthlyLimitUSD}`);
-        }
-
-        // Warning check (logged for observability, no downgrade)
-        const status = this.getStatus();
-        if (status.isDailyExceeded || status.isMonthlyExceeded) {
-            // Tracked in status but no console warnings — user disabled downgrade behavior
+            console.log(`[Usage]: $${cost.toFixed(4)} (${modelId}) | Today: $${status.todayUSD.toFixed(2)} | Month: $${status.monthUSD.toFixed(2)}`);
         }
     }
 
-    /** Given a desired tier, always return it (downgrade disabled) */
+    /** Pass-through — no tier adjustment (analytics only) */
     adjustTier(desired: ModelTier): ModelTier {
         return desired;
     }
 
-    /** Get current budget status */
-    getStatus(): BudgetStatus {
+    /** Get current usage analytics */
+    getStatus(): UsageStatus {
         const today = this.toDateStr(new Date());
         const monthPrefix = today.slice(0, 7); // YYYY-MM
 
@@ -160,41 +121,7 @@ export class BudgetTracker {
             }
         }
 
-        const dailyPct = this.limits.dailyUSD > 0 ? (todayUSD / this.limits.dailyUSD) * 100 : 0;
-        const monthlyPct = this.limits.monthlyUSD > 0 ? (monthUSD / this.limits.monthlyUSD) * 100 : 0;
-
-        const isDailyExceeded = todayUSD >= this.limits.dailyUSD;
-        const isMonthlyExceeded = monthUSD >= this.limits.monthlyUSD;
-        const isWarning = dailyPct >= this.limits.warningPct || monthlyPct >= this.limits.warningPct;
-
-        let cappedTier: ModelTier | null = null;
-        if (isMonthlyExceeded) cappedTier = 'fast';
-        else if (isDailyExceeded) cappedTier = 'balanced';
-
-        return {
-            todayUSD,
-            monthUSD,
-            dailyLimitUSD: this.limits.dailyUSD,
-            monthlyLimitUSD: this.limits.monthlyUSD,
-            dailyPct,
-            monthlyPct,
-            isWarning,
-            isDailyExceeded,
-            isMonthlyExceeded,
-            cappedTier,
-            todayByModel,
-        };
-    }
-
-    /** Update limits at runtime */
-    setLimits(patch: Partial<BudgetLimits>): BudgetLimits {
-        Object.assign(this.limits, patch);
-        return { ...this.limits };
-    }
-
-    /** Get current limits */
-    getLimits(): BudgetLimits {
-        return { ...this.limits };
+        return { todayUSD, monthUSD, todayByModel };
     }
 
     /** Flush to disk */
@@ -206,7 +133,7 @@ export class BudgetTracker {
             writeFileSync(this.persistPath, JSON.stringify(this.data, null, 2));
             this.dirty = false;
         } catch (err) {
-            console.error(`[Budget]: Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+            console.error(`[Usage]: Failed to save: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 
@@ -221,25 +148,24 @@ export class BudgetTracker {
 
     // ── Internal ───────────────────────────────────────
 
-    private load(): BudgetData {
+    private load(): UsageData {
         try {
             if (existsSync(this.persistPath)) {
                 const raw = readFileSync(this.persistPath, 'utf-8');
-                const data = JSON.parse(raw) as BudgetData;
-                // Validate structure
+                const data = JSON.parse(raw) as UsageData;
                 if (Array.isArray(data.records)) {
                     this.pruneOldRecords(data);
                     return data;
                 }
             }
         } catch (err) {
-            console.warn(`[Budget]: Failed to load budget data, starting fresh: ${err instanceof Error ? err.message : String(err)}`);
+            console.warn(`[Usage]: Failed to load usage data, starting fresh: ${err instanceof Error ? err.message : String(err)}`);
         }
         return { records: [], lastPruned: this.toDateStr(new Date()) };
     }
 
-    /** Remove records older than 35 days (keep current month + a few days buffer) */
-    private pruneOldRecords(data?: BudgetData): void {
+    /** Remove records older than 35 days */
+    private pruneOldRecords(data?: UsageData): void {
         const d = data || this.data;
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - 35);
@@ -250,7 +176,7 @@ export class BudgetTracker {
         d.lastPruned = this.toDateStr(new Date());
 
         if (before !== d.records.length) {
-            console.log(`[Budget]: Pruned ${before - d.records.length} old records`);
+            console.log(`[Usage]: Pruned ${before - d.records.length} old records`);
         }
     }
 

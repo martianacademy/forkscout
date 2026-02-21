@@ -10,7 +10,7 @@
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { PROJECT_ROOT } from '../paths';
-import type { ProviderType, RouterConfig, BudgetConfig, AgentSettings, ProviderRouterPresets } from './types';
+import type { ProviderType, RouterConfig, AgentSettings, ProviderRouterPresets } from './types';
 import { DEFAULTS, PROVIDER_ROUTER_DEFAULTS } from './types';
 
 // ── Router config builder ──────────────────────────────
@@ -100,16 +100,6 @@ export function buildRouterConfig(
     };
 }
 
-// ── Budget config builder ──────────────────────────────
-
-export function buildBudgetConfig(file: any): BudgetConfig {
-    return {
-        dailyUSD: file?.dailyUSD ?? DEFAULTS.budget.dailyUSD,
-        monthlyUSD: file?.monthlyUSD ?? DEFAULTS.budget.monthlyUSD,
-        warningPct: file?.warningPct ?? DEFAULTS.budget.warningPct,
-    };
-}
-
 // ── Agent settings builder ─────────────────────────────
 
 export function buildAgentConfig(file: any): AgentSettings {
@@ -152,9 +142,7 @@ export function buildAgentConfig(file: any): AgentSettings {
         failureEscalationThreshold: file?.failureEscalationThreshold ?? DEFAULTS.agent.failureEscalationThreshold,
         browserIdleMs: file?.browserIdleMs ?? DEFAULTS.agent.browserIdleMs,
         activityLogMaxBytes: file?.activityLogMaxBytes ?? DEFAULTS.agent.activityLogMaxBytes,
-        maxRequestCostUSD: file?.maxRequestCostUSD ?? DEFAULTS.agent.maxRequestCostUSD,
         idleStepThreshold: file?.idleStepThreshold ?? DEFAULTS.agent.idleStepThreshold,
-        maxRequestTokens: file?.maxRequestTokens ?? DEFAULTS.agent.maxRequestTokens,
         maxToolRetries: file?.maxToolRetries ?? DEFAULTS.agent.maxToolRetries,
         contextPruneAfterStep: file?.contextPruneAfterStep ?? DEFAULTS.agent.contextPruneAfterStep,
         contextKeepLastMessages: file?.contextKeepLastMessages ?? DEFAULTS.agent.contextKeepLastMessages,

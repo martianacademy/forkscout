@@ -255,7 +255,7 @@ export class Agent {
         };
         this.llm = new LLMClient(this.config.llm);
 
-        // Hot-swap router tiers (preserves budget state)
+        // Hot-swap router tiers (preserves usage state)
         this.router.reloadConfig(createRouterFromEnv());
 
         console.log(`[Agent↻] Config reloaded — provider: ${cfg.provider}, model: ${cfg.model}`);
@@ -332,11 +332,11 @@ export class Agent {
     async stop(): Promise<void> {
         this.state.running = false;
         this.scheduler.shutdown();
-        this.router.getBudget().stop();
+        this.router.getUsage().stop();
         await this.survival.stop();
         await this.mcpConnector.disconnect();
         await this.survival.withWriteAccess(() => this.memory.flush());
-        console.log('\nAgent stopped (memory + budget saved)');
+        console.log('\nAgent stopped (memory + usage saved)');
     }
 
     // ── Accessors ──────────────────────────────────────

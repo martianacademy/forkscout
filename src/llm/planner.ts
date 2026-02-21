@@ -45,7 +45,7 @@ const AVAILABLE_TOOLS = [
     // Planning
     'manage_todos', 'think',
     // Other
-    'get_current_date', 'get_budget',
+    'get_current_date', 'check_usage',
 ] as const;
 
 // ── Schema ─────────────────────────────────────────────

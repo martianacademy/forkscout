@@ -58,15 +58,15 @@ export async function buildSystemPrompt(
 
     // Inject system time at the very top of the prompt for true temporal awareness
     const now = new Date();
-    const timeString = now.toLocaleString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric', 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit', 
-        timeZoneName: 'short' 
+    const timeString = now.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZoneName: 'short'
     });
     const timeSection = `[System Time]\n${timeString}\n\n`;
 
@@ -229,7 +229,7 @@ export async function buildSystemPrompt(
         try {
             const cfg = getConfig();
             const status = router.getStatus();
-            const budgetStatus = status.budget;
+            const usageStatus = status.usage;
             const lines = [
                 `\n\n[Runtime Config — YOUR current setup]`,
                 `Provider: ${cfg.provider}`,
@@ -239,11 +239,8 @@ export async function buildSystemPrompt(
                 `  powerful: ${status.tiers.powerful.modelId} (${status.tiers.powerful.provider})`,
                 `You are running on a model tier selected by pre-flight analysis (quick→fast, moderate→balanced, deep→powerful). May escalate on repeated tool failures.`,
                 `Temperature: ${cfg.temperature ?? 'default'}`,
-                `Budget: $${budgetStatus.todayUSD.toFixed(2)}/$${budgetStatus.dailyLimitUSD}/day, $${budgetStatus.monthUSD.toFixed(2)}/$${budgetStatus.monthlyLimitUSD}/month (${budgetStatus.dailyPct.toFixed(0)}% daily used)`,
+                `Usage today: $${usageStatus.todayUSD.toFixed(2)} | This month: $${usageStatus.monthUSD.toFixed(2)}`,
             ];
-            if (budgetStatus.cappedTier) {
-                lines.push(`⚠️ Budget pressure — capped to ${budgetStatus.cappedTier} tier`);
-            }
             configSection = lines.join('\n');
         } catch { /* config unavailable — skip */ }
     }

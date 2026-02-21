@@ -87,7 +87,7 @@ This agent inherits all memory discipline, volatile fact verification, and opera
 - Switching providers = change one field in `forkscout.config.json`
 - Config hot-reload via `fs.watch` with 500ms debounce — no restart needed
 - Model auto-resolved from active provider's balanced tier
-- BudgetTracker preserved across hot-swaps
+- UsageTracker preserved across hot-swaps (analytics only, no enforcement)
 - OpenRouter gets `HTTP-Referer` and `X-Title` headers from `agent.appName`/`agent.appUrl`
 
 ### 2. Sub-Agent Orchestration (`spawn_agents`)
@@ -113,7 +113,7 @@ Docker container. Check `docker-compose.yml` for port, `forkscout-memory-mcp/src
 
 `forkscout.config.json` is the single source of truth. **Always read the file — never rely on memorized values.**
 
-Key paths: `provider`, `router[provider].{fast,balanced,powerful}`, `agent.port`, `agent.maxIterations`, `agent.maxSteps`, `agent.forkscoutMemoryMcpUrl`, `agent.mcpServers`, `budget`.
+Key paths: `provider`, `router[provider].{fast,balanced,powerful}`, `agent.port`, `agent.maxIterations`, `agent.maxSteps`, `agent.forkscoutMemoryMcpUrl`, `agent.mcpServers`.
 
 - Hot-reload: `watchConfig()` in `loader.ts` → `fs.watch` + 500ms debounce
 - Agent picks up changes via `Agent.reloadConfig()` → rebuilds LLMClient + hot-swaps router

@@ -16,7 +16,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
-import { BudgetTracker } from '../budget';
+import { UsageTracker } from '../usage-tracker';
 import { loadConfig, getConfig, resolveApiKeyForProvider, resolveApiUrlForProvider, type ProviderType } from '../../config';
 import type { ModelTier, ModelTierConfig, ModelPricing, RouterConfig } from './types';
 import { KNOWN_PRICES } from './types';
@@ -127,7 +127,7 @@ export function createRouterFromEnv(): RouterConfig {
             balanced: buildTierConfig('balanced'),
             powerful: buildTierConfig('powerful'),
         },
-        budget: BudgetTracker.fromConfig(cfg.budget),
+        usage: UsageTracker.create(),
     };
 
     for (const t of ['fast', 'balanced', 'powerful'] as ModelTier[]) {

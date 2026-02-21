@@ -87,12 +87,10 @@ export function describeToolCall(toolName: string, args: Record<string, any> = {
             return `💾 Backing up memory${args.reason ? ' — ' + shorten(args.reason) : ''}`;
         case 'system_status':
             return '📊 Checking system status';
-        case 'check_budget':
-            return '💰 Checking budget usage';
+        case 'check_usage':
+            return '📊 Checking usage analytics';
         case 'set_model_tier':
             return `🎛 Setting ${args.tier || 'tier'} model to ${args.modelId || '?'}`;
-        case 'set_budget_limit':
-            return `💰 Updating budget limits`;
 
         // ── Telegram ──
         case 'send_telegram_message':

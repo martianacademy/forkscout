@@ -55,7 +55,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
     for (const [tier, info] of Object.entries(routerStatus.tiers)) {
         console.log(`   ${tier}: ${info.modelId} ($${info.inputPricePer1M}/$${info.outputPricePer1M} per 1M tokens)`);
     }
-    console.log(`   Budget: $${routerStatus.budget.dailyLimitUSD}/day, $${routerStatus.budget.monthlyLimitUSD}/month`);
+    console.log(`   Usage today: $${routerStatus.usage.todayUSD.toFixed(2)} | This month: $${routerStatus.usage.monthUSD.toFixed(2)}`);
 
     const channelAuth = agent.getChannelAuth();
 
