@@ -34,8 +34,8 @@ services:
             - /app/node_modules
         networks:
             - forkscout-external
-        # Run watchdog instead of bare tsx — handles build, restart, crash recovery, rollback
-        command: ['bash', './watchdog.sh']
+        # Run watchdog in dev mode — watches dist/ for changes and auto-restarts
+        command: ['bash', './watchdog.sh', '--dev']
 
 volumes:
     app-data:

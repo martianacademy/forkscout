@@ -107,8 +107,13 @@ restore_dist() {
 # ─── Run agent from dist ─────────────────────────────────
 
 run_agent() {
-    log "Starting Forkscout Agent from dist/ (mode: $MODE)..."
-    pnpm exec tsx dist/serve.js
+    if [[ "$MODE" == "dev" ]]; then
+        log "Starting Forkscout Agent with dist/ watcher (auto-restart on build changes)..."
+        node scripts/watch-dist.mjs serve
+    else
+        log "Starting Forkscout Agent from dist/ (mode: $MODE)..."
+        pnpm exec tsx dist/serve.js
+    fi
 }
 
 # ─── Initial build ───────────────────────────────────────
