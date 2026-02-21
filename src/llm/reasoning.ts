@@ -114,23 +114,22 @@ export function createPrepareStep(tracker: TurnTracker) {
     }) => {
         const { stepNumber, steps, messages } = options;
 
-        // ── Step 0: force tool use + limit to recommended tools ──
-        //    Prevents the model from dumping text without calling tools.
+        // Always force tool use on every step — deliver_answer is the "I'm done" signal.
+        // This eliminates wasted text-only steps; the model must act or finish.
+        const base: Record<string, any> = { toolChoice: 'required' as const };
+
+        // ── Step 0: limit to recommended tools ──
         //    Recommended tools from the planner focus the model on relevant actions.
         if (stepNumber === 0) {
-            const step0: Record<string, any> = {
-                toolChoice: 'required' as const,
-            };
-            // If the planner recommended specific tools, only expose those + deliver_answer
             if (tracker.recommendedTools.length > 0) {
                 const active = [...new Set([...tracker.recommendedTools, 'deliver_answer', 'think', 'manage_todos'])];
                 // Only filter if recommended tools are a strict subset of all tools
                 if (active.length < tracker.allToolNames.length) {
-                    step0.activeTools = active;
+                    base.activeTools = active;
                     console.log(`[PrepareStep]: Step 0 — activeTools: [${active.join(', ')}]`);
                 }
             }
-            return step0;
+            return base;
         }
 
         // ── Detect tool failures from previous step ──────
@@ -191,6 +190,7 @@ export function createPrepareStep(tracker: TurnTracker) {
             console.log(`[Agent]: Escalating to powerful tier after ${tracker.toolFailures.length} tool failures`);
 
             return {
+                ...base,
                 model: escalated.model,
                 system: tracker.baseSystemPrompt + buildFailureContext(tracker.toolFailures),
                 ...(prunedMessages ? { messages: prunedMessages } : {}),
@@ -198,7 +198,7 @@ export function createPrepareStep(tracker: TurnTracker) {
         }
 
         // ── Inject failure context + pruning if needed ───
-        const result: Record<string, any> = {};
+        const result: Record<string, any> = { ...base };
 
         if (prunedMessages) {
             result.messages = prunedMessages;
@@ -209,7 +209,7 @@ export function createPrepareStep(tracker: TurnTracker) {
             result.system = tracker.baseSystemPrompt + buildFailureContext(tracker.toolFailures);
         }
 
-        return Object.keys(result).length > 0 ? result : undefined;
+        return result;
     };
 }
 
