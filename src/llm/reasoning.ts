@@ -156,11 +156,13 @@ export function createPrepareStep(tracker: TurnTracker) {
             }
 
             // Check tool result strings for error patterns
+            // Only match explicit TOOL ERROR prefix — informational results like
+            // "File not found" are NOT failures (normal exploration behavior).
             if (lastStep.toolResults) {
                 for (const tr of lastStep.toolResults) {
                     const raw = (tr as any).output;
                     const output = typeof raw === 'string' ? raw : JSON.stringify(raw || '');
-                    if (output.includes('TOOL ERROR') || output.includes('Error:') || output.includes('ENOENT') || output.includes('permission denied')) {
+                    if (output.startsWith('TOOL ERROR')) {
                         tracker.toolFailures.push({
                             stepNumber: stepNumber - 1,
                             toolName: tr.toolName || 'unknown',

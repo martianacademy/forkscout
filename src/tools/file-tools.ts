@@ -47,9 +47,9 @@ export const readFile = tool({
             return content;
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            if (msg.includes('ENOENT')) return `❌ File not found: "${path}". Use list_directory to check what exists.`;
-            if (msg.includes('EISDIR')) return `❌ "${path}" is a directory, not a file. Use list_directory instead.`;
-            return `❌ read_file failed for "${path}": ${msg}`;
+            if (msg.includes('ENOENT')) return `File not found: "${path}". Use list_directory to check what exists.`;
+            if (msg.includes('EISDIR')) return `"${path}" is a directory, not a file. Use list_directory instead.`;
+            return `TOOL ERROR [read_file]: ${msg}`;
         }
     },
 });
@@ -69,7 +69,7 @@ export const writeFile = tool({
             await fs.writeFile(absPath, content, 'utf-8');
             return `File written: ${absPath} (${content.length} bytes)`;
         } catch (err) {
-            return `❌ write_file failed for "${path}": ${err instanceof Error ? err.message : String(err)}`;
+            return `TOOL ERROR [write_file]: ${err instanceof Error ? err.message : String(err)}`;
         }
     },
 });
@@ -89,7 +89,7 @@ export const appendFile = tool({
             await fs.appendFile(absPath, content, 'utf-8');
             return `Content appended to: ${absPath}`;
         } catch (err) {
-            return `❌ append_file failed for "${path}": ${err instanceof Error ? err.message : String(err)}`;
+            return `TOOL ERROR [append_file]: ${err instanceof Error ? err.message : String(err)}`;
         }
     },
 });
@@ -107,9 +107,9 @@ export const listDirectory = tool({
             return entries.map(e => (e.isDirectory() ? `${e.name}/` : e.name));
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            if (msg.includes('ENOENT')) return `❌ Directory not found: "${path}". Check the path and try again.`;
-            if (msg.includes('ENOTDIR')) return `❌ "${path}" is a file, not a directory.`;
-            return `❌ list_directory failed for "${path}": ${msg}`;
+            if (msg.includes('ENOENT')) return `Directory not found: "${path}". Check the path and try again.`;
+            if (msg.includes('ENOTDIR')) return `"${path}" is a file, not a directory.`;
+            return `TOOL ERROR [list_directory]: ${msg}`;
         }
     },
 });
@@ -129,8 +129,8 @@ export const deleteFile = tool({
             return `Deleted: ${absPath}`;
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            if (msg.includes('ENOENT')) return `❌ Cannot delete "${path}" — file not found.`;
-            return `❌ delete_file failed for "${path}": ${msg}`;
+            if (msg.includes('ENOENT')) return `Cannot delete "${path}" — file not found.`;
+            return `TOOL ERROR [delete_file]: ${msg}`;
         }
     },
 });

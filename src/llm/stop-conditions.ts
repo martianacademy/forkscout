@@ -135,7 +135,8 @@ export function repeatedToolFailure(maxRepeats = 3): StopCondition<any> {
                 // AI SDK v6 StepResult content parts use .output (not .result)
                 const raw = (tr as any).output;
                 const output = typeof raw === 'string' ? raw : JSON.stringify(raw || '');
-                if (output.includes('TOOL ERROR') || output.includes('Error:') || output.includes('ENOENT')) {
+                // Only match explicit TOOL ERROR prefix — not informational "File not found" etc.
+                if (output.startsWith('TOOL ERROR')) {
                     const name = (tr as any).toolName || 'unknown';
                     failCounts.set(name, (failCounts.get(name) ?? 0) + 1);
                 }

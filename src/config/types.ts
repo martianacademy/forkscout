@@ -314,7 +314,7 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         maxRequestCostUSD: 0.50,
         idleStepThreshold: 3,
         maxRequestTokens: 0,
-        maxToolRetries: 4,
+        maxToolRetries: 6,
         contextPruneAfterStep: 8,
         contextKeepLastMessages: 6,
         effortStepsQuick: 3,
