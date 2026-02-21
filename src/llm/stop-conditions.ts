@@ -16,12 +16,15 @@ import { stepCountIs, hasToolCall, type StopCondition } from 'ai';
 // ── Idle-detection stop condition ──────────────────────
 
 /**
- * Tools that represent internal reasoning/planning progress.
- * Steps calling ONLY these tools are "thinking" — not idle, but not
- * doing external work either. We allow some thinking steps before
- * considering the model stuck.
+ * Tools that represent pure internal reasoning (no external effect).
+ *
+ * With toolChoice:'required' on every step, text-only steps are impossible.
+ * The only true idle pattern is the model calling `think` repeatedly without
+ * acting. `manage_todos` is excluded — it's legitimate planning work.
+ * `deliver_answer` is excluded — hasToolCall('deliver_answer') stops the
+ * loop before idle detection ever sees it.
  */
-const LOGIC_TOOLS = new Set(['manage_todos', 'think', 'deliver_answer']);
+const LOGIC_TOOLS = new Set(['think']);
 
 /**
  * Stop the loop if the model produces N consecutive steps with no meaningful tool calls.
