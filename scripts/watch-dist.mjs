@@ -119,6 +119,7 @@ async function startChild() {
             cwd: ROOT,
             stdio: 'inherit',
             env: { ...process.env },
+            detached: true, // create process group so we can kill the entire tree
         });
 
         child.on('exit', (code, signal) => {
@@ -147,11 +148,12 @@ function stopChild() {
             stoppingForRestart = false;
             resolve();
         });
-        child.kill('SIGTERM');
+        // Kill entire process group (npx → tsx → node) not just the direct child
+        try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
         // Force kill after 5s
         setTimeout(() => {
             if (child) {
-                child.kill('SIGKILL');
+                try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already dead */ } }
             }
             // Resolve even if SIGKILL — don't hang forever
             setTimeout(() => {
