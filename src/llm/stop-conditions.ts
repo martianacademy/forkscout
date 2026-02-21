@@ -13,53 +13,6 @@
 
 import { stepCountIs, hasToolCall, type StopCondition } from 'ai';
 
-// ── Idle-detection stop condition ──────────────────────
-
-/**
- * Tools that represent pure internal reasoning (no external effect).
- *
- * With toolChoice:'required' on every step, text-only steps are impossible.
- * The only true idle pattern is the model calling `think` repeatedly without
- * acting. `manage_todos` is excluded — it's legitimate planning work.
- * `deliver_answer` is excluded — hasToolCall('deliver_answer') stops the
- * loop before idle detection ever sees it.
- */
-const LOGIC_TOOLS = new Set(['think']);
-
-/**
- * Stop the loop if the model produces N consecutive steps with no meaningful tool calls.
- *
- * A step counts as "active" if it calls at least one tool that is NOT purely
- * internal logic (manage_todos, think). Steps with only logic tools or no
- * tool calls at all are "idle." This prevents the model from endlessly
- * planning without acting, while still allowing a few reasoning steps.
- *
- * @param threshold - Number of consecutive idle steps before stopping (default: 5)
- */
-export function idleDetected(threshold = 5): StopCondition<any> {
-    return ({ steps }) => {
-        if (steps.length < threshold) return false;
-
-        // Check last N steps for meaningful (non-logic-only) tool calls
-        const tail = steps.slice(-threshold);
-        const allIdle = tail.every(step => {
-            const calls = step.toolCalls || [];
-            if (calls.length === 0) return true; // no tool calls at all → idle
-            // If every tool call is a logic tool, still counts as idle
-            return calls.every((tc: any) => LOGIC_TOOLS.has(tc.toolName));
-        });
-
-        if (allIdle) {
-            console.log(
-                `[StopCondition]: Idle detected — ${threshold} consecutive steps with no external tool calls ` +
-                `(${steps.length} total steps). Model may be stuck in a planning loop.`,
-            );
-            return true;
-        }
-        return false;
-    };
-}
-
 // ── Repeated-tool-failure stop condition ───────────────
 
 /**
@@ -103,8 +56,6 @@ export function repeatedToolFailure(maxRepeats = 3): StopCondition<any> {
 
 export interface LoopControlConfig {
     maxSteps: number;
-    /** Consecutive no-tool-call steps before stopping. 0 = disabled. */
-    idleStepThreshold?: number;
     /** Max times same tool can fail before stopping. 0 = disabled. */
     maxToolRetries?: number;
 }
@@ -114,7 +65,7 @@ export interface LoopControlConfig {
  *
  * Usage:
  *   import { stepCountIs } from 'ai';
- *   stopWhen: buildStopConditions({ maxSteps: 60, idleStepThreshold: 3, maxToolRetries: 6 })
+ *   stopWhen: buildStopConditions({ maxSteps: 60, maxToolRetries: 6 })
  */
 export function buildStopConditions(config: LoopControlConfig): Array<StopCondition<any>> {
     const conditions: Array<StopCondition<any>> = [
@@ -122,10 +73,6 @@ export function buildStopConditions(config: LoopControlConfig): Array<StopCondit
         // Stop immediately when the agent explicitly delivers its answer
         hasToolCall('deliver_answer'),
     ];
-
-    if (config.idleStepThreshold && config.idleStepThreshold > 0) {
-        conditions.push(idleDetected(config.idleStepThreshold));
-    }
 
     if (config.maxToolRetries && config.maxToolRetries > 0) {
         conditions.push(repeatedToolFailure(config.maxToolRetries));

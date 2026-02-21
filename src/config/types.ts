@@ -119,8 +119,6 @@ export interface AgentSettings {
     browserIdleMs: number;
     /** Activity log max size in bytes before rotation */
     activityLogMaxBytes: number;
-    /** Consecutive no-tool-call steps before stopping. 0 = disabled. (stop condition) */
-    idleStepThreshold: number;
     /** Max times same tool can fail before stopping. 0 = disabled. (stop condition) */
     maxToolRetries: number;
     /** Step number after which to start pruning old tool results from context. 0 = disabled. */
@@ -296,7 +294,6 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         failureEscalationThreshold: 3,
         browserIdleMs: 60_000,
         activityLogMaxBytes: 5 * 1024 * 1024,
-        idleStepThreshold: 5,
         maxToolRetries: 6,
         contextPruneAfterStep: 8,
         contextKeepLastMessages: 6,

@@ -142,7 +142,6 @@ export function buildAgentConfig(file: any): AgentSettings {
         failureEscalationThreshold: file?.failureEscalationThreshold ?? DEFAULTS.agent.failureEscalationThreshold,
         browserIdleMs: file?.browserIdleMs ?? DEFAULTS.agent.browserIdleMs,
         activityLogMaxBytes: file?.activityLogMaxBytes ?? DEFAULTS.agent.activityLogMaxBytes,
-        idleStepThreshold: file?.idleStepThreshold ?? DEFAULTS.agent.idleStepThreshold,
         maxToolRetries: file?.maxToolRetries ?? DEFAULTS.agent.maxToolRetries,
         contextPruneAfterStep: file?.contextPruneAfterStep ?? DEFAULTS.agent.contextPruneAfterStep,
         contextKeepLastMessages: file?.contextKeepLastMessages ?? DEFAULTS.agent.contextKeepLastMessages,
