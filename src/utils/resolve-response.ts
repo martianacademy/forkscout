@@ -36,6 +36,21 @@ export function resolveAgentResponse(
     text: string | undefined,
     steps: any[] | undefined,
 ): string {
+    // 0. Check for deliver_answer tool — the agent explicitly delivered its response
+    if (steps && steps.length > 0) {
+        const lastStep = steps[steps.length - 1];
+        if (lastStep.toolResults?.length) {
+            for (const tr of lastStep.toolResults) {
+                if ((tr as any).toolName === 'deliver_answer') {
+                    const answer = typeof (tr as any).output === 'string'
+                        ? (tr as any).output
+                        : JSON.stringify((tr as any).output);
+                    if (answer?.trim()) return answer.trim();
+                }
+            }
+        }
+    }
+
     // 1. Model produced explicit final text — use it
     if (text?.trim()) return text.trim();
 

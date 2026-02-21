@@ -78,7 +78,7 @@
         "owner": "Suru",
         "appName": "Forkscout Agent",
         "appUrl": "https://github.com/martianacademy/forkscout",
-        "forkscoutMemoryMcpUrl": "http://localhost:3211/mcp",
+        "forkscoutMemoryMcpUrl": "http://127.0.0.1:3211/mcp",
         "mcpServers": {
             "sequential-thinking": {
                 "command": "npx",

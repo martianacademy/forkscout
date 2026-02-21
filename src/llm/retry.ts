@@ -11,7 +11,7 @@
  *   - Unknown → retry up to max attempts
  */
 
-import { generateText, streamText, type GenerateTextResult } from 'ai';
+import { generateText, streamText, NoSuchToolError, InvalidToolInputError, type GenerateTextResult } from 'ai';
 import type { LanguageModel } from 'ai';
 import { getConfig } from '../config';
 import { resolveApiKeyForProvider, resolveApiUrlForProvider } from '../config/loader';
@@ -177,6 +177,17 @@ export async function generateTextWithRetry<T extends Parameters<typeof generate
             return await generateText(currentParams);
         } catch (error) {
             lastError = error;
+
+            // Structured SDK error types — handle before generic classification
+            if (NoSuchToolError.isInstance(error)) {
+                console.error(`[LLM Retry]: Model hallucinated non-existent tool: ${(error as any).toolName || 'unknown'}. Not retrying.`);
+                throw error;
+            }
+            if (InvalidToolInputError.isInstance(error)) {
+                console.error(`[LLM Retry]: Invalid tool input for ${(error as any).toolName || 'unknown'}. Not retrying.`);
+                throw error;
+            }
+
             const errorType = classifyError(error);
             const errMsg = error instanceof Error ? error.message : String(error);
 

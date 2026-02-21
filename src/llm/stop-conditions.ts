@@ -11,7 +11,7 @@
  * @module llm/stop-conditions
  */
 
-import { stepCountIs, type StopCondition } from 'ai';
+import { stepCountIs, hasToolCall, type StopCondition } from 'ai';
 
 // ── Budget-exceeded stop condition ─────────────────────
 
@@ -178,6 +178,8 @@ export interface LoopControlConfig {
 export function buildStopConditions(config: LoopControlConfig): Array<StopCondition<any>> {
     const conditions: Array<StopCondition<any>> = [
         stepCountIs(config.maxSteps),
+        // Stop immediately when the agent explicitly delivers its answer
+        hasToolCall('deliver_answer'),
     ];
 
     if (config.maxRequestCostUSD && config.maxRequestCostUSD > 0) {

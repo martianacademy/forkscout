@@ -2,7 +2,7 @@
  * Telegram message handler — processes incoming updates and generates AI responses.
  */
 
-import type { UIMessage } from 'ai';
+import { convertToModelMessages, type UIMessage } from 'ai';
 import { getConfig } from '../../config';
 import { generateTextWithRetry, isVisionUnsupportedError } from '../../llm/retry';
 import { buildStopConditions } from '../../llm/stop-conditions';
@@ -218,21 +218,7 @@ export async function handleTelegramUpdate(
         typing.nudge();
 
         const { text: responseText, usage, steps: agentSteps } = await chatAgent.generate({
-            messages: history.map(m => {
-                const contentParts: any[] = [];
-                for (const p of (m.parts || []) as any[]) {
-                    if (p.type === 'text' && p.text) {
-                        contentParts.push({ type: 'text', text: p.text });
-                    } else if (p.type === 'image' && p.image) {
-                        contentParts.push({ type: 'image', image: p.image, mediaType: p.mediaType });
-                    }
-                }
-                const content =
-                    contentParts.length === 1 && contentParts[0].type === 'text'
-                        ? contentParts[0].text
-                        : contentParts;
-                return { role: m.role as 'user' | 'assistant', content };
-            }),
+            messages: await convertToModelMessages(history),
             abortSignal: tgAbortSignal,
             onStepFinish: async ({ text: stepText, toolCalls, toolResults }: any) => {
                 const currentStep = stepCounter++;
@@ -428,23 +414,15 @@ export async function handleTelegramUpdate(
 
                 const typingRetry = createTypingGuard(token, chatId);
                 typingRetry.start();
+                // Strip image parts since the retry model doesn't support vision
+                const textOnlyHistory: UIMessage[] = history.map(m => ({
+                    ...m,
+                    parts: ((m.parts || []) as any[]).filter((p: any) => p.type !== 'image'),
+                }));
                 const { text: retryText } = await generateTextWithRetry({
                     model: retryModel,
                     system: retrySystemPrompt,
-                    messages: history.map(m => {
-                        const contentParts: any[] = [];
-                        for (const p of (m.parts || []) as any[]) {
-                            if (p.type === 'text' && p.text) {
-                                contentParts.push({ type: 'text', text: p.text });
-                            }
-                            // Skip image parts entirely
-                        }
-                        const content =
-                            contentParts.length === 1 && contentParts[0].type === 'text'
-                                ? contentParts[0].text
-                                : contentParts;
-                        return { role: m.role as 'user' | 'assistant', content };
-                    }),
+                    messages: await convertToModelMessages(textOnlyHistory),
                     tools: agent.getToolsForContext(ctx),
                     stopWhen: buildStopConditions(getConfig().agent),
                 });

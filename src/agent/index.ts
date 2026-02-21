@@ -198,10 +198,12 @@ export class Agent {
         // 4. Tools — filtered by access level
         const tools = this.getToolsForContext(ctx);
 
-        // 5. Turn tracker — handles context pruning + failure escalation
+        // 5. Turn tracker — handles context pruning + failure escalation + activeTools
+        const allToolNames = Object.keys(tools);
         const reasoningCtx = createTurnTracker(
             userText, chatTier as ModelTier,
             systemPrompt, this.router,
+            plan.recommendedTools, allToolNames,
         );
 
         // 5b. Adaptive step budget — effort-based maxSteps

@@ -12,7 +12,7 @@
  * @module llm/reasoning
  */
 
-import { pruneMessages, type ModelMessage } from 'ai';
+import { pruneMessages, NoSuchToolError, InvalidToolInputError, type ModelMessage } from 'ai';
 import type { ModelRouter, ModelTier } from './router';
 import { getConfig } from '../config';
 import { compressLargeToolResults } from './compress';
@@ -32,6 +32,10 @@ export interface TurnTracker {
     toolFailures: ToolFailureRecord[];
     /** Whether the model has been escalated mid-task */
     escalated: boolean;
+    /** Planner-recommended tool names — used for activeTools filtering on early steps */
+    recommendedTools: string[];
+    /** All registered tool names — needed to restore full tool access after initial filtering */
+    allToolNames: string[];
 }
 
 export interface ToolFailureRecord {
@@ -93,13 +97,13 @@ function pruneContextIfNeeded(
 /**
  * Create a `prepareStep` function for AI SDK v6's ToolLoopAgent.
  *
- * Handles only:
+ * Handles:
+ *   - activeTools filtering (planner-recommended tools on step 0)
+ *   - toolChoice: 'required' on step 0 (forces tool use instead of text dumps)
  *   - Detecting tool failures from previous steps
  *   - Context pruning in long loops
  *   - Model escalation (balanced → powerful) after repeated failures
  *   - Injecting failure context into the system prompt
- *
- * No phases. No tool filtering. The LLM decides everything.
  */
 export function createPrepareStep(tracker: TurnTracker) {
     return async (options: {
@@ -110,9 +114,48 @@ export function createPrepareStep(tracker: TurnTracker) {
     }) => {
         const { stepNumber, steps, messages } = options;
 
+        // ── Step 0: force tool use + limit to recommended tools ──
+        //    Prevents the model from dumping text without calling tools.
+        //    Recommended tools from the planner focus the model on relevant actions.
+        if (stepNumber === 0) {
+            const step0: Record<string, any> = {
+                toolChoice: 'required' as const,
+            };
+            // If the planner recommended specific tools, only expose those + deliver_answer
+            if (tracker.recommendedTools.length > 0) {
+                const active = [...new Set([...tracker.recommendedTools, 'deliver_answer', 'think', 'manage_todos'])];
+                // Only filter if recommended tools are a strict subset of all tools
+                if (active.length < tracker.allToolNames.length) {
+                    step0.activeTools = active;
+                    console.log(`[PrepareStep]: Step 0 — activeTools: [${active.join(', ')}]`);
+                }
+            }
+            return step0;
+        }
+
         // ── Detect tool failures from previous step ──────
         if (steps.length > 0) {
             const lastStep = steps[steps.length - 1];
+
+            // Check for SDK-typed errors (NoSuchToolError, InvalidToolInputError)
+            if (lastStep.error) {
+                const err = lastStep.error;
+                if (NoSuchToolError.isInstance(err)) {
+                    tracker.toolFailures.push({
+                        stepNumber: stepNumber - 1,
+                        toolName: (err as any).toolName || 'hallucinated-tool',
+                        error: `NoSuchToolError: model called non-existent tool "${(err as any).toolName}"`,
+                    });
+                } else if (InvalidToolInputError.isInstance(err)) {
+                    tracker.toolFailures.push({
+                        stepNumber: stepNumber - 1,
+                        toolName: (err as any).toolName || 'unknown',
+                        error: `InvalidToolInputError: bad args for "${(err as any).toolName}"`,
+                    });
+                }
+            }
+
+            // Check tool result strings for error patterns
             if (lastStep.toolResults) {
                 for (const tr of lastStep.toolResults) {
                     const raw = (tr as any).output;
@@ -178,6 +221,8 @@ export function createTurnTracker(
     tier: ModelTier,
     baseSystemPrompt: string,
     router: ModelRouter,
+    recommendedTools: string[] = [],
+    allToolNames: string[] = [],
 ): TurnTracker {
     return {
         userMessage,
@@ -186,6 +231,8 @@ export function createTurnTracker(
         router,
         toolFailures: [],
         escalated: false,
+        recommendedTools,
+        allToolNames,
     };
 }
 
@@ -218,7 +265,7 @@ export const createReasoningContext = (
     baseSystemPrompt: string,
     router: ModelRouter,
     _allToolNames?: string[],
-) => createTurnTracker(userMessage, tier, baseSystemPrompt, router);
+) => createTurnTracker(userMessage, tier, baseSystemPrompt, router, [], _allToolNames ?? []);
 
 /** @deprecated Use getTurnSummary */
 export const getReasoningSummary = (tracker: TurnTracker) => ({
