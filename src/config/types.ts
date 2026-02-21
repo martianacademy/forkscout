@@ -155,10 +155,6 @@ export interface AgentSettings {
     plannerMaxMemoryQueries: number;
     /** Max chars of agent response sent to the postflight evaluator */
     postflightMaxResponseChars: number;
-
-    // ── Response resolution ─────────────────────────
-    /** Minimum char length to consider a tool result usable in response fallback */
-    resolveMinContentLength: number;
 }
 
 // ── SearXNG ────────────────────────────────────────────
@@ -309,7 +305,6 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         plannerChatHistoryLimit: 5,
         plannerMaxMemoryQueries: 3,
         postflightMaxResponseChars: 2000,
-        resolveMinContentLength: 20,
     },
     searxng: { url: 'http://localhost:8888' },
 };

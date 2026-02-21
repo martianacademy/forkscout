@@ -157,7 +157,6 @@ export function buildAgentConfig(file: any): AgentSettings {
         plannerChatHistoryLimit: file?.plannerChatHistoryLimit ?? DEFAULTS.agent.plannerChatHistoryLimit,
         plannerMaxMemoryQueries: file?.plannerMaxMemoryQueries ?? DEFAULTS.agent.plannerMaxMemoryQueries,
         postflightMaxResponseChars: file?.postflightMaxResponseChars ?? DEFAULTS.agent.postflightMaxResponseChars,
-        resolveMinContentLength: file?.resolveMinContentLength ?? DEFAULTS.agent.resolveMinContentLength,
     };
 }
 
