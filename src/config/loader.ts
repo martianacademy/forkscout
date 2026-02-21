@@ -64,7 +64,7 @@ export function loadConfig(force = false): ForkscoutConfig {
         || DEFAULTS.model;
 
     // Parse fallback providers — filter to valid ProviderType values
-    const validProviders: Set<string> = new Set(['openrouter', 'openai', 'anthropic', 'google', 'github', 'ollama', 'openai-compatible']);
+    const validProviders: Set<string> = new Set(['openrouter', 'openai', 'anthropic', 'google', 'github', 'copilot-bridge', 'ollama', 'openai-compatible']);
     const fallbackProviders: ProviderType[] = Array.isArray(fileConfig.fallbackProviders)
         ? (fileConfig.fallbackProviders as string[])
             .filter((p): p is ProviderType => validProviders.has(p) && p !== provider)
@@ -96,6 +96,7 @@ export function loadConfig(force = false): ForkscoutConfig {
             googleApiUrl: env('GOOGLE_API_URL') || PROVIDER_URLS.google,
             githubApiKey: env('GITHUB_API_KEY') || '',
             githubApiUrl: env('GITHUB_API_URL') || PROVIDER_URLS.github,
+            copilotBridgeUrl: env('COPILOT_BRIDGE_URL') || PROVIDER_URLS['copilot-bridge'] || '',
             openApiCompatibleApiKey: env('OPEN_API_COMPATIBLE_API_KEY') || '',
             openApiCompatibleApiUrl: env('OPEN_API_COMPATIBLE_API_URL') || '',
             adminSecret: env('ADMIN_SECRET') || '',
@@ -127,6 +128,7 @@ export function resolveApiKeyForProvider(provider: ProviderType, cfg?: Forkscout
         anthropic: c.secrets.anthropicApiKey,
         google: c.secrets.googleApiKey,
         github: c.secrets.githubApiKey,
+        'copilot-bridge': 'copilot-bridge',
         ollama: '',
         'openai-compatible': c.secrets.openApiCompatibleApiKey,
     };
@@ -156,6 +158,7 @@ export function resolveApiUrlForProvider(provider: ProviderType, cfg?: Forkscout
         anthropic: c.secrets.anthropicApiUrl,
         google: c.secrets.googleApiUrl,
         github: c.secrets.githubApiUrl,
+        'copilot-bridge': c.secrets.copilotBridgeUrl,
         ollama: PROVIDER_URLS.ollama,
         'openai-compatible': c.secrets.openApiCompatibleApiUrl,
     };

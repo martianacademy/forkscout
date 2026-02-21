@@ -175,6 +175,7 @@ export function resolveProvider(raw: string): ProviderType {
         case 'google': case 'google-ai': case 'gemini': return 'google';
         case 'ollama': return 'ollama';
         case 'github': case 'github-models': return 'github';
+        case 'copilot-bridge': case 'copilot': case 'vscode': return 'copilot-bridge';
         case 'openai-compatible': case 'custom': return 'openai-compatible';
         default: return 'openrouter';
     }
@@ -191,6 +192,7 @@ export function resolveProviderUrl(provider: ProviderType): string | undefined {
         anthropic: 'ANTHROPIC_API_URL',
         google: 'GOOGLE_API_URL',
         github: 'GITHUB_API_URL',
+        'copilot-bridge': 'COPILOT_BRIDGE_URL',
         'openai-compatible': 'OPEN_API_COMPATIBLE_API_URL',
     };
     const envKey = envUrlMap[provider];

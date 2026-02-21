@@ -9,7 +9,7 @@
 
 // ── Provider types ─────────────────────────────────────
 
-export type ProviderType = 'openrouter' | 'openai' | 'anthropic' | 'google' | 'github' | 'ollama' | 'openai-compatible';
+export type ProviderType = 'openrouter' | 'openai' | 'anthropic' | 'google' | 'github' | 'copilot-bridge' | 'ollama' | 'openai-compatible';
 
 // ── Tier & Router ──────────────────────────────────────
 
@@ -209,6 +209,7 @@ export interface ForkscoutConfig {
         googleApiUrl: string;
         githubApiKey: string;
         githubApiUrl: string;
+        copilotBridgeUrl: string;
         openApiCompatibleApiKey: string;
         openApiCompatibleApiUrl: string;
         adminSecret: string;
@@ -244,6 +245,11 @@ export const PROVIDER_ROUTER_DEFAULTS: Record<string, RouterConfig> = {
         fast: { model: 'gpt-4o-mini', provider: 'github' },
         balanced: { model: 'gpt-4o', provider: 'github' },
         powerful: { model: 'o1', provider: 'github' },
+    },
+    'copilot-bridge': {
+        fast: { model: 'gpt-4o-mini', provider: 'copilot-bridge' },
+        balanced: { model: 'claude-sonnet-4.6', provider: 'copilot-bridge' },
+        powerful: { model: 'claude-opus-4.6', provider: 'copilot-bridge' },
     },
 };
 
@@ -324,5 +330,6 @@ export const PROVIDER_URLS: Record<string, string> = {
     anthropic: 'https://api.anthropic.com/v1',
     google: 'https://generativelanguage.googleapis.com/v1beta',
     github: 'https://models.inference.ai.azure.com',
+    'copilot-bridge': 'http://localhost:4000/v1',
     ollama: 'http://localhost:11434/v1',
 };

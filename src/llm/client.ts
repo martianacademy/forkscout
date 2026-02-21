@@ -18,7 +18,7 @@ function openRouterHeaders() {
  * LLM Configuration
  */
 export interface LLMConfig {
-    provider: 'openai' | 'ollama' | 'anthropic' | 'google' | 'github' | 'openrouter' | 'openai-compatible' | 'custom';
+    provider: 'openai' | 'ollama' | 'anthropic' | 'google' | 'github' | 'copilot-bridge' | 'openrouter' | 'openai-compatible' | 'custom';
     model: string;
     baseURL?: string;
     apiKey?: string;
@@ -55,6 +55,7 @@ export class LLMClient {
                 ollama: 'http://localhost:11434/v1',
                 openai: 'https://api.openai.com/v1',
                 openrouter: 'https://openrouter.ai/api/v1',
+                'copilot-bridge': 'http://localhost:4000/v1',
             };
             if (defaults[patch.provider]) {
                 this.config.baseURL = defaults[patch.provider];
@@ -101,6 +102,14 @@ export class LLMClient {
                 const p = createOpenAI({
                     baseURL: this.config.baseURL || getConfig().secrets.githubApiUrl || 'https://models.inference.ai.azure.com',
                     apiKey: this.config.apiKey || getConfig().secrets.githubApiKey || '',
+                });
+                return p.chat(this.config.model);
+            }
+
+            case 'copilot-bridge': {
+                const p = createOpenAI({
+                    baseURL: this.config.baseURL || getConfig().secrets.copilotBridgeUrl || 'http://localhost:4000/v1',
+                    apiKey: 'copilot-bridge',
                 });
                 return p.chat(this.config.model);
             }

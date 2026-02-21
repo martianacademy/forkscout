@@ -1,0 +1,58 @@
+{
+    "name": "copilot-bridge",
+    "displayName": "Copilot Bridge",
+    "description": "Exposes VS Code Copilot models as an OpenAI-compatible HTTP API for Forkscout",
+    "version": "0.1.0",
+    "publisher": "forkscout",
+    "engines": {
+        "vscode": "^1.90.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "configuration": {
+            "title": "Copilot Bridge",
+            "properties": {
+                "copilotBridge.port": {
+                    "type": "number",
+                    "default": 4000,
+                    "description": "HTTP port for the bridge server"
+                },
+                "copilotBridge.autoStart": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Auto-start the bridge server when VS Code opens"
+                }
+            }
+        },
+        "commands": [
+            {
+                "command": "copilotBridge.start",
+                "title": "Copilot Bridge: Start Server"
+            },
+            {
+                "command": "copilotBridge.stop",
+                "title": "Copilot Bridge: Stop Server"
+            },
+            {
+                "command": "copilotBridge.restart",
+                "title": "Copilot Bridge: Restart Server"
+            }
+        ]
+    },
+    "scripts": {
+        "build": "tsc",
+        "watch": "tsc -w",
+        "package": "npx @vscode/vsce package"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.90.0",
+        "@types/node": "^20.0.0",
+        "typescript": "^5.5.0"
+    }
+}

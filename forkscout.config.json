@@ -1,7 +1,6 @@
 {
     "$schema": "./packages/agent/src/config.schema.json",
     "provider": "openrouter",
-    "baseURL": "https://api.aimlapi.com/v1",
     "fallbackProviders": [
         "openrouter",
         "google",
@@ -62,6 +61,28 @@
             },
             "powerful": {
                 "model": "claude-sonnet-4-5-20250929"
+            }
+        },
+        "github": {
+            "fast": {
+                "model": "gpt-4o-mini"
+            },
+            "balanced": {
+                "model": "gpt-4o"
+            },
+            "powerful": {
+                "model": "o1"
+            }
+        },
+        "copilot-bridge": {
+            "fast": {
+                "model": "gpt-4o-mini"
+            },
+            "balanced": {
+                "model": "claude-sonnet-4.6"
+            },
+            "powerful": {
+                "model": "claude-opus-4.6"
             }
         }
     },
