@@ -2,7 +2,6 @@ import { ToolLoopAgent, type ToolSet } from 'ai';
 import { LLMClient } from '../llm/client';
 import { ModelRouter, createRouterFromEnv, type ModelPurpose, type ModelTier } from '../llm/router';
 import { MemoryManager } from '../memory';
-import type { Scheduler, CronAlert } from '../scheduler';
 import { McpConnector } from '../mcp/connector';
 import { createTelegramTools } from '../tools/telegram-tools';
 import { getToolAccess } from '../tools/access';
@@ -12,13 +11,13 @@ import { createSurvivalMonitor, type SurvivalMonitor } from '../survival';
 import { ChannelAuthStore } from '../channels/auth';
 import { connectMcpServers } from '../mcp/defaults';
 import { buildSystemPrompt as buildPrompt, type PromptCache } from './prompt-builder';
-import { createMemoryManager, createScheduler } from './factories';
+import { createMemoryManager } from './factories';
 import { registerDefaultTools } from './tools-setup';
 import { resolveApiKeyForProvider, getConfig } from '../config';
 import { buildStopConditions, type LoopControlConfig } from '../llm/stop-conditions';
 import { createTurnTracker, createPrepareStep, type TurnTracker } from '../llm/reasoning';
-import { runPlanner, effortToTier, formatPlanForPrompt, type PlannerResult, type PreFetchedMemory } from '../llm/planner';
 import type { SubAgentDeps, SubAgentProgressCallback } from '../tools/agent-tool';
+import { buildToolIndex } from '../tools/tool-index';
 
 // Re-export all types from the barrel
 export type { AgentConfig, AgentState, ChatContext, ChatChannel } from './types';
@@ -40,6 +39,8 @@ export interface ChatAgentOptions {
     onError?: (event: { error: unknown }) => void;
     /** Per-request sub-agent progress callback — replaces the old singleton pattern. */
     onSubAgentProgress?: SubAgentProgressCallback;
+    /** Parent abort signal — propagated to sub-agents so "stop" kills everything */
+    abortSignal?: AbortSignal;
     /** Override model (skip complexity routing) */
     model?: any;
     /** Override model tier label (for logging) */
@@ -67,18 +68,13 @@ export interface ChatAgentResult {
     systemPrompt: string;
     /** The tools given to this agent */
     tools: Record<string, any>;
-    /** Planning agent result */
-    plan: PlannerResult;
-    /** Pre-fetched memory from the planner */
-    preFetched: PreFetchedMemory;
 }
 /**
  * Forkscout Agent — AI SDK v6 powered agent with tools, memory, and MCP.
  *
  * The agent manages:
- *   - Tool registry (core + scheduler + MCP)
+ *   - Tool registry (core + MCP)
  *   - Memory (vector-search long-term recall)
- *   - Scheduler (cron jobs with urgency evaluation)
  *   - LLM model selection + hot-swap
  *
  * The HTTP server (server.ts) handles streaming via AI SDK's streamText.
@@ -89,8 +85,6 @@ export class Agent {
     private toolSet: Record<string, any> = {};
     private config: AgentConfig;
     private state: AgentState;
-    private scheduler: Scheduler;
-    private urgentAlerts: CronAlert[] = [];
     private mcpConnector: McpConnector = new McpConnector();
     private mcpConfigPath: string;
     private survival: SurvivalMonitor;
@@ -112,10 +106,6 @@ export class Agent {
 
         // Subsystems
         this.memory = createMemoryManager(this.llm, this.router);
-        this.scheduler = createScheduler(this.router, (alert) => {
-            this.urgentAlerts.push(alert);
-            console.log(`\n🚨 URGENT ALERT from "${alert.jobName}": ${alert.output.slice(0, 300)}`);
-        });
 
         const storagePath = resolvePath(AGENT_ROOT, '.forkscout');
         this.survival = createSurvivalMonitor({
@@ -127,7 +117,7 @@ export class Agent {
         // Register tools (auto-discovered from src/tools/)
         if (config.autoRegisterDefaultTools !== false) {
             const result = registerDefaultTools(
-                this.toolSet, this.scheduler, this.mcpConnector, this.mcpConfigPath,
+                this.toolSet, this.mcpConnector, this.mcpConfigPath,
                 this.memory, this.survival, this.channelAuth, this.router,
             );
             this.subAgentDeps = result.subAgentDeps;
@@ -169,22 +159,20 @@ export class Agent {
             this.subAgentDeps.onProgress = onSubAgentProgress;
         }
 
-        // 1. Planning Agent: context-aware structured analysis
-        const { plan, preFetched } = await runPlanner(userText, this.router, this.memory, ctx);
-        console.log(`[Planner]: effort=${plan.effort} tasks=${plan.tasks.length} tools=[${plan.recommendedTools.join(', ')}]`);
+        // Wire parent abort signal so "stop" kills sub-agents too
+        if (opts.abortSignal && this.subAgentDeps) {
+            this.subAgentDeps.parentAbortSignal = opts.abortSignal;
+        }
 
-        // 2. Build enriched system prompt — planner already gathered memory context
-        let systemPrompt = await this.buildSystemPrompt(userText, ctx, plan.effort, preFetched);
-        // Inject the planner's structured plan so the model knows the approach
-        const planInjection = formatPlanForPrompt(plan, preFetched);
-        if (planInjection) systemPrompt += planInjection;
+        // 1. Build enriched system prompt (always full memory — no effort gating)
+        let systemPrompt = await this.buildSystemPrompt(userText, ctx);
         if (opts.systemPromptSuffix) {
             systemPrompt += '\n\n' + opts.systemPromptSuffix;
         }
 
-        // 3. Model selection — use override or effort-based tier routing
+        // 2. Model selection — use override or balanced tier by default
         let chatModel = opts.model;
-        let chatTier = opts.tier || effortToTier(plan.effort);
+        let chatTier = opts.tier || 'balanced';
         let chatModelId = opts.modelId || '';
 
         if (!chatModel) {
@@ -192,32 +180,26 @@ export class Agent {
             chatModel = selection.model;
             chatTier = selection.tier;
             chatModelId = selection.modelId;
-            console.log(`[Router]: Using ${chatTier} tier (${chatModelId}) [effort: ${plan.effort}]`);
+            console.log(`[Router]: Using ${chatTier} tier (${chatModelId})`);
         }
 
-        // 4. Tools — filtered by access level
+        // 3. Tools — filtered by access level
         const tools = this.getToolsForContext(ctx);
 
-        // 5. Turn tracker — handles context pruning + failure escalation + activeTools
+        // 4. Turn tracker — handles context pruning + failure escalation
         const allToolNames = Object.keys(tools);
         const reasoningCtx = createTurnTracker(
             userText, chatTier as ModelTier,
             systemPrompt, this.router,
-            plan.recommendedTools, allToolNames,
+            [], allToolNames,
         );
 
-        // 5b. Adaptive step budget — effort-based maxSteps
+        // 5. Stop conditions — always use maxSteps from config
         const agentCfg = getConfig().agent;
-        const effortMaxSteps: Record<string, number> = {
-            quick: agentCfg.effortStepsQuick,
-            moderate: agentCfg.effortStepsModerate,
-            deep: agentCfg.maxSteps,
-        };
         const adaptiveConfig: LoopControlConfig = {
             ...agentCfg,
-            maxSteps: effortMaxSteps[plan.effort] ?? agentCfg.maxSteps,
         };
-        console.log(`[StopConditions]: maxSteps=${adaptiveConfig.maxSteps} (effort: ${plan.effort})`);
+        console.log(`[StopConditions]: maxSteps=${adaptiveConfig.maxSteps}`);
 
         // 6. Build the ToolLoopAgent with all configuration
         const agent = new ToolLoopAgent({
@@ -232,7 +214,7 @@ export class Agent {
             onFinish: onFinish ? (result: any) => { onFinish(result); } : undefined,
         });
 
-        return { agent, reasoningCtx, tier: chatTier, modelId: chatModelId, systemPrompt, tools, plan, preFetched };
+        return { agent, reasoningCtx, tier: chatTier, modelId: chatModelId, systemPrompt, tools };
     }
 
     getRouter(): ModelRouter {
@@ -268,6 +250,8 @@ export class Agent {
     setTelegramBridge(bridge: any): void {
         this.telegramBridge = bridge;
         Object.assign(this.toolSet, createTelegramTools(bridge, this.channelAuth));
+        // Rebuild tool index to include telegram tools
+        if (this.state.running) buildToolIndex(this.toolSet);
         console.log(`[Agent]: Telegram messaging tools registered`);
     }
 
@@ -280,7 +264,10 @@ export class Agent {
      * Called by channel handlers in their finally blocks.
      */
     clearSubAgentProgress(): void {
-        if (this.subAgentDeps) this.subAgentDeps.onProgress = undefined;
+        if (this.subAgentDeps) {
+            this.subAgentDeps.onProgress = undefined;
+            this.subAgentDeps.parentAbortSignal = undefined;
+        }
     }
 
     getToolList(): Array<{ name: string; description: string }> {
@@ -292,9 +279,9 @@ export class Agent {
 
     // ── System Prompt ──────────────────────────────────
 
-    async buildSystemPrompt(userQuery: string, ctx?: ChatContext, effort?: string, preFetched?: PreFetchedMemory): Promise<string> {
+    async buildSystemPrompt(userQuery: string, ctx?: ChatContext): Promise<string> {
         const guestTools = ctx?.isAdmin ? undefined : this.getToolsForContext(ctx);
-        return buildPrompt(this.config, this.memory, this.survival, this.urgentAlerts, this.promptCache, this.router, userQuery, ctx, guestTools, effort, preFetched);
+        return buildPrompt(this.config, this.memory, this.survival, this.promptCache, this.router, userQuery, ctx, guestTools);
     }
 
     // ── Memory ─────────────────────────────────────────
@@ -326,12 +313,15 @@ export class Agent {
         const mcpCfg = typeof this.config.mcpConfig === 'object' ? this.config.mcpConfig : undefined;
         await connectMcpServers(mcpCfg, this.mcpConfigPath, this.mcpConnector, this.toolSet, this.discoveredMcpServers);
         await this.survival.start();
+
+        // Build tool index for Tool RAG (search_available_tools) — must happen after all tools are registered
+        buildToolIndex(this.toolSet);
+
         this.state.running = true;
     }
 
     async stop(): Promise<void> {
         this.state.running = false;
-        this.scheduler.shutdown();
         this.router.getUsage().stop();
         await this.survival.stop();
         await this.mcpConnector.disconnect();

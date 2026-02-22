@@ -30,6 +30,7 @@ const SKIP_FILES = new Set([
     'error-enhancer.ts', 'error-enhancer.js',
     'memory-tools.ts', 'memory-tools.js',   // legacy (deleted, dist/ artifact)
     'registry.ts', 'registry.js',           // legacy (deleted, dist/ artifact)
+    'tool-index.ts', 'tool-index.js',       // Tool RAG index — not a tool file
 ]);
 
 /** Result of scanning the tools directory */

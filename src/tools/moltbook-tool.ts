@@ -8,12 +8,6 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
-import type { ToolDeps } from './deps';
-
-/** Auto-discovered by auto-loader — called with ToolDeps at startup. */
-export function register(_deps: ToolDeps) {
-    return createMoltbookTools();
-}
 
 const MOLTBOOK_API_BASE = 'https://www.moltbook.com/api/v1';
 
@@ -261,179 +255,175 @@ async function tryVerify(verification: { verification_code: string; challenge_te
 
 // ── Tool definitions ────────────────────────────────────
 
-export function createMoltbookTools() {
-    return {
-        moltbook_create_post: tool({
-            description:
-                'Create a new post on Moltbook (social network for AI agents). ' +
-                'Requires title, content, and submolt (default "general"). ' +
-                'Auto-verifies captcha (up to 3 retries). 2-hour cooldown between posts for new agents.',
-            inputSchema: z.object({
-                title: z.string().describe('Post title'),
-                content: z.string().describe('Post body (markdown supported)'),
-                submolt: z.string().default('general').describe('Submolt to post in'),
-            }),
-            execute: async ({ title, content, submolt }: { title: string; content: string; submolt: string }) => {
-                try {
-                    for (let attempt = 0; attempt < 3; attempt++) {
-                        const result = await moltbookFetch('POST', '/posts', { submolt_name: submolt, title, content });
-                        const err = formatError(result, 'Create post');
-                        if (err) return err;
+export const moltbookCreatePost = tool({
+    description:
+        'Create a new post on Moltbook (social network for AI agents). ' +
+        'Requires title, content, and submolt (default "general"). ' +
+        'Auto-verifies captcha (up to 3 retries). 2-hour cooldown between posts for new agents.',
+    inputSchema: z.object({
+        title: z.string().describe('Post title'),
+        content: z.string().describe('Post body (markdown supported)'),
+        submolt: z.string().default('general').describe('Submolt to post in'),
+    }),
+    execute: async ({ title, content, submolt }: { title: string; content: string; submolt: string }) => {
+        try {
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const result = await moltbookFetch('POST', '/posts', { submolt_name: submolt, title, content });
+                const err = formatError(result, 'Create post');
+                if (err) return err;
 
-                        const post = (result as MoltbookResponse).post as Record<string, any> | undefined;
-                        const postId = post?.id;
-                        const verification = post?.verification;
-                        if (!verification) return `✅ Post published (id: ${postId})`;
-                        if (await tryVerify(verification)) return `✅ Post verified and live (id: ${postId})`;
-                        if (postId) await moltbookFetch('DELETE', `/posts/${postId}`);
-                    }
-                    return '❌ Captcha verification failed after 3 attempts. The captcha may have changed format.';
-                } catch (err) {
-                    return `❌ moltbook_create_post failed: ${err instanceof Error ? err.message : String(err)}`;
-                }
-            },
-        }),
+                const post = (result as MoltbookResponse).post as Record<string, any> | undefined;
+                const postId = post?.id;
+                const verification = post?.verification;
+                if (!verification) return `✅ Post published (id: ${postId})`;
+                if (await tryVerify(verification)) return `✅ Post verified and live (id: ${postId})`;
+                if (postId) await moltbookFetch('DELETE', `/posts/${postId}`);
+            }
+            return '❌ Captcha verification failed after 3 attempts. The captcha may have changed format.';
+        } catch (err) {
+            return `❌ moltbook_create_post failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+    },
+});
 
-        moltbook_comment: tool({
-            description:
-                'Comment on a Moltbook post. Auto-verifies captcha. 60-second cooldown for new agents.',
-            inputSchema: z.object({
-                post_id: z.string().describe('The post ID to comment on'),
-                content: z.string().describe('Comment text'),
-            }),
-            execute: async ({ post_id, content }: { post_id: string; content: string }) => {
-                try {
-                    for (let attempt = 0; attempt < 3; attempt++) {
-                        const result = await moltbookFetch('POST', `/posts/${post_id}/comments`, { content });
-                        const err = formatError(result, 'Comment');
-                        if (err) return err;
+export const moltbookComment = tool({
+    description:
+        'Comment on a Moltbook post. Auto-verifies captcha. 60-second cooldown for new agents.',
+    inputSchema: z.object({
+        post_id: z.string().describe('The post ID to comment on'),
+        content: z.string().describe('Comment text'),
+    }),
+    execute: async ({ post_id, content }: { post_id: string; content: string }) => {
+        try {
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const result = await moltbookFetch('POST', `/posts/${post_id}/comments`, { content });
+                const err = formatError(result, 'Comment');
+                if (err) return err;
 
-                        const comment = (result as MoltbookResponse).comment as Record<string, any> | undefined;
-                        const commentId = comment?.id;
-                        const verification = comment?.verification;
-                        if (!verification) return `✅ Comment published (id: ${commentId})`;
-                        if (await tryVerify(verification)) return `✅ Comment verified and live (id: ${commentId})`;
-                        if (commentId) await moltbookFetch('DELETE', `/posts/${post_id}/comments/${commentId}`);
-                    }
-                    return '❌ Captcha verification failed after 3 attempts.';
-                } catch (err) {
-                    return `❌ moltbook_comment failed: ${err instanceof Error ? err.message : String(err)}`;
-                }
-            },
-        }),
+                const comment = (result as MoltbookResponse).comment as Record<string, any> | undefined;
+                const commentId = comment?.id;
+                const verification = comment?.verification;
+                if (!verification) return `✅ Comment published (id: ${commentId})`;
+                if (await tryVerify(verification)) return `✅ Comment verified and live (id: ${commentId})`;
+                if (commentId) await moltbookFetch('DELETE', `/posts/${post_id}/comments/${commentId}`);
+            }
+            return '❌ Captcha verification failed after 3 attempts.';
+        } catch (err) {
+            return `❌ moltbook_comment failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+    },
+});
 
-        moltbook_upvote: tool({
-            description: 'Upvote a post on Moltbook',
-            inputSchema: z.object({
-                post_id: z.string().describe('The post ID to upvote'),
-            }),
-            execute: async ({ post_id }: { post_id: string }) => {
-                try {
-                    const result = await moltbookFetch('POST', `/posts/${post_id}/upvote`, {});
-                    const err = formatError(result, 'Upvote');
-                    if (err) return err;
-                    return `✅ Upvoted post ${post_id}`;
-                } catch (err) {
-                    return `❌ moltbook_upvote failed: ${err instanceof Error ? err.message : String(err)}`;
-                }
-            },
-        }),
+export const moltbookUpvote = tool({
+    description: 'Upvote a post on Moltbook',
+    inputSchema: z.object({
+        post_id: z.string().describe('The post ID to upvote'),
+    }),
+    execute: async ({ post_id }: { post_id: string }) => {
+        try {
+            const result = await moltbookFetch('POST', `/posts/${post_id}/upvote`, {});
+            const err = formatError(result, 'Upvote');
+            if (err) return err;
+            return `✅ Upvoted post ${post_id}`;
+        } catch (err) {
+            return `❌ moltbook_upvote failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+    },
+});
 
-        moltbook_downvote: tool({
-            description: 'Downvote a post on Moltbook',
-            inputSchema: z.object({
-                post_id: z.string().describe('The post ID to downvote'),
-            }),
-            execute: async ({ post_id }: { post_id: string }) => {
-                try {
-                    const result = await moltbookFetch('POST', `/posts/${post_id}/downvote`, {});
-                    const err = formatError(result, 'Downvote');
-                    if (err) return err;
-                    return `✅ Downvoted post ${post_id}`;
-                } catch (err) {
-                    return `❌ moltbook_downvote failed: ${err instanceof Error ? err.message : String(err)}`;
-                }
-            },
-        }),
+export const moltbookDownvote = tool({
+    description: 'Downvote a post on Moltbook',
+    inputSchema: z.object({
+        post_id: z.string().describe('The post ID to downvote'),
+    }),
+    execute: async ({ post_id }: { post_id: string }) => {
+        try {
+            const result = await moltbookFetch('POST', `/posts/${post_id}/downvote`, {});
+            const err = formatError(result, 'Downvote');
+            if (err) return err;
+            return `✅ Downvoted post ${post_id}`;
+        } catch (err) {
+            return `❌ moltbook_downvote failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+    },
+});
 
-        moltbook_get_feed: tool({
-            description: 'Browse the Moltbook feed. Returns posts sorted by hot/new/top.',
-            inputSchema: z.object({
-                sort: z.enum(['hot', 'new', 'top']).default('hot').describe('Sort order'),
-                limit: z.number().default(10).describe('Number of posts (max 25)'),
-                submolt: z.string().default('general').describe('Submolt to browse'),
-            }),
-            execute: async ({ sort, limit, submolt }: { sort: string; limit: number; submolt: string }) => {
-                try {
-                    const result = await moltbookFetch('GET', `/posts?submolt=${submolt}&sort=${sort}&limit=${Math.min(limit, 25)}`);
-                    const err = formatError(result, 'Get feed');
-                    if (err) return err;
+export const moltbookGetFeed = tool({
+    description: 'Browse the Moltbook feed. Returns posts sorted by hot/new/top.',
+    inputSchema: z.object({
+        sort: z.enum(['hot', 'new', 'top']).default('hot').describe('Sort order'),
+        limit: z.number().default(10).describe('Number of posts (max 25)'),
+        submolt: z.string().default('general').describe('Submolt to browse'),
+    }),
+    execute: async ({ sort, limit, submolt }: { sort: string; limit: number; submolt: string }) => {
+        try {
+            const result = await moltbookFetch('GET', `/posts?submolt=${submolt}&sort=${sort}&limit=${Math.min(limit, 25)}`);
+            const err = formatError(result, 'Get feed');
+            if (err) return err;
 
-                    const posts = ((result as MoltbookResponse).posts as any[]) || [];
-                    if (posts.length === 0) return 'No posts found in this submolt.';
+            const posts = ((result as MoltbookResponse).posts as any[]) || [];
+            if (posts.length === 0) return 'No posts found in this submolt.';
 
-                    const lines = [`📰 **${submolt}** feed (${posts.length} posts, sorted by ${sort}):\n`];
-                    for (const p of posts) {
-                        const preview = typeof p.content === 'string' ? p.content.slice(0, 120) : '';
-                        lines.push(`- **${p.title}** (id: ${p.id}) by ${p.author?.name || 'unknown'} | ⬆${p.score ?? 0} 💬${p.comment_count ?? 0}`);
-                        if (preview) lines.push(`  ${preview}${p.content?.length > 120 ? '…' : ''}`);
-                    }
-                    return lines.join('\n');
-                } catch (err) {
-                    return `❌ moltbook_get_feed failed: ${err instanceof Error ? err.message : String(err)}`;
-                }
-            },
-        }),
+            const lines = [`📰 **${submolt}** feed (${posts.length} posts, sorted by ${sort}):\n`];
+            for (const p of posts) {
+                const preview = typeof p.content === 'string' ? p.content.slice(0, 120) : '';
+                lines.push(`- **${p.title}** (id: ${p.id}) by ${p.author?.name || 'unknown'} | ⬆${p.score ?? 0} 💬${p.comment_count ?? 0}`);
+                if (preview) lines.push(`  ${preview}${p.content?.length > 120 ? '…' : ''}`);
+            }
+            return lines.join('\n');
+        } catch (err) {
+            return `❌ moltbook_get_feed failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+    },
+});
 
-        moltbook_get_comments: tool({
-            description: 'Get comments on a Moltbook post',
-            inputSchema: z.object({
-                post_id: z.string().describe('The post ID'),
-                sort: z.enum(['hot', 'new', 'top']).default('new').describe('Sort order'),
-                limit: z.number().default(10).describe('Number of comments'),
-            }),
-            execute: async ({ post_id, sort, limit }: { post_id: string; sort: string; limit: number }) => {
-                try {
-                    const result = await moltbookFetch('GET', `/posts/${post_id}/comments?sort=${sort}&limit=${limit}`);
-                    const err = formatError(result, 'Get comments');
-                    if (err) return err;
+export const moltbookGetComments = tool({
+    description: 'Get comments on a Moltbook post',
+    inputSchema: z.object({
+        post_id: z.string().describe('The post ID'),
+        sort: z.enum(['hot', 'new', 'top']).default('new').describe('Sort order'),
+        limit: z.number().default(10).describe('Number of comments'),
+    }),
+    execute: async ({ post_id, sort, limit }: { post_id: string; sort: string; limit: number }) => {
+        try {
+            const result = await moltbookFetch('GET', `/posts/${post_id}/comments?sort=${sort}&limit=${limit}`);
+            const err = formatError(result, 'Get comments');
+            if (err) return err;
 
-                    const comments = ((result as MoltbookResponse).comments as any[]) || [];
-                    if (comments.length === 0) return `No comments on post ${post_id}.`;
+            const comments = ((result as MoltbookResponse).comments as any[]) || [];
+            if (comments.length === 0) return `No comments on post ${post_id}.`;
 
-                    const lines = [`💬 ${comments.length} comment(s) on post ${post_id}:\n`];
-                    for (const c of comments) {
-                        lines.push(`- **${c.author?.name || 'anon'}** (⬆${c.score ?? 0}): ${c.content?.slice(0, 200) || ''}`);
-                    }
-                    return lines.join('\n');
-                } catch (err) {
-                    return `❌ moltbook_get_comments failed: ${err instanceof Error ? err.message : String(err)}`;
-                }
-            },
-        }),
+            const lines = [`💬 ${comments.length} comment(s) on post ${post_id}:\n`];
+            for (const c of comments) {
+                lines.push(`- **${c.author?.name || 'anon'}** (⬆${c.score ?? 0}): ${c.content?.slice(0, 200) || ''}`);
+            }
+            return lines.join('\n');
+        } catch (err) {
+            return `❌ moltbook_get_comments failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+    },
+});
 
-        moltbook_my_profile: tool({
-            description: 'Get current Moltbook agent profile (karma, posts, followers)',
-            inputSchema: z.object({}),
-            execute: async () => {
-                try {
-                    const result = await moltbookFetch('GET', '/agents/me');
-                    const err = formatError(result, 'Get profile');
-                    if (err) return err;
+export const moltbookMyProfile = tool({
+    description: 'Get current Moltbook agent profile (karma, posts, followers)',
+    inputSchema: z.object({}),
+    execute: async () => {
+        try {
+            const result = await moltbookFetch('GET', '/agents/me');
+            const err = formatError(result, 'Get profile');
+            if (err) return err;
 
-                    const a = (result as MoltbookResponse).agent as Record<string, any>;
-                    if (!a) return '❌ No agent data in response.';
+            const a = (result as MoltbookResponse).agent as Record<string, any>;
+            if (!a) return '❌ No agent data in response.';
 
-                    return [
-                        `👤 **${a.name || 'unknown'}** ${a.is_verified ? '✅ verified' : ''}`,
-                        `Karma: ${a.karma ?? 0} | Posts: ${a.posts_count ?? 0} | Comments: ${a.comments_count ?? 0}`,
-                        `Followers: ${a.follower_count ?? 0} | Following: ${a.following_count ?? 0}`,
-                        `Joined: ${a.created_at || 'unknown'}`,
-                    ].join('\n');
-                } catch (err) {
-                    return `❌ moltbook_my_profile failed: ${err instanceof Error ? err.message : String(err)}`;
-                }
-            },
-        }),
-    };
-}
+            return [
+                `👤 **${a.name || 'unknown'}** ${a.is_verified ? '✅ verified' : ''}`,
+                `Karma: ${a.karma ?? 0} | Posts: ${a.posts_count ?? 0} | Comments: ${a.comments_count ?? 0}`,
+                `Followers: ${a.follower_count ?? 0} | Following: ${a.following_count ?? 0}`,
+                `Joined: ${a.created_at || 'unknown'}`,
+            ].join('\n');
+        } catch (err) {
+            return `❌ moltbook_my_profile failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+    },
+});
