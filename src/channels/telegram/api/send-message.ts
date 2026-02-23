@@ -30,30 +30,36 @@ export async function sendMessage(
     text: string,
     replyToMessageId?: number,
     maxLen = 4096,
-): Promise<void> {
+): Promise<number | null> {
     // Sanitize standard Markdown → Telegram-safe Markdown before splitting
     const sanitized = sanitizeTelegramMarkdown(text);
     const chunks = splitMessage(sanitized, maxLen);
+
+    let firstMessageId: number | null = null;
 
     for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         const chunkLabel = chunks.length > 1 ? ` (chunk ${i + 1}/${chunks.length})` : '';
 
         try {
-            await callApi(token, 'sendMessage', {
+            const result = await callApi<{ message_id: number }>(token, 'sendMessage', {
                 chat_id: chatId,
                 text: chunk,
                 parse_mode: 'Markdown',
                 ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
             });
+            if (i === 0) firstMessageId = result?.message_id ?? null;
         } catch {
             // Markdown parse failed — retry as plain text
             console.warn(`[Telegram API] Markdown rejected for chat ${chatId}${chunkLabel}, retrying plain text`);
-            await callApi(token, 'sendMessage', {
+            const result = await callApi<{ message_id: number }>(token, 'sendMessage', {
                 chat_id: chatId,
                 text: chunk,
                 ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
             });
+            if (i === 0) firstMessageId = result?.message_id ?? null;
         }
     }
+
+    return firstMessageId;
 }

@@ -18,9 +18,15 @@ import * as vscode from 'vscode';
 
 // ── OpenAI types (subset for translation) ──────────────
 
+export interface OpenAIContentPart {
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: { url: string; detail?: string };
+}
+
 export interface OpenAIMessage {
     role: 'system' | 'user' | 'assistant' | 'tool';
-    content?: string | null;
+    content?: string | OpenAIContentPart[] | null;
     name?: string;
     tool_calls?: OpenAIToolCall[];
     tool_call_id?: string;
@@ -79,23 +85,22 @@ export function translateRequest(req: OpenAIRequest): {
     for (const msg of req.messages) {
         switch (msg.role) {
             case 'system':
-                systemContent += (systemContent ? '\n' : '') + (msg.content || '');
+                systemContent += (systemContent ? '\n' : '') + extractText(msg.content);
                 break;
 
             case 'user': {
-                const text = systemContent
-                    ? systemContent + '\n\n' + (msg.content || '')
-                    : (msg.content || '');
+                const parts = buildUserParts(msg.content, systemContent);
                 systemContent = '';
-                messages.push(vscode.LanguageModelChatMessage.User(text));
+                messages.push(vscode.LanguageModelChatMessage.User(parts));
                 break;
             }
 
             case 'assistant':
                 if (msg.tool_calls?.length) {
                     const parts: (vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart)[] = [];
-                    if (msg.content) {
-                        parts.push(new vscode.LanguageModelTextPart(msg.content));
+                    const textVal = extractText(msg.content);
+                    if (textVal) {
+                        parts.push(new vscode.LanguageModelTextPart(textVal));
                     }
                     for (const tc of msg.tool_calls) {
                         let input: object;
@@ -105,7 +110,7 @@ export function translateRequest(req: OpenAIRequest): {
                     }
                     messages.push(vscode.LanguageModelChatMessage.Assistant(parts));
                 } else {
-                    messages.push(vscode.LanguageModelChatMessage.Assistant(msg.content || ''));
+                    messages.push(vscode.LanguageModelChatMessage.Assistant(extractText(msg.content)));
                 }
                 break;
 
@@ -113,7 +118,7 @@ export function translateRequest(req: OpenAIRequest): {
                 messages.push(vscode.LanguageModelChatMessage.User([
                     new vscode.LanguageModelToolResultPart(
                         msg.tool_call_id || '',
-                        [new vscode.LanguageModelTextPart(msg.content || '')]
+                        [new vscode.LanguageModelTextPart(extractText(msg.content))]
                     ),
                 ]));
                 break;
@@ -136,12 +141,20 @@ export function translateRequest(req: OpenAIRequest): {
         })
         );
 
-        if (req.tool_choice === 'required') {
-            options.toolMode = vscode.LanguageModelChatToolMode.Required;
-        } else if (req.tool_choice === 'none') {
+        // Normalize tool_choice — can be string or { type: string }
+        const choice = typeof req.tool_choice === 'object' && req.tool_choice
+            ? req.tool_choice.type
+            : req.tool_choice;
+
+        if (choice === 'none') {
             options.tools = undefined;
+        } else if (choice === 'required' && req.tools.length === 1) {
+            // vscode.lm only supports Required mode with exactly one tool
+            options.toolMode = vscode.LanguageModelChatToolMode.Required;
+        } else {
+            // Explicitly set Auto — vscode.lm defaults to Required otherwise
+            options.toolMode = vscode.LanguageModelChatToolMode.Auto;
         }
-        // 'auto' is the default — no action needed
     }
 
     return { messages, options };
@@ -191,4 +204,85 @@ export async function collectResponse(
             finish_reason: toolCalls.length ? 'tool_calls' : 'stop',
         }],
     };
+}
+
+// ── Multipart content helpers ──────────────────────────
+
+/** Extract plain text from content (string or array of parts) */
+function extractText(content: string | OpenAIContentPart[] | null | undefined): string {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    return content
+        .filter((p): p is OpenAIContentPart & { type: 'text' } => p.type === 'text')
+        .map(p => p.text || '')
+        .join('\n');
+}
+
+/** Build VS Code LM parts from OpenAI content, prepending system content if any */
+function buildUserParts(
+    content: string | OpenAIContentPart[] | null | undefined,
+    systemContent: string,
+): string | (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[] {
+    // Simple string content — fast path
+    if (!content || typeof content === 'string') {
+        const text = systemContent
+            ? systemContent + '\n\n' + (content || '')
+            : (content || '');
+        return text;
+    }
+
+    // Array content — may contain images
+    const parts: (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[] = [];
+    const hasImages = content.some(p => p.type === 'image_url');
+
+    // Prepend system content as text
+    if (systemContent) {
+        const firstText = content.find(p => p.type === 'text');
+        const combinedText = firstText
+            ? systemContent + '\n\n' + (firstText.text || '')
+            : systemContent;
+        parts.push(new vscode.LanguageModelTextPart(combinedText));
+    }
+
+    for (const part of content) {
+        if (part.type === 'text') {
+            // Skip if already merged with system content above
+            if (systemContent && part === content.find(p => p.type === 'text')) continue;
+            parts.push(new vscode.LanguageModelTextPart(part.text || ''));
+        } else if (part.type === 'image_url' && part.image_url?.url) {
+            const imgPart = parseImageUrl(part.image_url.url);
+            if (imgPart) {
+                parts.push(imgPart);
+            } else {
+                parts.push(new vscode.LanguageModelTextPart('[image could not be parsed]'));
+            }
+        }
+    }
+
+    // If no images were found, just return plain text (simpler for the model)
+    if (!hasImages) {
+        const allText = parts
+            .filter((p): p is vscode.LanguageModelTextPart => p instanceof vscode.LanguageModelTextPart)
+            .map(p => p.value)
+            .join('\n');
+        return allText;
+    }
+
+    return parts;
+}
+
+/** Parse a data:image/...;base64,... URL into a LanguageModelDataPart */
+function parseImageUrl(url: string): vscode.LanguageModelDataPart | null {
+    const match = url.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) return null;
+
+    const mime = match[1];
+    const base64 = match[2];
+
+    try {
+        const buffer = Buffer.from(base64, 'base64');
+        return vscode.LanguageModelDataPart.image(new Uint8Array(buffer), mime);
+    } catch {
+        return null;
+    }
 }

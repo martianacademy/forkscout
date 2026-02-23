@@ -141,18 +141,28 @@ class BridgeServer {
         }
         this.log(`Matched: ${model.id} (family=${model.family}, vendor=${model.vendor})`);
         const { messages, options } = (0, translator_1.translateRequest)(request);
+        this.log(`Options: toolMode=${options.toolMode}, tools=${options.tools?.length || 0}, tool_choice=${request.tool_choice}`);
         // Cancel on client disconnect
         const cts = new vscode.CancellationTokenSource();
         req.on('close', () => cts.cancel());
-        if (request.stream) {
-            return this.streamChat(model, messages, options, request.model, cts, res);
+        try {
+            if (request.stream) {
+                return await this.streamChat(model, messages, options, request.model, cts, res);
+            }
+            // Non-streaming
+            const response = await model.sendRequest(messages, options, cts.token);
+            const result = await (0, translator_1.collectResponse)(response, request.model);
+            this.log(`Done: finish=${result.choices[0].finish_reason}, chars=${result.choices[0].message.content?.length || 0}, tool_calls=${result.choices[0].message.tool_calls?.length || 0}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
         }
-        // Non-streaming
-        const response = await model.sendRequest(messages, options, cts.token);
-        const result = await (0, translator_1.collectResponse)(response, request.model);
-        this.log(`Done: finish=${result.choices[0].finish_reason}, chars=${result.choices[0].message.content?.length || 0}, tool_calls=${result.choices[0].message.tool_calls?.length || 0}`);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(result));
+        catch (err) {
+            this.log(`sendRequest error: ${err.message}`);
+            if (!res.headersSent) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+            }
+            res.end(JSON.stringify({ error: { message: err.message, type: 'api_error' } }));
+        }
     }
     // ── Streaming SSE ──────────────────────────────────
     async streamChat(model, messages, options, modelId, cts, res) {

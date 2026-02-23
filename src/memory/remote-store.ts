@@ -96,9 +96,14 @@ export class RemoteMemoryStore {
     // ── Lifecycle ────────────────────────────────────
 
     async init(): Promise<void> {
-        // Verify connection + cache stats
-        await this.refreshStats();
-        console.log(`🧠 Remote memory: ${this._entityCount} entities, ${this._relationCount} relations, ${this._exchangeCount} exchanges`);
+        // Verify connection + cache stats (non-fatal — agent works without memory)
+        try {
+            await this.refreshStats();
+            console.log(`🧠 Remote memory: ${this._entityCount} entities, ${this._relationCount} relations, ${this._exchangeCount} exchanges`);
+        } catch (err) {
+            this._healthy = false;
+            console.warn(`⚠️  Memory MCP unreachable — agent will run without persistent memory. Reason: ${err instanceof Error ? err.message : err}`);
+        }
     }
 
     async flush(): Promise<void> { /* no-op — MCP server manages its own persistence */ }
@@ -122,14 +127,14 @@ export class RemoteMemoryStore {
 
     // ── Entity CRUD ──────────────────────────────────
 
-    addEntity(name: string, type: EntityType, facts: string[]): Entity {
+    addEntity(name: string, type: EntityType, facts: string[], tags?: Record<string, string>): Entity {
         // Fire-and-forget for sync interface compatibility
-        this.callTool('add_entity', { name, type, facts }).catch(err =>
+        this.callTool('add_entity', { name, type, facts, ...(tags ? { tags } : {}) }).catch(err =>
             console.warn(`[Memory]: addEntity(${name}) failed: ${err instanceof Error ? err.message : err}`),
         );
         const now = Date.now();
         const structuredFacts: Fact[] = facts.map(f => ({ content: f, confidence: 1.0, sources: 1, firstSeen: now, lastConfirmed: now }));
-        return { name, type, facts: structuredFacts, lastSeen: now, accessCount: 1 };
+        return { name, type, facts: structuredFacts, lastSeen: now, accessCount: 1, ...(tags ? { tags } : {}) };
     }
 
     getEntity(_name: string): Entity | undefined {
@@ -138,9 +143,12 @@ export class RemoteMemoryStore {
         return undefined;
     }
 
-    async getEntityAsync(name: string): Promise<Entity | undefined> {
+    async getEntityAsync(name: string, query?: string, limit?: number): Promise<Entity | undefined> {
         try {
-            const text = await this.callTool('get_entity', { name });
+            const args: Record<string, any> = { name };
+            if (query) args.query = query;
+            if (limit) args.limit = limit;
+            const text = await this.callTool('get_entity', args);
             if (text.includes('not found')) return undefined;
             // Parse the text response back to entity
             return JSON.parse(text);
@@ -174,8 +182,8 @@ export class RemoteMemoryStore {
 
     // ── Exchanges ────────────────────────────────────
 
-    addExchange(user: string, assistant: string, sessionId: string): void {
-        this.callTool('add_exchange', { user, assistant, sessionId }).catch(err =>
+    addExchange(user: string, assistant: string, sessionId: string, tags?: Record<string, string>): void {
+        this.callTool('add_exchange', { user, assistant, sessionId, ...(tags ? { project: tags.project } : {}) }).catch(err =>
             console.warn(`[Memory]: addExchange failed: ${err instanceof Error ? err.message : err}`),
         );
     }
@@ -212,8 +220,8 @@ export class RemoteMemoryStore {
         return [];
     }
 
-    async searchEntitiesAsync(query: string, limit = 5): Promise<Entity[]> {
-        const text = await this.callTool('search_entities', { query, limit });
+    async searchEntitiesAsync(query: string, limit = 5, project?: string): Promise<Entity[]> {
+        const text = await this.callTool('search_entities', { query, limit, ...(project ? { project } : {}) });
         if (text.includes('No matching')) return [];
         // Parse bullet list: "• Name (type): facts"
         const entities: Entity[] = [];
@@ -238,16 +246,16 @@ export class RemoteMemoryStore {
         return [];
     }
 
-    async searchExchangesAsync(query: string, limit = 5): Promise<Exchange[]> {
-        return this.callToolJson<Exchange[]>('search_exchanges', { query, limit });
+    async searchExchangesAsync(query: string, limit = 5, project?: string): Promise<Exchange[]> {
+        return this.callToolJson<Exchange[]>('search_exchanges', { query, limit, ...(project ? { project } : {}) });
     }
 
     searchKnowledge(_query: string, _limit = 5): SearchResult[] {
         return [];
     }
 
-    async searchKnowledgeAsync(query: string, limit = 5): Promise<SearchResult[]> {
-        const text = await this.callTool('search_knowledge', { query, limit });
+    async searchKnowledgeAsync(query: string, limit = 5, project?: string): Promise<SearchResult[]> {
+        const text = await this.callTool('search_knowledge', { query, limit, ...(project ? { project } : {}) });
         if (text.includes('No relevant')) return [];
         const results: SearchResult[] = [];
         for (const line of text.split('\n')) {
@@ -264,8 +272,29 @@ export class RemoteMemoryStore {
         return { name: 'Forkscout Agent', type: 'agent-self', facts: [], lastSeen: 0, accessCount: 0 };
     }
 
-    async getSelfEntityAsync(): Promise<Entity> {
-        return this.callToolJson<Entity>('get_self_entity');
+    async getSelfEntityAsync(query?: string, limit?: number): Promise<Entity> {
+        const args: Record<string, any> = {};
+        if (query) args.query = query;
+        if (limit) args.limit = limit;
+        // When query is provided, MCP returns text format — parse facts from bullet lines
+        if (query || limit) {
+            const text = await this.callTool('get_self_entity', args);
+            const facts: Fact[] = [];
+            for (const line of text.split('\n')) {
+                const m = line.match(/^\u2022\s*\[(\d+)%\]\s*(.+)/);
+                if (m) {
+                    facts.push({
+                        content: m[2].trim(),
+                        confidence: parseInt(m[1]) / 100,
+                        sources: 1,
+                        firstSeen: 0,
+                        lastConfirmed: 0,
+                    });
+                }
+            }
+            return { name: 'Forkscout Agent', type: 'agent-self', facts, lastSeen: Date.now(), accessCount: 0 };
+        }
+        return this.callToolJson<Entity>('get_self_entity', args);
     }
 
     addSelfObservation(content: string): void {

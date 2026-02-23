@@ -70,6 +70,12 @@ export interface SubAgentDeps {
      * When set, sub-agents send live step-by-step updates to the user.
      */
     onProgress?: SubAgentProgressCallback;
+    /**
+     * Parent request's abort signal — set per-request by the channel handler.
+     * When the user sends "stop" or a new message, this signal aborts ALL sub-agents
+     * spawned during that request, not just the main agent loop.
+     */
+    parentAbortSignal?: AbortSignal;
 }
 
 /**
@@ -103,6 +109,11 @@ export function createSubAgentTool(deps: SubAgentDeps) {
             console.log(`[SubAgents]: Spawning ${count} agents in parallel: ${agents.map(a => a.id).join(', ')}`);
             const batchStart = Date.now();
 
+            // Check if parent was already aborted before we even start
+            if (deps.parentAbortSignal?.aborted) {
+                return '⏹️ Request was cancelled before sub-agents could start.';
+            }
+
             // Batch-level abort controller — kills stragglers if the batch takes too long
             const batchTimeoutMs = getConfig().agent.subAgent.batchTimeoutMs;
             const batchAbort = new AbortController();
@@ -112,6 +123,14 @@ export function createSubAgentTool(deps: SubAgentDeps) {
                     console.warn(`[SubAgents]: Batch timeout (${batchTimeoutMs}ms) — aborting remaining agents`);
                     batchAbort.abort();
                 }, batchTimeoutMs);
+            }
+
+            // If the parent request is aborted (user said "stop"), kill the batch too
+            if (deps.parentAbortSignal) {
+                deps.parentAbortSignal.addEventListener('abort', () => {
+                    console.log('[SubAgents]: Parent request aborted — killing all sub-agents');
+                    batchAbort.abort();
+                }, { once: true });
             }
 
             // Run all sub-agents concurrently
@@ -219,12 +238,7 @@ function extractFromSteps(steps: any[]): string {
                     ? raw
                     : JSON.stringify(raw, null, 2);
                 if (content && content.length > 10) {
-                    // Truncate very large tool outputs
-                    const maxLen = getConfig().agent.subAgent.outputMaxLength ?? 2000;
-                    const truncated = content.length > maxLen
-                        ? content.slice(0, maxLen) + '\n... (truncated)'
-                        : content;
-                    parts.push(`**[${tr.toolName}]:**\n${truncated}`);
+                    parts.push(`**[${tr.toolName}]:**\n${content}`);
                 }
             }
         }

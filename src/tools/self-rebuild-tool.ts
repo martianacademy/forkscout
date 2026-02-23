@@ -26,10 +26,11 @@ const RELOAD_EXIT_CODE = 10;
 export function createSelfRebuildTool(flushMemory: () => Promise<void>) {
     return tool({
         description:
-            'Rebuild the agent from source and reload. Call this AFTER making edits with safe_self_edit. ' +
-            'Validates TypeScript compilation, flushes memory to disk, then triggers a graceful restart. ' +
-            'The watchdog will rebuild from the updated source and restart the agent. ' +
-            'DO NOT call this unless you have already tested your edits with safe_self_edit (which validates on each edit).',
+            'Rebuild the agent from source and reload. ' +
+            'Use this in two cases: (1) after making edits with safe_self_edit to apply them, or ' +
+            '(2) when the user explicitly asks to rebuild/restart (e.g. says "self_rebuild") — ' +
+            'the developer may have made external edits that need to be picked up. ' +
+            'Validates TypeScript compilation, flushes memory to disk, then triggers a graceful restart via watchdog.',
         inputSchema: z.object({
             reason: z.string().describe('Brief explanation of what changed and why a rebuild is needed'),
         }),

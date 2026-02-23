@@ -36,6 +36,10 @@ export interface TurnTracker {
     recommendedTools: string[];
     /** All registered tool names — needed to restore full tool access after initial filtering */
     allToolNames: string[];
+    /** Whether dynamic tool loading (Tool RAG Phase 2) is enabled for this turn */
+    dynamicToolLoading: boolean;
+    /** Tool names discovered via search_available_tools — accumulated across steps */
+    discoveredTools: Set<string>;
 }
 
 export interface ToolFailureRecord {
@@ -52,6 +56,46 @@ const FAILURE_ESCALATION_THRESHOLD = 3;
 const CONTEXT_PRUNE_AFTER_STEP = 8;
 /** Keep the last N messages when pruning (AI SDK pruneMessages) */
 const CONTEXT_KEEP_LAST_MESSAGES = 6;
+
+// ── Core Tools (always available in dynamic loading mode) ──
+
+/**
+ * Tools that must ALWAYS be in activeTools — they are the minimum set the LLM
+ * needs to think, deliver answers, discover other tools, and act.
+ *
+ * In dynamic loading mode, ONLY these tools are sent on step 0.
+ * The LLM uses search_available_tools to discover additional tools on-demand.
+ */
+const CORE_TOOLS = new Set([
+    'think',                    // Internal reasoning / scratchpad
+    'search_available_tools',   // Tool RAG — discovers other tools
+    'manage_todos',             // Task tracking
+    'run_command',              // Shell access — universal escape hatch
+    'spawn_agents',             // Sub-agent delegation (plural — matches agent-tool.ts)
+    'web_search',               // Common enough to be core
+    'self_rebuild',             // Rebuild + restart — always reachable without tool discovery
+    'safe_self_edit',           // Self-modification — always reachable without tool discovery
+]);
+
+// ── Tool Name Extraction from Search Results ───────────
+
+/**
+ * Parse tool names from formatted search_available_tools output.
+ * Matches lines like:
+ *   `• tool_name [category] (score: 5.0)` — search mode
+ *   `• tool_name: description` — category fallback mode
+ */
+const TOOL_NAME_PATTERN = /^• (\w+)[\s\[:]/gm;
+
+function extractToolNamesFromSearchResult(output: string): string[] {
+    const names: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = TOOL_NAME_PATTERN.exec(output)) !== null) {
+        names.push(match[1]);
+    }
+    TOOL_NAME_PATTERN.lastIndex = 0; // Reset regex state
+    return names;
+}
 
 // ── Error Context Injection ────────────────────────────
 
@@ -92,6 +136,30 @@ function pruneContextIfNeeded(
     }
 }
 
+// ── Think Tool Result Discard ──────────────────────────
+
+/**
+ * Replace old `think` tool results with a minimal marker.
+ * Think outputs are one-use scratchpads — keeping them wastes ~200-500
+ * tokens per think call across every subsequent step.
+ * Only discards results from steps before the most recent one.
+ */
+function discardThinkResults(messages: Array<any>, stepNumber: number): void {
+    if (stepNumber < 2) return; // nothing to discard yet
+
+    for (const msg of messages) {
+        if (msg.role !== 'tool') continue;
+        const parts: any[] = msg.content ?? msg.parts ?? [];
+        for (const part of parts) {
+            if (part.type !== 'tool-result') continue;
+            if (part.toolName !== 'think') continue;
+            const raw = typeof part.result === 'string' ? part.result : '';
+            if (raw.startsWith('[Thought noted]')) continue; // already discarded
+            part.result = '[Thought noted]';
+        }
+    }
+}
+
 // ── Main PrepareStep Factory ───────────────────────────
 
 /**
@@ -99,7 +167,6 @@ function pruneContextIfNeeded(
  *
  * Handles:
  *   - activeTools filtering (planner-recommended tools on step 0)
- *   - toolChoice: 'required' on step 0 (forces tool use instead of text dumps)
  *   - Detecting tool failures from previous steps
  *   - Context pruning in long loops
  *   - Model escalation (balanced → powerful) after repeated failures
@@ -114,14 +181,43 @@ export function createPrepareStep(tracker: TurnTracker) {
     }) => {
         const { stepNumber, steps, messages } = options;
 
-        // Always force tool use on every step — deliver_answer is the "I'm done" signal.
-        // This eliminates wasted text-only steps; the model must act or finish.
-        const base: Record<string, any> = { toolChoice: 'required' as const };
+        // All steps use 'auto' — the model decides when to use tools vs text.
+        // Modern models (Claude 4.x, GPT-5.x) reliably use tools when needed.
+        // The loop stops when the model produces text-only (no tool calls) OR
+        // calls deliver_answer. This avoids wasting a full step on forced tool
+        // calls for simple queries like greetings.
+        const base: Record<string, any> = { toolChoice: 'auto' as const };
 
-        // ── Step 0: limit to recommended tools ──
-        //    Recommended tools from the planner focus the model on relevant actions.
+        // ── Dynamic tool discovery: extract tool names from search_available_tools results ──
+        if (tracker.dynamicToolLoading && steps.length > 0) {
+            const lastStep = steps[steps.length - 1];
+            if (lastStep.toolResults) {
+                for (const tr of lastStep.toolResults) {
+                    if (tr.toolName === 'search_available_tools') {
+                        const output = typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output || '');
+                        const discovered = extractToolNamesFromSearchResult(output);
+                        for (const name of discovered) {
+                            if (tracker.allToolNames.includes(name)) {
+                                tracker.discoveredTools.add(name);
+                            }
+                        }
+                        if (discovered.length > 0) {
+                            console.log(`[ToolRAG]: Discovered ${discovered.length} tools → activeTools now: ${CORE_TOOLS.size + tracker.discoveredTools.size}`);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Step 0: activeTools filtering ──
         if (stepNumber === 0) {
-            if (tracker.recommendedTools.length > 0) {
+            if (tracker.dynamicToolLoading) {
+                // Dynamic loading: only core tools on step 0
+                const active = [...CORE_TOOLS].filter(t => tracker.allToolNames.includes(t));
+                base.activeTools = active;
+                console.log(`[ToolRAG]: Step 0 — core tools only: [${active.join(', ')}] (${tracker.allToolNames.length} total registered)`);
+            } else if (tracker.recommendedTools.length > 0) {
+                // Legacy: planner-recommended tools
                 const active = [...new Set([...tracker.recommendedTools, 'deliver_answer', 'think', 'manage_todos'])];
                 // Only filter if recommended tools are a strict subset of all tools
                 if (active.length < tracker.allToolNames.length) {
@@ -130,6 +226,16 @@ export function createPrepareStep(tracker: TurnTracker) {
                 }
             }
             return base;
+        }
+
+        // ── Steps 1+: expand activeTools with discovered tools ──
+        if (tracker.dynamicToolLoading) {
+            const active = [
+                ...CORE_TOOLS,
+                ...tracker.discoveredTools,
+            ].filter(t => tracker.allToolNames.includes(t));
+            // Deduplicate (core + discovered may overlap)
+            base.activeTools = [...new Set(active)];
         }
 
         // ── Detect tool failures from previous step ──────
@@ -171,6 +277,9 @@ export function createPrepareStep(tracker: TurnTracker) {
                 }
             }
         }
+
+        // ── Discard stale think tool results (one-use scratchpads) ──
+        discardThinkResults(messages, stepNumber);
 
         // ── Context management: prune messages in long loops ──
         const prunedMessages = pruneContextIfNeeded(messages, stepNumber);
@@ -225,6 +334,7 @@ export function createTurnTracker(
     router: ModelRouter,
     recommendedTools: string[] = [],
     allToolNames: string[] = [],
+    dynamicToolLoading: boolean = false,
 ): TurnTracker {
     return {
         userMessage,
@@ -235,6 +345,8 @@ export function createTurnTracker(
         escalated: false,
         recommendedTools,
         allToolNames,
+        dynamicToolLoading,
+        discoveredTools: new Set(),
     };
 }
 

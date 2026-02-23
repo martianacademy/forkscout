@@ -1,33 +1,89 @@
 {
     "$schema": "./packages/agent/src/config.schema.json",
     "provider": "openrouter",
-    "fallbackProviders": [
-        "openrouter",
-        "google",
-        "anthropic"
-    ],
-    "temperature": 0.7,
+    "temperature": 1,
+    "fallbackProviders": [],
+    "agent": {
+        "port": 3210,
+        "owner": "Suru",
+        "maxIterations": 100,
+        "maxSteps": 80,
+        "effortStepsQuick": 15,
+        "effortStepsModerate": 25,
+        "forkscoutMemoryMcpUrl": "http://127.0.0.1:3211/mcp",
+        "autoRegisterTools": true,
+        "dynamicToolLoading": true,
+        "failureEscalationThreshold": 3,
+        "activityLogMaxBytes": 5242880,
+        "browserIdleMs": 60000,
+        "mcpServers": {
+            "context7": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@upstash/context7-mcp"
+                ]
+            },
+            "deepwiki": {
+                "url": "https://mcp.deepwiki.com/mcp"
+            },
+            "sequential-thinking": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@modelcontextprotocol/server-sequential-thinking"
+                ]
+            },
+            "github": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@modelcontextprotocol/server-github"
+                ],
+                "env": {
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": "$GITHUB_API_KEY"
+                }
+            },
+            "playwright": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@playwright/mcp"
+                ]
+            }
+        },
+        "server": {
+            "rateLimitLocal": 300,
+            "rateLimitRemote": 30,
+            "rateLimitWindowMs": 60000,
+            "maxBodyBytes": 1048576
+        },
+        "subAgent": {
+            "tier": "balanced",
+            "timeoutMs": 600000,
+            "maxSteps": 20,
+            "maxParallel": 5,
+            "outputMaxLength": 5000,
+            "retryAttempts": 5,
+            "retryDelayMs": 1000,
+            "batchTimeoutMs": 0,
+            "temperature": 0.5
+        },
+        "telegram": {
+            "maxInbox": 200,
+            "maxHistory": 20
+        }
+    },
     "router": {
         "openrouter": {
             "fast": {
-                "model": "google/gemini-3-flash-preview"
+                "model": "qwen/qwen3-coder-next"
             },
             "balanced": {
-                "model": "google/gemini-3-flash-preview"
+                "model": "qwen/qwen3-coder-next"
             },
             "powerful": {
-                "model": "google/gemini-3-flash-preview"
-            }
-        },
-        "openai": {
-            "fast": {
-                "model": "gpt-5-mini"
-            },
-            "balanced": {
-                "model": "gpt-5"
-            },
-            "powerful": {
-                "model": "gpt-5.2-codex"
+                "model": "qwen/qwen3-coder-next"
             }
         },
         "google": {
@@ -52,6 +108,17 @@
                 "model": "claude-opus-4.6"
             }
         },
+        "openai": {
+            "fast": {
+                "model": "gpt-5-mini"
+            },
+            "balanced": {
+                "model": "gpt-5"
+            },
+            "powerful": {
+                "model": "gpt-5.2-codex"
+            }
+        },
         "openai-compatible": {
             "fast": {
                 "model": "claude-sonnet-4-5-20250929"
@@ -65,79 +132,26 @@
         },
         "github": {
             "fast": {
-                "model": "gpt-4o-mini"
-            },
-            "balanced": {
-                "model": "gpt-4o"
-            },
-            "powerful": {
-                "model": "o1"
-            }
-        },
-        "copilot-bridge": {
-            "fast": {
-                "model": "gpt-4o-mini"
+                "model": "claude-sonnet-4.6"
             },
             "balanced": {
                 "model": "claude-sonnet-4.6"
             },
             "powerful": {
-                "model": "claude-opus-4.6"
+                "model": "claude-sonnet-4.6"
+            }
+        },
+        "copilot-bridge": {
+            "fast": {
+                "model": "claude-sonnet-4.6"
+            },
+            "balanced": {
+                "model": "claude-sonnet-4.6"
+            },
+            "powerful": {
+                "model": "claude-sonnet-4.6"
             }
         }
-    },
-    "agent": {
-        "maxIterations": 100,
-        "maxSteps": 100,
-        "autoRegisterTools": true,
-        "port": 3210,
-        "owner": "Suru",
-        "appName": "Forkscout Agent",
-        "appUrl": "https://github.com/martianacademy/forkscout",
-        "forkscoutMemoryMcpUrl": "http://127.0.0.1:3211/mcp",
-        "mcpServers": {
-            "sequential-thinking": {
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "@modelcontextprotocol/server-sequential-thinking"
-                ]
-            },
-            "deepwiki": {
-                "url": "https://mcp.deepwiki.com/mcp"
-            },
-            "context7": {
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "@upstash/context7-mcp"
-                ]
-            }
-        },
-        "subAgent": {
-            "maxSteps": 50,
-            "timeoutMs": 600000,
-            "maxParallel": 10,
-            "tier": "balanced",
-            "retryAttempts": 5,
-            "retryDelayMs": 1000,
-            "outputMaxLength": 5000,
-            "temperature": 0.5,
-            "batchTimeoutMs": 0
-        },
-        "server": {
-            "rateLimitLocal": 300,
-            "rateLimitRemote": 30,
-            "rateLimitWindowMs": 60000,
-            "maxBodyBytes": 1048576
-        },
-        "telegram": {
-            "maxInbox": 200,
-            "maxHistory": 20
-        },
-        "failureEscalationThreshold": 3,
-        "browserIdleMs": 60000,
-        "activityLogMaxBytes": 5242880
     },
     "searxng": {
         "url": "http://localhost:8888"

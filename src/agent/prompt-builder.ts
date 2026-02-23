@@ -1,14 +1,20 @@
 import type { ChatContext, AgentConfig } from './types';
 import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
-import type { CronAlert } from '../scheduler';
 import type { ModelRouter } from '../llm/router';
-import type { PreFetchedMemory } from '../llm/planner';
 import { getConfig } from '../config';
 import { getDefaultSystemPrompt, getPublicSystemPrompt } from './system-prompts';
 import { getCurrentTodos } from '../tools/todo-tool';
 import { requestTracker } from '../request-tracker';
 import * as personalities from './personalities';
+
+// ── Trivial message detection ──────────────────────────
+
+/**
+ * Short greetings, pleasantries, and single-word messages that don't benefit
+ * from full memory injection.  Saves ~1–2K tokens on throwaway messages.
+ */
+const TRIVIAL_PATTERNS = /^\s*(h(i|ello|ey|ola|owdy)|yo+|sup|gm|gn|thanks?|thx|ok(ay)?|yes|no|bye|ciao|cheers|good\s*(morning|evening|night|afternoon)|what'?s?\s*up|how\s*are\s*you|test(ing)?|ping)\s*[?!.]*\s*$/i;
 
 /**
  * Mutable cache object — owned by the Agent instance, passed by reference.
@@ -23,19 +29,18 @@ export interface PromptCache {
 /**
  * Build the system prompt, enriched with memory context for the given user query.
  * Injects access control rules based on whether the user is admin.
+ *
+ * Memory fetching is always full for admin users.
  */
 export async function buildSystemPrompt(
     config: AgentConfig,
     memory: MemoryManager,
     survival: SurvivalMonitor,
-    urgentAlerts: CronAlert[],
     cache: PromptCache,
     router: ModelRouter,
     userQuery: string,
     ctx?: ChatContext,
     guestTools?: Record<string, any>,
-    effort?: string,
-    preFetched?: PreFetchedMemory,
 ): Promise<string> {
     const isAdmin = ctx?.isAdmin ?? false;
 
@@ -138,74 +143,50 @@ export async function buildSystemPrompt(
         }
     }
 
-    // Surface pending urgent alerts — keep them so they persist across turns
-    // until the agent addresses them. Only drain after a configurable number of
-    // exposures so the agent doesn't lose track of unresolved issues.
-    let alertSection = '';
-    if (urgentAlerts.length > 0) {
-        alertSection =
-            '\n\n[URGENT ALERTS — you MUST investigate and resolve these. Do NOT ignore them.]\n' +
-            urgentAlerts.map((a) => `🚨 "${a.jobName}" at ${a.timestamp}: ${a.output.slice(0, 1000)}`).join('\n') +
-            '\n\nFor each alert: 1) Read the error, 2) Run the command manually, 3) Fix the root cause, 4) Verify the fix works.';
-
-        // Mark alerts as "shown" — drain after 3 exposures (3 chat turns)
-        for (const a of urgentAlerts) {
-            (a as any)._exposures = ((a as any)._exposures || 0) + 1;
-        }
-        // Remove alerts that have been shown 3+ times (agent had enough chances)
-        const stale = urgentAlerts.filter((a) => ((a as any)._exposures || 0) >= 3);
-        if (stale.length > 0) {
-            for (const s of stale) {
-                const idx = urgentAlerts.indexOf(s);
-                if (idx >= 0) urgentAlerts.splice(idx, 1);
-            }
-        }
-    }
-
     // Survival alerts (battery, disk, integrity, etc.)
+    let alertSection = '';
     const survivalAlerts = survival.formatAlerts();
     alertSection += survivalAlerts;
 
     // Memory context — only injected for admin users (guests must not see private data)
-    // When preFetched is available (from planner), use it to avoid duplicate memory calls.
-    // Lazy injection: quick = skip memory, moderate = recent history only, deep = full
+    // Skip heavy memory lookups for trivial messages (greetings, yes/no, thanks)
     let memorySection = '';
     let selfSection = '';
-    if (isAdmin && effort !== 'quick') {
+    let behavioralRulesSection = '';
+    const isTrivial = TRIVIAL_PATTERNS.test(userQuery);
+    if (isAdmin && !isTrivial) {
         try {
-            // Self-identity — who am I? (async fetch from MCP, cached)
-            const selfCtx = await memory.getSelfContextAsync();
+            // Self-identity — who am I? (async fetch from MCP, filtered by current query)
+            const selfCtx = await memory.getSelfContextAsync(userQuery);
             if (selfCtx) {
                 selfSection = '\n\n[LEARNED BEHAVIORS — follow these rigorously, they come from your own experience and owner directives]\n' + selfCtx;
             }
 
-            if (preFetched?.plannerContext) {
-                // Planner already gathered context — use it directly (no duplicate MCP calls)
-                const pc = preFetched.plannerContext;
-                if (pc.recentChat) memorySection += '\n\n[Recent Conversation]\n' + pc.recentChat;
-                if (pc.memoryHits) memorySection += '\n\n' + pc.memoryHits;
-                if (preFetched.additionalContext) memorySection += '\n\n' + preFetched.additionalContext;
-            } else if (effort === 'moderate') {
-                // Moderate: recent history only — skip vector search, graph, skills
-                const history = memory.getRecentHistory(10);
-                if (history.length > 0) {
-                    const lines = history.map(m => `${m.role}: ${m.content}`);
-                    memorySection += '\n\n[Recent Conversation]\n' + lines.join('\n');
-                }
-            } else {
-                // Deep (or unspecified): full memory injection
-                const { recentHistory, relevantMemories, graphContext, skillContext, stats } =
-                    await memory.buildContext(userQuery);
-                if (stats.retrievedCount > 0 || stats.graphEntities > 0 || stats.skillCount > 0) {
-                    console.log(
-                        `[Memory]: ${stats.recentCount} recent + ${stats.retrievedCount} vector + ${stats.graphEntities} graph entities + ${stats.skillCount} skills | situation: [${stats.situation.primary.join(', ')}] ${stats.situation.goal}`,
-                    );
-                }
-                if (recentHistory) memorySection += '\n\n[Recent Conversation]\n' + recentHistory;
-                if (graphContext) memorySection += graphContext;
-                if (skillContext) memorySection += '\n\n[Known Skills]\n' + skillContext;
-                if (relevantMemories) memorySection += relevantMemories;
+            // Per-person behavioral rules — corrections the user has given us (e.g. "don't call me bhai")
+            if (ctx?.sender) {
+                try {
+                    const rules = await memory.getBehavioralRules(ctx.sender);
+                    if (rules.length > 0) {
+                        behavioralRulesSection = '\n\n[⚠️ BEHAVIORAL RULES for ' + ctx.sender + ' — ALWAYS respect these, they are direct corrections from this person]\n' +
+                            rules.map(r => `• ${r.replace(/^\[RULE:\w+\]\s*/, '')}`).join('\n');
+                    }
+                } catch { /* rules unavailable — continue */ }
             }
+
+            // Full memory injection — vector search, graph, skills (no recentHistory — it duplicates the messages array)
+            const { relevantMemories, graphContext, skillContext, stats } =
+                await memory.buildContext(userQuery);
+            if (stats.retrievedCount > 0 || stats.graphEntities > 0 || stats.skillCount > 0) {
+                console.log(
+                    `[Memory]: ${stats.recentCount} recent + ${stats.retrievedCount} vector + ${stats.graphEntities} graph entities + ${stats.skillCount} skills | situation: [${stats.situation.primary.join(', ')}] ${stats.situation.goal}`,
+                );
+            }
+            // NOTE: recentHistory is NOT injected here — it duplicates the
+            // user/assistant messages already passed via the messages array,
+            // wasting tokens on every request.
+            if (graphContext) memorySection += graphContext;
+            if (skillContext) memorySection += '\n\n[Known Skills]\n' + skillContext;
+            if (relevantMemories) memorySection += relevantMemories;
         } catch {
             /* memory unavailable — continue without it */
         }
@@ -225,7 +206,7 @@ export async function buildSystemPrompt(
 
     // Runtime config — so the agent knows its own model, provider, and capabilities
     let configSection = '';
-    if (isAdmin) {
+    if (isAdmin && !isTrivial) {
         try {
             const cfg = getConfig();
             const status = router.getStatus();
@@ -247,7 +228,7 @@ export async function buildSystemPrompt(
 
     // Available personalities — inject so the agent knows what styles it can adopt
     let personalitySection = '';
-    if (isAdmin) {
+    if (isAdmin && !isTrivial) {
         try {
             const available = await personalities.list();
             if (available.length > 0) {
@@ -259,5 +240,17 @@ export async function buildSystemPrompt(
         } catch { /* personalities unavailable */ }
     }
 
-    return timeSection + base + channelSection + crossChannelSection + alertSection + configSection + selfSection + personalitySection + todoSection + memorySection;
+    // Tool RAG — when dynamic tool loading is enabled, inject discovery instructions
+    let toolDiscoverySection = '';
+    if (isAdmin && getConfig().agent.dynamicToolLoading) {
+        toolDiscoverySection = `\n\n[TOOL DISCOVERY — IMPORTANT]
+You have a small set of core tools loaded. Many more tools are available but NOT visible to you yet.
+To find and use additional tools, call \`search_available_tools\` with a description of what you need.
+Examples: "send telegram message", "read file", "search the web", "voice synthesis", "memory operations"
+Once you search, those tools become available for use in your next step.
+ALWAYS search before saying you can't do something — you likely have a tool for it.
+Use mode "categories" to see all available tool categories.`;
+    }
+
+    return timeSection + base + channelSection + crossChannelSection + alertSection + configSection + selfSection + behavioralRulesSection + personalitySection + toolDiscoverySection + todoSection + memorySection;
 }

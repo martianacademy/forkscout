@@ -1,6 +1,6 @@
 {
     "name": "forkscout",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "description": "Autonomous AI agent with persistent memory, multi-model routing, sub-agents, self-evolution, and production-grade security",
     "private": true,
     "main": "dist/index.js",
@@ -32,10 +32,13 @@
         "@ai-sdk/google": "^3.0.29",
         "@ai-sdk/openai": "^3.0.29",
         "@modelcontextprotocol/sdk": "^1.26.0",
+        "@types/ws": "^8.18.1",
         "ai": "^6.0.86",
         "dotenv": "^17.3.1",
         "gpt-tokenizer": "^3.4.0",
+        "lgtv2": "^1.6.3",
         "playwright": "^1.49.1",
+        "ws": "^8.19.0",
         "zod": "^3.23.8"
     },
     "devDependencies": {

@@ -274,7 +274,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                 const writerRef: { current?: { write: (part: any) => void } } = {};
 
                 // Create a per-request ToolLoopAgent via the centralized factory
-                const { agent: chatAgent, reasoningCtx, modelId: chatModelId, plan } = await agent.createChatAgent({
+                const { agent: chatAgent, reasoningCtx, modelId: chatModelId } = await agent.createChatAgent({
                     userText,
                     ctx,
                     onStepFinish: createStepLogger({ activityLog: true, writer: { write: (part: any) => writerRef.current?.write(part) } }),
@@ -283,19 +283,10 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
                     },
                 });
 
-                // Stream with ack-first: write acknowledgment immediately, then merge agent stream
-                const ack = plan.acknowledgment;
+                // Stream agent response directly
                 const uiStream = createUIMessageStream({
                     execute: async ({ writer }) => {
                         writerRef.current = writer; // Enable progress markers
-                        // 1. Write acknowledgment text immediately so user sees it fast
-                        if (ack) {
-                            const ackId = `ack-${Date.now()}`;
-                            writer.write({ type: 'text-start', id: ackId });
-                            writer.write({ type: 'text-delta', delta: ack + '\n\n', id: ackId });
-                            writer.write({ type: 'text-end', id: ackId });
-                        }
-                        // 2. Create and merge the agent stream (tool loop)
                         const agentStream = await createAgentUIStream({
                             agent: chatAgent,
                             uiMessages: messages,
@@ -345,15 +336,7 @@ export async function startServer(config: AgentConfig, opts: ServerOptions = {})
 
                 try {
                     // Create a per-request ToolLoopAgent via the centralized factory
-                    const { agent: syncAgent, reasoningCtx: syncReasoningCtx, modelId: syncModelId, plan: syncPlan } = await agent.createChatAgent({ userText, ctx });
-
-                    // Quick tasks with no tools needed — return the ack directly
-                    if (syncPlan.effort === 'quick' && !syncPlan.needsTools && syncPlan.acknowledgment) {
-                        agent.saveToMemory('assistant', syncPlan.acknowledgment);
-                        requestTracker.finish(syncReqId);
-                        sendJSON(res, 200, { response: syncPlan.acknowledgment });
-                        return;
-                    }
+                    const { agent: syncAgent, reasoningCtx: syncReasoningCtx, modelId: syncModelId } = await agent.createChatAgent({ userText, ctx });
 
                     const { text, usage, steps } = await syncAgent.generate({
                         prompt: userText,

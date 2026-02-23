@@ -14,6 +14,5 @@ Structure your output for the parent agent to consume:
 - Lead with the direct answer or key finding.
 - Follow with supporting evidence, data, or details.
 - Note any caveats, uncertainties, or items that need follow-up.
-Be concise but complete. The parent agent needs actionable information, not filler.
-Use Markdown formatting: headers for sections, bullets for lists, backticks for code/paths.`;
+Be concise — output tokens are expensive. Lead with the direct answer, follow with only essential details. No filler, no preamble, no "In summary" repetition.`;
 }

@@ -7,7 +7,6 @@
  * @module tools/deps
  */
 
-import type { Scheduler } from '../scheduler';
 import type { McpConnector } from '../mcp/connector';
 import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
@@ -16,7 +15,6 @@ import type { ModelRouter } from '../llm/router';
 import type { SubAgentDeps } from './agent-tool';
 
 export interface ToolDeps {
-    scheduler: Scheduler;
     router: ModelRouter;
     survival: SurvivalMonitor;
     channelAuth: ChannelAuthStore;

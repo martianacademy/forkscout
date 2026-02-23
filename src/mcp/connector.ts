@@ -22,6 +22,25 @@ import { jsonSchemaToZod } from './schema';
 export type { McpServerConfig, McpConfig } from './types';
 export { loadMcpConfig, saveMcpConfig } from './config-io';
 
+/**
+ * Resolve env vars in MCP server env config.
+ * Values starting with $ are substituted from process.env.
+ * e.g. "$GITHUB_API_KEY" → process.env.GITHUB_API_KEY
+ */
+function resolveEnv(env?: Record<string, string>): Record<string, string> | undefined {
+    if (!env) return undefined;
+    const resolved: Record<string, string> = {};
+    for (const [key, value] of Object.entries(env)) {
+        if (value.startsWith('$')) {
+            const varName = value.slice(1);
+            resolved[key] = process.env[varName] ?? '';
+        } else {
+            resolved[key] = value;
+        }
+    }
+    return resolved;
+}
+
 // ── Connector class ─────────────────────────────────────
 
 export class McpConnector {
@@ -81,7 +100,7 @@ export class McpConnector {
             transport = new StdioClientTransport({
                 command: config.command,
                 args: config.args ?? [],
-                env: config.env,
+                env: resolveEnv(config.env),
                 stderr: 'pipe',
             });
 

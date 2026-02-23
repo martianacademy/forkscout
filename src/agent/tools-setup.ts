@@ -12,7 +12,6 @@
 import { discoverAllTools } from '../tools/auto-loader';
 import type { ToolDeps, McpDeclaration } from '../tools/deps';
 import { enhanceToolSet } from '../tools/error-enhancer';
-import type { Scheduler } from '../scheduler';
 import type { McpConnector } from '../mcp/connector';
 import type { MemoryManager } from '../memory';
 import type { SurvivalMonitor } from '../survival';
@@ -28,7 +27,6 @@ export interface RegistrationResult {
 /** Register all tools into the toolSet. Returns sub-agent deps + MCP declarations for async init. */
 export function registerDefaultTools(
     toolSet: Record<string, any>,
-    scheduler: Scheduler,
     mcpConnector: McpConnector,
     mcpConfigPath: string,
     memory: MemoryManager,
@@ -44,7 +42,7 @@ export function registerDefaultTools(
 
     // 2. Factory tools — call each register(deps) and merge returned tools
     const deps: ToolDeps = {
-        scheduler, router, survival, channelAuth,
+        router, survival, channelAuth,
         memory, mcpConnector, toolSet, mcpConfigPath,
     };
 

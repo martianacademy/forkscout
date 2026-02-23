@@ -16,14 +16,25 @@
 /**
  * Resolve a final response from ToolLoopAgent generate() output.
  *
+ * Priority chain:
+ *   1. deliver_answer tool result
+ *   2. spawn_agents output
+ *   3. result.text
+ *   4. step text fallback
+ *
  * @param text    - `result.text` from generate()
  * @param steps   - `result.steps` from generate()
+ * @param output  - unused (kept for signature compat)
  * @returns Non-empty string if a valid response was found, empty string otherwise.
  */
 export function resolveAgentResponse(
     text: string | undefined,
     steps: any[] | undefined,
+    _output?: { answer?: string } | null,
 ): string {
+    // Note: Output.object() was removed — it caused extra LLM calls and "null" responses.
+    // Fallback chain below handles all real response extraction.
+
     if (!steps || steps.length === 0) return text?.trim() || '';
 
     // 1. deliver_answer — the canonical "I'm done" signal.
@@ -58,6 +69,15 @@ export function resolveAgentResponse(
     //    This happens when the model ignores toolChoice:'required' and returns
     //    text instead of calling deliver_answer. The text is often the actual answer.
     if (text?.trim()) return text.trim();
+
+    // 4. Step text fallback — scan steps last-to-first for a step that produced
+    //    meaningful text (i.e. the model was summarizing but forgot deliver_answer).
+    //    Skip steps that only have tool calls (those are just reasoning prefixes).
+    for (let i = steps.length - 1; i >= 0; i--) {
+        const step = steps[i];
+        const txt = (step as any).text?.trim();
+        if (txt && txt.length > 20) return txt;
+    }
 
     // Nothing usable found.
     return '';

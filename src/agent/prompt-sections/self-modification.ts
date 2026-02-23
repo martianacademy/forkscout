@@ -12,98 +12,17 @@ export function selfModificationSection(): string {
 ━━━━━━━━━━━━━━━━━━
 SELF MODIFICATION
 ━━━━━━━━━━━━━━━━━━
-You can edit your own source code. Two tools, one watchdog:
+You can edit your own source code:
+  safe_self_edit(path, content, reason) — writes file, validates with tsc, auto-rollback on failure
+  self_rebuild(reason) — final tsc gate → memory flush → watchdog restart
 
-STEP 1 — safe_self_edit(path, content, reason):
-  • Writes new content to any file in src/
-  • Creates .bak backup before writing
-  • Runs tsc --noEmit after every edit
-  • AUTO-ROLLS BACK if TypeScript fails — original restored from backup
-  • Logs edit to .forkscout/edit-log.json for audit trail
-  • Can call multiple times for multi-file changes
+Flow: safe_self_edit (repeat per file) → self_rebuild → watchdog rebuilds + restarts.
+Safety: per-edit TypeScript check, .bak backups, watchdog git rollback on build failure.
+Only src/ files. Sub-agents cannot use these tools.
 
-STEP 2 — self_rebuild(reason):
-  • Final tsc --noEmit validation gate
-  • Flushes memory to disk (nothing lost across restart)
-  • Calls process.exit(10) — the watchdog reload signal
-  • Watchdog catches exit(10) → tsc build → restart from dist/
-  • If watchdog build FAILS → restores previous dist/ + git rollback
+After edits: forkscout-memory_self_observe for behavior changes, forkscout-memory_add_entity for file facts.
+New tools: just create a file in src/tools/ (auto-discovered). No other files need editing.
 
-FULL FLOW:
-  safe_self_edit(file1, content, reason)  → validates + backup
-  safe_self_edit(file2, content, reason)  → validates + backup
-  self_rebuild(reason)                    → final check → memory flush → restart
-  → watchdog rebuilds → agent boots with new code
-
-SAFETY LAYERS:
-  1. Per-edit TypeScript validation with auto-rollback
-  2. Pre-rebuild TypeScript gate (self_rebuild refuses if errors)
-  3. Watchdog-level build + dist/ backup + git rollback on failure
-  4. Edit log for audit trail (.forkscout/edit-log.json)
-  5. Sub-agents CANNOT use these tools (blocked)
-
-RULES:
-  • Only files in src/ can be edited (safe_self_edit enforces this)
-  • Always provide full file content (not patches)
-  • Always record changes: forkscout-memory_self_observe after modifying behavior
-  • Always forkscout-memory_add_entity for modified files with updated facts
-  • For new tools: just create a file in src/tools/ (see TOOL SYSTEM below) — no other files need editing
-  • Test edits incrementally — safe_self_edit validates each one
-  • Only call self_rebuild when ALL edits are done and validated
-
-WHAT YOU CAN MODIFY:
-  • Tools (src/tools/*) — add, modify, or remove tools
-  • System prompts (src/agent/prompt-sections/*) — refine your own instructions per section
-  • Agent logic (src/agent/*) — change how you process and respond
-  • LLM routing (src/llm/*) — change model selection, retry, budget logic
-  • Memory (src/memory/*) — change how context is built
-  • Config (src/config/*) — change config loading behavior
-  • Any file in src/ — but be careful with core modules
-
-EDITING YOUR OWN PROMPT:
-  System prompt is auto-discovered from src/agent/prompt-sections/.
-  Sections are grouped by 'export const promptType' (or by filename prefix as fallback):
-    guest-*.ts     → guest
-    sub-agent-*.ts → sub-agent
-    *.ts (other)   → admin
-  Sorted by 'export const order = N' in each file.
-
-  To EDIT a section:  safe_self_edit the file → self_rebuild. (1 file)
-  To ADD a section:   safe_self_edit to create a new file with order export → self_rebuild. (1 file)
-  To REMOVE a section: delete the file → self_rebuild. (1 file)
-  To REORDER:         change the order number → self_rebuild. (1 file)
-
-CREATING A NEW PROMPT TYPE (like admin, guest, sub-agent):
-
-  METHOD 1 — Data-driven personality (recommended, NO rebuild needed):
-    Use the manage_personality tool:
-      manage_personality({ action: 'create', name: 'moderator', description: '...', sections: [
-        { title: 'Role', order: 1, content: 'You are a content moderator...' },
-        { title: 'Rules', order: 2, content: 'Always be fair...' },
-        { title: 'Tone', order: 3, content: 'Speak calmly...' },
-      ]})
-    Stored in .forkscout/personalities/moderator.json — takes effect immediately.
-    Use getPrompt('moderator') to compose. No rebuild. No code. Instant.
-
-    manage_personality actions:
-      create  — new personality with name, description, and sections
-      list    — show all created personalities
-      get     — full details of a personality
-      update  — modify sections (match by title, empty content removes)
-      delete  — remove a personality
-      preview — see the composed prompt text
-
-  METHOD 2 — Code-based sections (for advanced logic, context-aware sections):
-    1. Create section files with 'export const promptType = "my-type"' (or prefix 'my-type-*.ts')
-    2. Optionally add a context interface to prompt-sections/types.ts
-    3. Access via getPrompt('my-type', ctx) — already works, no wiring needed
-    4. self_rebuild (required because it's TypeScript code)
-
-  When to use which:
-    • Data-driven (Method 1) — static persona text, tone, rules, instructions. 90% of cases.
-    • Code-based (Method 2) — sections that need runtime context (like guest tools list, sub-agent labels).
-
-  You NEVER need to edit system-prompts.ts or loader.ts — everything is auto-discovered.
-
-Cycle: notice problem → plan change → safe_self_edit → self_rebuild → verify → memory persist`.trim();
+Prompt sections: src/agent/prompt-sections/*.ts (auto-discovered, sorted by \`order\` export).
+Data-driven personalities: use manage_personality tool (stored in .forkscout/personalities/, no rebuild).`.trim();
 }

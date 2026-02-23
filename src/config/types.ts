@@ -144,17 +144,18 @@ export interface AgentSettings {
     /** Max chars of raw tool output sent to the compression model */
     compressInputMaxChars: number;
 
-    // ── Planning Agent ──────────────────────────────
-    /** Max retry attempts for planner/postflight generateObject calls */
+    // ── Instant Classifier ──────────────────────────
+    /** Max retry attempts for classifier/postflight generateObject calls */
     flightMaxRetries: number;
-    /** Max tasks the planner can produce */
-    plannerMaxTasks: number;
-    /** Number of recent chat exchanges to feed the planner */
+    /** Number of recent chat exchanges to feed the classifier */
     plannerChatHistoryLimit: number;
-    /** Max memory queries the planner can request for pre-fetch */
-    plannerMaxMemoryQueries: number;
     /** Max chars of agent response sent to the postflight evaluator */
     postflightMaxResponseChars: number;
+
+    // ── Tool RAG (dynamic tool loading) ─────────────
+    /** When true, only core tools are loaded per step; others are discovered via search_available_tools.
+     *  Saves ~8-11K tokens per request by not sending all tool definitions upfront. */
+    dynamicToolLoading: boolean;
 }
 
 // ── SearXNG ────────────────────────────────────────────
@@ -304,20 +305,19 @@ export const DEFAULTS: Omit<ForkscoutConfig, 'secrets'> = {
         browserIdleMs: 60_000,
         activityLogMaxBytes: 5 * 1024 * 1024,
         maxToolRetries: 6,
-        contextPruneAfterStep: 8,
-        contextKeepLastMessages: 6,
+        contextPruneAfterStep: 4,
+        contextKeepLastMessages: 4,
         effortStepsQuick: 10,
         effortStepsModerate: 15,
         agentMaxRetries: 3,
-        compressThreshold: 2000,
-        compressMaxSummary: 800,
+        compressThreshold: 1000,
+        compressMaxSummary: 500,
         compressAfterStep: 0,
         compressInputMaxChars: 6000,
         flightMaxRetries: 1,
-        plannerMaxTasks: 8,
-        plannerChatHistoryLimit: 5,
-        plannerMaxMemoryQueries: 3,
+        plannerChatHistoryLimit: 3,
         postflightMaxResponseChars: 2000,
+        dynamicToolLoading: false,
     },
     searxng: { url: 'http://localhost:8888' },
 };

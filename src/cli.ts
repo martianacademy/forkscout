@@ -64,14 +64,14 @@ createAgent(config)
                         userText: input,
                     });
 
-                    const { text, usage, steps } = await chatAgent.generate({
+                    const { text, usage, steps, output } = await chatAgent.generate({
                         prompt: input,
                     });
 
                     const { response: resolved } = await finalizeGeneration({
                         text, steps, usage, reasoningCtx,
                         modelId: 'cli', channel: 'terminal', agent,
-                        userMessage: input,
+                        userMessage: input, output: output as any,
                     });
 
                     console.log(`\n[Forkscout]: ${resolved}\n`);

@@ -59,7 +59,7 @@ export async function handleChatStream(
     const writerRef: { current?: { write: (part: any) => void } } = {};
 
     // Create a per-request ToolLoopAgent with all configuration
-    const { agent: chatAgent, reasoningCtx, modelId: chatModelId, plan } = await agent.createChatAgent({
+    const { agent: chatAgent, reasoningCtx, modelId: chatModelId } = await agent.createChatAgent({
         userText,
         ctx,
         onStepFinish: createStepLogger({ writer: { write: (part: any) => writerRef.current?.write(part) } }),
@@ -68,17 +68,10 @@ export async function handleChatStream(
         },
     });
 
-    // Stream with ack-first: write acknowledgment immediately, then merge agent stream
-    const ack = plan.acknowledgment;
+    // Stream agent response directly
     const uiStream = createUIMessageStream({
         execute: async ({ writer }) => {
             writerRef.current = writer; // Enable progress markers
-            if (ack) {
-                const ackId = `ack-${Date.now()}`;
-                writer.write({ type: 'text-start', id: ackId });
-                writer.write({ type: 'text-delta', delta: ack + '\n\n', id: ackId });
-                writer.write({ type: 'text-end', id: ackId });
-            }
             const agentStream = await createAgentUIStream({
                 agent: chatAgent,
                 uiMessages: messages,
@@ -131,14 +124,7 @@ export async function handleChatSync(
 
     try {
         // Create a per-request ToolLoopAgent via the centralized factory
-        const { agent: chatAgent, reasoningCtx, modelId: syncModelId, plan: syncPlan } = await agent.createChatAgent({ userText, ctx });
-
-        // Quick tasks with no tools needed — return the ack directly
-        if (syncPlan.effort === 'quick' && !syncPlan.needsTools && syncPlan.acknowledgment) {
-            agent.saveToMemory('assistant', syncPlan.acknowledgment, ctx);
-            sendJSON(res, 200, { response: syncPlan.acknowledgment });
-            return;
-        }
+        const { agent: chatAgent, reasoningCtx, modelId: syncModelId } = await agent.createChatAgent({ userText, ctx });
 
         const { text, usage, steps } = await chatAgent.generate({
             prompt: userText,

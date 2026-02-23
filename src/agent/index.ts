@@ -1,4 +1,5 @@
 import { ToolLoopAgent, type ToolSet } from 'ai';
+import { z } from 'zod';
 import { LLMClient } from '../llm/client';
 import { ModelRouter, createRouterFromEnv, type ModelPurpose, type ModelTier } from '../llm/router';
 import { MemoryManager } from '../memory';
@@ -55,9 +56,19 @@ export interface ChatAgentOptions {
  * Result from `createChatAgent()` — the ToolLoopAgent instance plus
  * metadata needed for logging and cost tracking after generation.
  */
+/**
+ * Structured schema for the agent's final response.
+ * Kept for type compatibility (deliver_answer tool output shape).
+ * NOT used as Output.object() — that caused extra LLM calls and "null" responses.
+ */
+export const AgentOutputSchema = z.object({
+    answer: z.string().describe('Your complete final response to the user'),
+});
+export type AgentOutput = z.infer<typeof AgentOutputSchema>;
+
 export interface ChatAgentResult {
     /** The configured ToolLoopAgent ready for .generate() or .stream() */
-    agent: ToolLoopAgent<never, ToolSet>;
+    agent: ToolLoopAgent<never, ToolSet, any>;
     /** Turn tracker (for post-generation logging/failure learning) */
     reasoningCtx: TurnTracker;
     /** Resolved model tier */
@@ -188,10 +199,11 @@ export class Agent {
 
         // 4. Turn tracker — handles context pruning + failure escalation
         const allToolNames = Object.keys(tools);
+        const dynamicToolLoading = getConfig().agent.dynamicToolLoading ?? false;
         const reasoningCtx = createTurnTracker(
             userText, chatTier as ModelTier,
             systemPrompt, this.router,
-            [], allToolNames,
+            [], allToolNames, dynamicToolLoading,
         );
 
         // 5. Stop conditions — always use maxSteps from config
@@ -210,6 +222,10 @@ export class Agent {
             maxRetries: agentCfg.agentMaxRetries,
             stopWhen: buildStopConditions(adaptiveConfig),
             prepareStep: createPrepareStep(reasoningCtx),
+            // No Output.object() — that forces an extra LLM step which reliably produces
+            // "null" or hallucinated answers when the model is uncertain.
+            // Instead we rely on result.text → deliver_answer → step-text fallback
+            // (see resolveAgentResponse in utils/resolve-response.ts).
             onStepFinish: onStepFinish ? (step: any) => { onStepFinish(step); } : undefined,
             onFinish: onFinish ? (result: any) => { onFinish(result); } : undefined,
         });

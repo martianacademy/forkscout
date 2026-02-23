@@ -91,9 +91,9 @@ Use list_secrets first to discover available secret names.`,
             let responseBody: string;
             if (contentType.includes('json')) {
                 const json = await res.json();
-                responseBody = JSON.stringify(json, null, 2).slice(0, 4000);
+                responseBody = JSON.stringify(json, null, 2);
             } else {
-                responseBody = (await res.text()).slice(0, 4000);
+                responseBody = await res.text();
             }
 
             // Scrub any secrets that might appear in the response

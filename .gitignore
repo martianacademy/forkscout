@@ -54,6 +54,35 @@ packages/agent/custom/
 forkscout-memory-mcp/
 forkscout-memory-mcp-rust/
 temp_voice.oga
+*.oga
+*.ogg
+*.wav
 *.png
 packages/frontend/.next/
 screenshots/
+
+# Python virtual environments
+venv/
+venv_tts/
+venv-tts/
+.venv-tts/
+vibevoice_setup/venv/
+tts/venv/
+
+# Old TTS assets (removed)
+tts/
+tts_models/
+tts-assets/
+
+# VibeVoice (large ML repo, not project source)
+vibevoice/
+vibevoice_setup/
+
+# Temp / scratch
+tmp/
+
+# VS Code extension builds
+*.vsix
+
+# LG TV runtime
+lg_tv_store.json

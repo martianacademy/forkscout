@@ -6,11 +6,8 @@ import { z } from 'zod';
 import { resolveAgentPath } from '../paths';
 import { isProtectedPath } from './_helpers';
 
-/** Max chars returned by read_file before truncation (≈ 400 lines of code) */
-const READ_FILE_MAX_CHARS = 15_000;
-
 export const readFile = tool({
-    description: 'Read contents of a file. Large files are truncated — use startLine/endLine to read specific sections.',
+    description: 'Read contents of a file. Use startLine/endLine to read specific sections of large files.',
     inputSchema: z.object({
         path: z.string().describe('File path to read (relative to project root or absolute)'),
         startLine: z.number().optional().describe('1-based start line (inclusive). Omit to start from beginning.'),
@@ -29,19 +26,6 @@ export const readFile = tool({
                 const end = endLine ? Math.min(lines.length, endLine) : lines.length;
                 content = lines.slice(start, end).join('\n');
                 return `[Lines ${start + 1}-${end} of ${lines.length}]\n${content}`;
-            }
-
-            // Truncate oversized files
-            if (content.length > READ_FILE_MAX_CHARS) {
-                const lines = content.split('\n');
-                let truncated = '';
-                let lineCount = 0;
-                for (const line of lines) {
-                    if (truncated.length + line.length + 1 > READ_FILE_MAX_CHARS) break;
-                    truncated += (lineCount > 0 ? '\n' : '') + line;
-                    lineCount++;
-                }
-                return `${truncated}\n\n[⚠️ TRUNCATED — showing ${lineCount} of ${lines.length} lines (${content.length} chars total). Use startLine/endLine to read specific sections.]`;
             }
 
             return content;

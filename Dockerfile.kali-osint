@@ -1,0 +1,93 @@
+# ─── Kali Linux OSINT Environment ───
+# Built on top of official Kali Linux image
+# Purpose: OSINT (Open Source Intelligence) — publicly available information gathering
+#
+# Included OSINT tools:
+#   - theHarvester     → emails, subdomains, hosts, employee names from public sources
+#   - recon-ng         → full-featured web reconnaissance framework
+#   - spiderfoot       → automated OSINT collection
+#   - sherlock         → find usernames across social networks
+#   - holehe           → check if email is used on 120+ websites
+#   - exiftool         → extract metadata from files/images
+#   - whois            → domain/IP ownership lookup
+#   - nslookup / dig   → DNS reconnaissance
+#   - curl / wget      → web data fetching
+#   - python3 + pip    → custom OSINT scripts
+
+FROM kalilinux/kali-rolling
+
+LABEL maintainer="Forkscout OSINT Lab"
+LABEL description="Kali Linux OSINT environment — open source intelligence gathering tools"
+LABEL purpose="legitimate-osint-research"
+
+# ── Environment ──
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TERM=xterm-256color
+
+# ── System Update + Core Tools ──
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    git \
+    vim \
+    nano \
+    unzip \
+    zip \
+    jq \
+    tree \
+    htop \
+    net-tools \
+    whois \
+    dnsutils \
+    nmap \
+    exiftool \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    python3-requests \
+    python3-bs4 \
+    python3-lxml \
+    python3-pandas \
+    tor \
+    theharvester \
+    sherlock \
+    recon-ng \
+    spiderfoot \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python OSINT Tools (only what apt doesn't provide) ──
+RUN pip3 install --no-cache-dir --break-system-packages \
+    holehe \
+    googlesearch-python \
+    shodan
+
+# ── Convenience aliases ──
+RUN echo '#!/bin/bash' > /usr/local/bin/reconng && \
+    echo 'recon-ng "$@"' >> /usr/local/bin/reconng && \
+    chmod +x /usr/local/bin/reconng
+
+# ── Working directory ──
+WORKDIR /osint
+
+# ── Welcome message ──
+RUN echo 'echo ""' >> /root/.bashrc && \
+    echo 'echo "╔══════════════════════════════════════╗"' >> /root/.bashrc && \
+    echo 'echo "║   🔍 Kali OSINT Lab — Veronica        ║"' >> /root/.bashrc && \
+    echo 'echo "╠══════════════════════════════════════╣"' >> /root/.bashrc && \
+    echo 'echo "║  theHarvester  → theharvester -h      ║"' >> /root/.bashrc && \
+    echo 'echo "║  Sherlock      → sherlock <username>  ║"' >> /root/.bashrc && \
+    echo 'echo "║  Holehe        → holehe <email>       ║"' >> /root/.bashrc && \
+    echo 'echo "║  SpiderFoot    → spiderfoot -h        ║"' >> /root/.bashrc && \
+    echo 'echo "║  recon-ng      → reconng              ║"' >> /root/.bashrc && \
+    echo 'echo "║  ExifTool      → exiftool <file>      ║"' >> /root/.bashrc && \
+    echo 'echo "╚══════════════════════════════════════╝"' >> /root/.bashrc && \
+    echo 'echo ""' >> /root/.bashrc
+
+# ── Volume for saving results ──
+VOLUME ["/osint/results"]
+
+# ── Default shell ──
+CMD ["/bin/bash"]

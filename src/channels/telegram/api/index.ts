@@ -10,6 +10,7 @@ export { callApi } from './call-api';
 export { getMe } from './get-me';
 export { downloadFile } from './download-file';
 export { sendMessage } from './send-message';
+export { editMessage } from './edit-message';
 export { sanitizeTelegramMarkdown } from './sanitize-markdown';
 export { sendPhoto } from './send-photo';
 export { sendVoice } from './send-voice';

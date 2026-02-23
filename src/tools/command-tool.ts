@@ -25,8 +25,8 @@ export const runCommand = withAccess('guest', tool({
                 shell: getShell(),
             }, (error: ExecException | null, stdout: string, stderr: string) => {
                 resolve({
-                    stdout: scrubSecrets(stdout?.trim().slice(0, 4000) || ''),
-                    stderr: scrubSecrets(stderr?.trim().slice(0, 2000) || ''),
+                    stdout: scrubSecrets(stdout?.trim() || ''),
+                    stderr: scrubSecrets(stderr?.trim() || ''),
                     exitCode: error?.code ?? 0,
                 });
             });

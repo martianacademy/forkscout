@@ -153,10 +153,9 @@ export function buildAgentConfig(file: any): AgentSettings {
         compressAfterStep: file?.compressAfterStep ?? DEFAULTS.agent.compressAfterStep,
         compressInputMaxChars: file?.compressInputMaxChars ?? DEFAULTS.agent.compressInputMaxChars,
         flightMaxRetries: file?.flightMaxRetries ?? DEFAULTS.agent.flightMaxRetries,
-        plannerMaxTasks: file?.plannerMaxTasks ?? DEFAULTS.agent.plannerMaxTasks,
         plannerChatHistoryLimit: file?.plannerChatHistoryLimit ?? DEFAULTS.agent.plannerChatHistoryLimit,
-        plannerMaxMemoryQueries: file?.plannerMaxMemoryQueries ?? DEFAULTS.agent.plannerMaxMemoryQueries,
         postflightMaxResponseChars: file?.postflightMaxResponseChars ?? DEFAULTS.agent.postflightMaxResponseChars,
+        dynamicToolLoading: file?.dynamicToolLoading ?? DEFAULTS.agent.dynamicToolLoading,
     };
 }
 

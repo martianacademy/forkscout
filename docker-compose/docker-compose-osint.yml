@@ -1,0 +1,22 @@
+version: "3.9"
+
+# ─── Kali Linux OSINT Lab ───
+# Purpose: Open Source Intelligence (OSINT) gathering
+# Uses: Dockerfile.kali-osint (built from project root)
+# Tools: theHarvester, Sherlock, Holehe, SpiderFoot, recon-ng, PhoneInfoga, ExifTool, nmap, whois
+
+services:
+  osint-lab:
+    build:
+      context: ..
+      dockerfile: Dockerfile.kali-osint
+    container_name: osint-lab
+    hostname: osint-lab
+    command: tail -f /dev/null   # Keep running in background
+    volumes:
+      - ../osint-results:/osint/results   # Save all results here
+    environment:
+      - TERM=xterm-256color
+    restart: unless-stopped
+    stdin_open: true
+    tty: true

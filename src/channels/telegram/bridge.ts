@@ -12,7 +12,7 @@ import { getConfig } from '../../config';
 import { AGENT_ROOT } from '../../paths';
 import type { TelegramBotInfo, TelegramBridgeConfig, TelegramUpdate, InboxMessage } from './types';
 import { sleep } from './types';
-import { callApi, getMe, sendMessage, sendPhoto, sendDocument } from './api';
+import { callApi, getMe, sendMessage, sendPhoto, sendDocument, sendVoice } from './api';
 import { TelegramStateManager } from './state';
 import { handleTelegramUpdate } from './handler';
 
@@ -71,10 +71,7 @@ export class TelegramBridge {
         // Load persisted chat histories
         await this.loadHistories();
 
-        // Process any missed messages from Telegram's queue
-        await this.processMissedMessages();
-
-        // Resume any conversations interrupted by a restart
+        // Check for interrupted conversations — ask user before resuming
         await this.resumeInterruptedChats();
 
         this.poll(); // fire and forget — runs forever
@@ -93,36 +90,6 @@ export class TelegramBridge {
     // ── Polling ───────────────────────────────────────
 
     /**
-     * On startup, fetch any queued updates from Telegram.
-     * These are messages sent while the bot was offline.
-     */
-    private async processMissedMessages(): Promise<void> {
-        try {
-            const updates = await callApi<TelegramUpdate[]>(this.token, 'getUpdates', {
-                offset: this.offset,
-                timeout: 0,
-                allowed_updates: ['message'],
-            });
-
-            if (updates.length === 0) return;
-
-            console.log(`[Telegram]: Found ${updates.length} missed message(s) while offline — processing...`);
-
-            for (const update of updates) {
-                this.offset = update.update_id + 1;
-                await this.handleUpdate(update, true).catch(err => {
-                    console.error(`[Telegram]: Error handling missed update ${update.update_id}:`, err);
-                });
-            }
-
-            this.state.markDirty();
-            await this.state.saveState(this.offset, this.startedAt);
-            console.log(`[Telegram]: Finished processing missed messages`);
-        } catch (err) {
-            console.error(`[Telegram]: Error fetching missed messages:`, err instanceof Error ? err.message : err);
-        }
-    }
-
     /** Continuous long-polling loop */
     private async poll(): Promise<void> {
         while (this.running) {
@@ -133,9 +100,28 @@ export class TelegramBridge {
                     allowed_updates: ['message'],
                 });
 
-                for (const update of updates) {
+                // Deduplicate: when multiple messages arrive from the same chat
+                // in one poll batch, skip all but the LAST per chat.
+                // This prevents sequential processing of duplicate user messages
+                // (e.g. user re-sends while agent is processing the first one).
+                const lastPerChat = new Map<number, number>(); // chatId → index
+                for (let i = 0; i < updates.length; i++) {
+                    const chatId = updates[i].message?.chat?.id;
+                    if (chatId != null) lastPerChat.set(chatId, i);
+                }
+
+                for (let i = 0; i < updates.length; i++) {
+                    const update = updates[i];
                     this.offset = update.update_id + 1;
                     this.state.markDirty();
+
+                    const chatId = update.message?.chat?.id;
+                    if (chatId != null && lastPerChat.get(chatId) !== i) {
+                        // Skip — a newer message from this chat exists in the same batch
+                        console.log(`[Telegram]: Skipping update ${update.update_id} (superseded by newer message in chat ${chatId})`);
+                        continue;
+                    }
+
                     await this.handleUpdate(update, false).catch(err => {
                         console.error(`[Telegram]: Error handling update ${update.update_id}:`, err);
                     });
@@ -177,158 +163,59 @@ export class TelegramBridge {
 
     /**
      * After startup, detect conversations interrupted by a restart.
-     * Two cases:
-     *   1. Last message is role='user' — agent hadn't started any tool calls yet
-     *   2. History contains checkpoint messages — agent was mid-task with progress
-     * In both cases: pop the orphan user message, reconstruct the update,
-     * and re-run through the handler (with resume context if checkpoints exist).
+     * Instead of auto-resuming (which frustrates users who intentionally stopped
+     * the agent), we ASK the user if they want to continue.
+     *
+     * The orphaned user message stays in history — if the user says "continue",
+     * the agent sees the prior context naturally. If they send something else,
+     * normal flow handles it.
      */
     private async resumeInterruptedChats(): Promise<void> {
-        const interrupted: Array<{ chatId: number; hasCheckpoints: boolean }> = [];
+        const interrupted: Array<{ chatId: number }> = [];
 
         for (const [chatId, history] of this.chatHistories) {
             if (history.length === 0) continue;
 
-            const lastMsg = history[history.length - 1];
-
-            // Case 1: Last message is user (no steps completed before restart)
-            if (lastMsg.role === 'user') {
-                interrupted.push({ chatId, hasCheckpoints: false });
-                continue;
+            // Clean any stale checkpoints first (from prior crashes)
+            for (let i = history.length - 1; i >= 0; i--) {
+                if (history[i].id.startsWith('checkpoint-')) {
+                    history.splice(i, 1);
+                }
             }
 
-            // Case 2: Has checkpoint messages (agent was mid-task with progress)
-            if (history.some(m => m.id.startsWith('checkpoint-'))) {
-                interrupted.push({ chatId, hasCheckpoints: true });
+            const lastMsg = history[history.length - 1];
+
+            // If last message is user (no assistant reply), this was interrupted.
+            // Add an assistant message noting the restart so the agent doesn't
+            // auto-continue. Context is preserved — if the user says "continue",
+            // the agent sees the original task in history.
+            if (lastMsg && lastMsg.role === 'user') {
+                const restartNote: UIMessage = {
+                    id: `restart-note-${Date.now()}`,
+                    role: 'assistant' as const,
+                    parts: [{ type: 'text' as const, text: '[SYSTEM: Process was restarted before completing your request. Waiting for user to decide whether to continue or start fresh.]' }],
+                };
+                history.push(restartNote);
+                interrupted.push({ chatId });
             }
         }
 
         if (interrupted.length === 0) return;
 
-        console.log(`[Telegram]: Found ${interrupted.length} interrupted conversation(s) — resuming…`);
+        // Save cleaned history to disk
+        this.historyDirty = true;
 
-        for (const { chatId, hasCheckpoints } of interrupted) {
-            const history = this.chatHistories.get(chatId)!;
+        console.log(`[Telegram]: Found ${interrupted.length} interrupted conversation(s) — asking user to confirm resume`);
 
-            // Build resume context from checkpoints if the agent had made progress
-            let resumeContext: string | undefined;
-            if (hasCheckpoints) {
-                const checkpoints = history.filter(m => m.id.startsWith('checkpoint-'));
-                const summaries = checkpoints.map(cp => {
-                    const text = (cp.parts?.[0] as any)?.text || '';
-                    return text;
-                }).join('\n\n');
-
-                // Extract working context: directories and files the agent was
-                // operating on in the last few steps, so the model knows WHERE
-                // it was, not just WHAT it did.
-                const workingPaths = new Set<string>();
-                const recentCheckpoints = checkpoints.slice(-5); // last 5 steps
-                for (const cp of recentCheckpoints) {
-                    const text = (cp.parts?.[0] as any)?.text || '';
-                    // Extract paths from Args JSON
-                    const pathMatch = text.match(/"(?:path|cwd|file|directory)":\s*"([^"]+)"/g);
-                    if (pathMatch) {
-                        for (const m of pathMatch) {
-                            const val = m.match(/":\s*"([^"]+)"/)?.[1];
-                            if (val) workingPaths.add(val);
-                        }
-                    }
-                    // Extract cd paths from commands
-                    const cdMatch = text.match(/cd\s+(\/[^\s&|;]+)/g);
-                    if (cdMatch) {
-                        for (const m of cdMatch) {
-                            workingPaths.add(m.replace('cd ', ''));
-                        }
-                    }
-                }
-
-                const workingCtx = workingPaths.size > 0
-                    ? `\nWORKING CONTEXT — You were operating in/on these paths:\n${[...workingPaths].map(p => `  • ${p}`).join('\n')}\n`
-                    : '';
-
-                // Extract reasoning/plan text from checkpoints so the model
-                // remembers its high-level intent, not just individual tool calls.
-                const reasoningLines: string[] = [];
-                for (const cp of checkpoints) {
-                    const text = (cp.parts?.[0] as any)?.text || '';
-                    const reasoningMatch = text.match(/Reasoning: (.+?)(?:\n  Tool:|$)/s);
-                    if (reasoningMatch?.[1]?.trim()) {
-                        reasoningLines.push(reasoningMatch[1].trim());
-                    }
-                }
-                // Deduplicate and take the most meaningful reasoning snippets
-                const uniqueReasoning = [...new Set(reasoningLines)].slice(0, 5);
-                const taskPlan = uniqueReasoning.length > 0
-                    ? `\nYOUR PLAN/REASONING before the restart:\n${uniqueReasoning.map(r => `  > ${r.slice(0, 300)}`).join('\n')}\n`
-                    : '';
-
-                resumeContext = [
-                    '⚠️ CONTINUATION AFTER RESTART:',
-                    'You were previously working on this task but the process was restarted',
-                    '(possibly because your own code changes triggered a rebuild).',
-                    workingCtx,
-                    taskPlan,
-                    'Here are the steps you already completed before the restart:',
-                    '',
-                    summaries,
-                    '',
-                    'IMPORTANT: Continue from where you left off. Do NOT repeat steps that already succeeded.',
-                    'If a step partially failed or was interrupted, you may retry it.',
-                    'Pay attention to the WORKING CONTEXT and YOUR PLAN above — that is what you were doing and where.',
-                ].join('\n');
-
-                // Remove checkpoints from history so the user message is last
-                for (let i = history.length - 1; i >= 0; i--) {
-                    if (history[i].id.startsWith('checkpoint-')) {
-                        history.splice(i, 1);
-                    }
-                }
-            }
-
-            // The last message should now be the user message
-            const lastMsg = history[history.length - 1];
-            if (!lastMsg || lastMsg.role !== 'user') {
-                console.log(`[Telegram]: Can't resume chat ${chatId} — unexpected history state`);
-                continue;
-            }
-
-            // Extract the raw Telegram message JSON from the stored user parts
-            const textPart = (lastMsg.parts || []).find(
-                (p: any) => p.type === 'text' && typeof p.text === 'string' && p.text.startsWith('[Telegram Message]'),
-            ) as { type: string; text: string } | undefined;
-
-            if (!textPart) {
-                console.log(`[Telegram]: Can't resume chat ${chatId} — no raw message in history`);
-                continue;
-            }
-
+        for (const { chatId } of interrupted) {
             try {
-                const rawJson = textPart.text.replace('[Telegram Message]\n', '');
-                const originalMsg = JSON.parse(rawJson);
-
-                // Pop the orphan — the handler will re-push it normally
-                history.pop();
-
-                // Notify user we're resuming
-                const resumeMsg = hasCheckpoints
-                    ? '🔄 I was interrupted mid-task — resuming where I left off…'
-                    : '🔄 I was interrupted — picking up your message…';
-                await sendMessage(this.token, chatId, resumeMsg);
-
-                // Re-process through the normal handler (with resume context if available)
-                const syntheticUpdate: TelegramUpdate = {
-                    update_id: 0,
-                    message: originalMsg,
-                };
-
-                await handleTelegramUpdate(syntheticUpdate, false, this.getHandlerDeps(), resumeContext);
-                console.log(`[Telegram]: Successfully resumed chat ${chatId}${hasCheckpoints ? ' (with progress context)' : ''}`);
-            } catch (err) {
-                console.error(`[Telegram]: Failed to resume chat ${chatId}:`, err instanceof Error ? err.message : err);
-                await sendMessage(this.token, chatId, "I was interrupted and couldn't resume. Could you send your message again?").catch(err =>
-                    console.warn(`[Telegram]: Resume notification send failed for chat ${chatId}: ${err instanceof Error ? err.message : err}`),
+                await sendMessage(
+                    this.token, chatId,
+                    '⚠️ I was restarted while we were in the middle of something.\n\n' +
+                    'Would you like me to continue where I left off, or do you want to start fresh? Just let me know!',
                 );
+            } catch (err) {
+                console.warn(`[Telegram]: Resume notification failed for chat ${chatId}: ${err instanceof Error ? err.message : err}`);
             }
         }
     }
@@ -370,6 +257,33 @@ export class TelegramBridge {
         });
     }
 
+    /**
+     * Migrate legacy history entries that stored raw Telegram JSON blobs.
+     * Extracts just the text content from `[Telegram Message]\n{...JSON...}` format.
+     * This is a one-time migration — after save, the cleaned format persists.
+     */
+    private static migrateJsonBlobs(messages: UIMessage[]): { messages: UIMessage[]; migrated: number } {
+        let migrated = 0;
+        const result = messages.map(m => {
+            if (m.role !== 'user' || !m.parts) return m;
+            const newParts = m.parts.map((p: any) => {
+                if (p.type !== 'text' || !p.text?.startsWith('[Telegram Message]\n{')) return p;
+                // Extract text from the raw JSON blob
+                try {
+                    const jsonStr = p.text.slice('[Telegram Message]\n'.length);
+                    const parsed = JSON.parse(jsonStr);
+                    const text = parsed.text || parsed.caption || 'Message';
+                    migrated++;
+                    return { type: 'text' as const, text };
+                } catch {
+                    return p; // If parsing fails, keep as-is
+                }
+            });
+            return { ...m, parts: newParts };
+        });
+        return { messages: result, migrated };
+    }
+
     /** Load chat histories from disk */
     private async loadHistories(): Promise<void> {
         try {
@@ -377,15 +291,28 @@ export class TelegramBridge {
             const data: Record<string, UIMessage[]> = JSON.parse(raw);
             this.chatHistories.clear();
             let totalMessages = 0;
+            let totalMigrated = 0;
             for (const [chatIdStr, messages] of Object.entries(data)) {
                 const chatId = Number(chatIdStr);
                 if (!isNaN(chatId) && Array.isArray(messages)) {
-                    // Keep only the last maxHistory messages
-                    this.chatHistories.set(chatId, messages.slice(-this.maxHistory));
+                    // Filter out stale checkpoints (from prior crashes) and keep last maxHistory
+                    const clean = messages.filter(m => !m.id?.startsWith('checkpoint-'));
+                    // Migrate legacy raw JSON blobs → clean text
+                    const { messages: migrated, migrated: count } = TelegramBridge.migrateJsonBlobs(clean);
+                    totalMigrated += count;
+                    this.chatHistories.set(chatId, migrated.slice(-this.maxHistory));
+                    const removed = messages.length - clean.length;
+                    if (removed > 0) console.log(`[Telegram]: Purged ${removed} stale checkpoint(s) from chat ${chatId}`);
                     totalMessages += this.chatHistories.get(chatId)!.length;
                 }
             }
+            if (totalMigrated > 0) {
+                console.log(`[Telegram]: Migrated ${totalMigrated} message(s) from raw JSON to clean text format`);
+                this.historyDirty = true; // Trigger save to persist the migration
+            }
             console.log(`[Telegram]: Loaded ${totalMessages} message(s) across ${this.chatHistories.size} chat(s) from history`);
+            // Persist migration immediately if any messages were cleaned
+            if (this.historyDirty) await this.saveHistoriesForce();
         } catch {
             // First run or corrupted — start with empty histories
         }
@@ -438,7 +365,7 @@ export class TelegramBridge {
 
     /** Send a message via the API (public — used by telegram tools) */
     async sendMessage(chatId: number, text: string, replyToMessageId?: number): Promise<void> {
-        return sendMessage(this.token, chatId, text, replyToMessageId, this.maxMsgLen);
+        await sendMessage(this.token, chatId, text, replyToMessageId, this.maxMsgLen);
     }
 
     /** Send a photo via the API (public — used by telegram tools) */
@@ -449,5 +376,10 @@ export class TelegramBridge {
     /** Send a document via the API (public — used by telegram tools) */
     async sendDocument(chatId: number, filePath: string, caption?: string): Promise<void> {
         return sendDocument(this.token, chatId, filePath, caption);
+    }
+
+    /** Send a voice message via the API (public — used by telegram tools) */
+    async sendVoice(chatId: number, filePath: string, caption?: string): Promise<void> {
+        return sendVoice(this.token, chatId, filePath, caption);
     }
 }

@@ -132,6 +132,15 @@ async function startChild() {
             // SIGTERM/SIGINT from outside (e.g. Ctrl+C) — don't respawn
             if (signal === 'SIGTERM' || signal === 'SIGINT') return;
 
+            // Exit code 10 = self_rebuild requested. Propagate to watchdog.sh so it
+            // can run tsc (the real source-of-truth build) before restarting us.
+            if (code === 10) {
+                log('Agent requested self-rebuild (exit 10) — propagating to watchdog');
+                if (restartTimer) clearTimeout(restartTimer);
+                process.exit(10);
+                return;
+            }
+
             log(`Process exited (code=${code}, signal=${signal}) — restarting in 3s`);
             setTimeout(() => startChild(), 3000);
         });

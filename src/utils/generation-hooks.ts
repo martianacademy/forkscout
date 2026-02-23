@@ -119,6 +119,8 @@ export interface FinalizeOptions {
     ctx?: ChatContext;
     /** The user's original message (for postflight quality gate) */
     userMessage?: string;
+    /** Structured output from ToolLoopAgent.generate() — Output.object({ answer }) */
+    output?: { answer?: string } | null;
 }
 
 export interface FinalizeResult {
@@ -148,16 +150,19 @@ export interface FinalizeResult {
  * Returns the resolved response and metadata.
  */
 export async function finalizeGeneration(opts: FinalizeOptions): Promise<FinalizeResult> {
-    const { text, steps, usage, reasoningCtx, modelId, channel, agent, ctx, userMessage } = opts;
+    const { text, steps, usage, reasoningCtx, modelId, channel, agent, ctx, userMessage, output } = opts;
 
     // 1. Resolve response
-    const response = resolveAgentResponse(text, steps);
+    const response = resolveAgentResponse(text, steps, output);
 
     // 2. Reasoning summary
     const summary = getReasoningSummary(reasoningCtx);
     const stepCount = steps?.length || 0;
+    const inputTok = usage?.inputTokens || 0;
+    const outputTok = usage?.outputTokens || 0;
     console.log(
         `[Agent]: Done (${stepCount} step(s), tier: ${summary.finalTier}, ` +
+        `tokens: ${inputTok.toLocaleString()} in / ${outputTok.toLocaleString()} out = ${(inputTok + outputTok).toLocaleString()} total, ` +
         `failures: ${summary.toolFailures}${summary.escalated ? ', ESCALATED' : ''})`,
     );
 

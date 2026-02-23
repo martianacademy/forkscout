@@ -99,6 +99,8 @@ export interface Entity {
     facts: Fact[];             // v5: structured facts with confidence
     lastSeen: number;
     accessCount: number;
+    /** Multi-dimensional tags for scoped search (e.g. { project: "forkscout", scope: "universal" }). */
+    tags?: Record<string, string>;
 }
 
 export interface Relation {
@@ -120,6 +122,8 @@ export interface Exchange {
     timestamp: number;
     sessionId: string;
     importance?: number;      // 0-1, higher = more likely to surface in search
+    /** Multi-dimensional tags for scoped search (e.g. { project: "forkscout" }). */
+    tags?: Record<string, string>;
 }
 
 // ── Active tasks (working state / executive memory) ────

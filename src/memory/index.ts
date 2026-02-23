@@ -36,6 +36,8 @@ export class MemoryManager {
     private selfContextCache: string | null = null;
     private selfContextLastFetch = 0;
     private static readonly SELF_CACHE_TTL_MS = 60_000; // refresh self-entity every 60s
+    /** Active project for scoped memory searches. Set via setProject(). */
+    private activeProject: string | undefined;
 
     constructor(config: MemoryConfig) {
         this.config = { recentWindowSize: 6, contextBudget: 4000, ...config };
@@ -52,6 +54,9 @@ export class MemoryManager {
 
     async init(): Promise<void> {
         await this.store.init();
+
+        // If memory is unreachable, skip history restore
+        if (!this.store.isHealthy) return;
 
         // Restore recent conversation history from MCP so we have context after restart
         try {
@@ -87,6 +92,19 @@ export class MemoryManager {
         await this.store.clear();
     }
 
+    // ── Project context ──────────────────────────────
+
+    /** Set the active project for scoped memory searches. Null clears it. */
+    setProject(project: string | undefined): void {
+        if (this.activeProject !== project) {
+            console.log(`🧠 Memory project scope: ${project || '(global)'}`);
+        }
+        this.activeProject = project;
+    }
+
+    /** Get the currently active project scope. */
+    getProject(): string | undefined { return this.activeProject; }
+
     // ── Message handling ─────────────────────────────
 
     /**
@@ -100,7 +118,8 @@ export class MemoryManager {
         if (role === 'user') {
             this.pendingUser.set(key, content);
         } else if (role === 'assistant' && this.pendingUser.has(key)) {
-            this.store.addExchange(this.pendingUser.get(key)!, content, this.sessionId);
+            const tags = this.activeProject ? { project: this.activeProject } : undefined;
+            this.store.addExchange(this.pendingUser.get(key)!, content, this.sessionId, tags);
             this.pendingUser.delete(key);
         }
     }
@@ -153,9 +172,9 @@ export class MemoryManager {
         let retrievedCount = 0;
         let graphEntities = 0;
 
-        // 1. Knowledge search — graph entities + some exchanges
+        // 1. Knowledge search — graph entities + some exchanges (project-scoped)
         try {
-            const results = await this.store.searchKnowledgeAsync(query, 20);
+            const results = await this.store.searchKnowledgeAsync(query, 8, this.activeProject);
             const graphLines: string[] = [];
             const exchangeLines: string[] = [];
             for (const r of results) {
@@ -172,7 +191,7 @@ export class MemoryManager {
         //    Uses a broader query so context-light messages ("continue", "yes") still retrieve history
         try {
             const exchangeQuery = query.length < 20 ? '*' : query;
-            const exchanges = await this.store.searchExchangesAsync(exchangeQuery, 10);
+            const exchanges = await this.store.searchExchangesAsync(exchangeQuery, 5, this.activeProject);
             if (exchanges.length > 0) {
                 const seen = new Set(relevantMemories.split('\n').map(l => l.trim()));
                 const newLines: string[] = [];
@@ -219,16 +238,19 @@ export class MemoryManager {
 
     // ── Knowledge operations ─────────────────────────
 
-    async saveKnowledge(fact: string, category?: string): Promise<void> {
-        await this.store.callTool('save_knowledge', { fact, category });
+    async saveKnowledge(fact: string, category?: string, project?: string): Promise<void> {
+        await this.store.callTool('save_knowledge', {
+            fact, category,
+            ...(project || this.activeProject ? { project: project || this.activeProject } : {}),
+        });
     }
 
-    async searchKnowledge(query: string, limit = 5): Promise<SearchResult[]> {
-        return this.store.searchKnowledgeAsync(query, limit);
+    async searchKnowledge(query: string, limit = 5, project?: string): Promise<SearchResult[]> {
+        return this.store.searchKnowledgeAsync(query, limit, project || this.activeProject);
     }
 
-    async searchEntities(query: string, limit = 5): Promise<Entity[]> {
-        return this.store.searchEntitiesAsync(query, limit);
+    async searchEntities(query: string, limit = 5, project?: string): Promise<Entity[]> {
+        return this.store.searchEntitiesAsync(query, limit, project || this.activeProject);
     }
 
     // ── Entity operations ────────────────────────────
@@ -248,34 +270,73 @@ export class MemoryManager {
         return this.selfContextCache || '';
     }
 
-    /** Fetch self-entity from MCP and format as context string. Cached with TTL. */
-    async getSelfContextAsync(): Promise<string> {
+    /** Fetch self-entity from MCP and format as context string. Cached with TTL.
+     *  @param query — when provided, returns only the most relevant facts (scored by relevance).
+     *                 Without query, returns all facts (can be 30 K+ tokens — avoid in hot path). */
+    async getSelfContextAsync(query?: string): Promise<string> {
+        // Filtered requests always go to MCP (no cache — query changes each time)
+        if (query) return this.refreshSelfContext(query, 30);
+
         const now = Date.now();
         if (this.selfContextCache !== null && now - this.selfContextLastFetch < MemoryManager.SELF_CACHE_TTL_MS) {
             return this.selfContextCache;
         }
-        return this.refreshSelfContext();
+        // Unfiltered: fetch all but only cache top 40
+        return this.refreshSelfContext(undefined, 40);
     }
 
-    private async refreshSelfContext(): Promise<string> {
+    private async refreshSelfContext(query?: string, limit?: number): Promise<string> {
         try {
-            const selfEntity = await this.store.getSelfEntityAsync();
-            if (selfEntity && selfEntity.facts && selfEntity.facts.length > 0) {
-                this.selfContextCache = selfEntity.facts
+            const selfEntity = await this.store.getSelfEntityAsync(query, limit);
+            const formatted = selfEntity && selfEntity.facts && selfEntity.facts.length > 0
+                ? selfEntity.facts
                     .map(f => typeof f === 'string' ? `• ${f}` : `• [${Math.round(f.confidence * 100)}%] ${f.content}`)
-                    .join('\n');
-            } else {
-                this.selfContextCache = '';
+                    .join('\n')
+                : '';
+            // Only update the general cache when not doing a query-specific fetch
+            if (!query) {
+                this.selfContextCache = formatted;
+                this.selfContextLastFetch = Date.now();
             }
+            return formatted;
         } catch {
             // Keep existing cache on failure
             if (this.selfContextCache === null) this.selfContextCache = '';
+            return this.selfContextCache;
         }
-        this.selfContextLastFetch = Date.now();
-        return this.selfContextCache;
     }
 
     recordSelfObservation(content: string, _category?: string): void { this.store.addSelfObservation(content); }
+
+    /**
+     * Save a behavioral rule for a person. These are durable preferences/corrections
+     * that must be respected in ALL future conversations with this person.
+     * Stored as facts on their person entity, prefixed with [RULE] for easy retrieval.
+     */
+    saveBehavioralRule(personName: string, rule: string, category: string): void {
+        const fact = `[RULE:${category}] ${rule}`;
+        this.store.addEntity(personName, 'person', [fact]);
+        console.log(`[Memory]: Saved behavioral rule for ${personName}: ${fact}`);
+    }
+
+    /**
+     * Get all behavioral rules for a person from their entity facts.
+     * Returns rules as an array of strings, or empty if none found.
+     */
+    async getBehavioralRules(personName: string): Promise<string[]> {
+        try {
+            const entity = await this.store.getEntityAsync(personName);
+            if (!entity?.facts) return [];
+            return entity.facts
+                .filter((f: any) => {
+                    const content = typeof f === 'string' ? f : f.content;
+                    return content?.startsWith('[RULE:');
+                })
+                .map((f: any) => typeof f === 'string' ? f : f.content);
+        } catch {
+            return [];
+        }
+    }
 
     updateEntitySession(
         entityName: string,

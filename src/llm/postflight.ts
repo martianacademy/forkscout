@@ -13,7 +13,7 @@
  * @module llm/postflight
  */
 
-import { generateObject } from 'ai';
+import { generateText, Output } from 'ai';
 import { z } from 'zod';
 import type { ModelRouter } from './router';
 import { getConfig } from '../config';
@@ -80,16 +80,16 @@ export async function runPostflight(
         const { model } = router.getModelByTier('fast');
         const cfg = getConfig().agent;
 
-        const { object } = await generateObject({
+        const { output } = await generateText({
             model,
-            schema: PostflightSchema,
+            output: Output.object({ schema: PostflightSchema }),
             system: POSTFLIGHT_SYSTEM,
             prompt: `User question: ${userMessage}\n\nAgent response: ${response.slice(0, cfg.postflightMaxResponseChars)}`,
             temperature: 0,
             maxRetries: cfg.flightMaxRetries,
         });
 
-        return object;
+        return output;
     } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         console.warn(`[Postflight]: Failed — skipping quality gate. ${msg.slice(0, 150)}`);

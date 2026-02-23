@@ -3,16 +3,15 @@
  */
 
 import { convertToModelMessages, type UIMessage } from 'ai';
-import { getConfig } from '../../config';
-import { generateTextWithRetry, isVisionUnsupportedError } from '../../llm/retry';
-import { buildStopConditions } from '../../llm/stop-conditions';
 import type { Agent, ChatContext } from '../../agent';
 import { requestTracker } from '../../request-tracker';
-import type { TelegramUpdate } from './types';
-import { describeToolCall, humanTimeAgo } from './types';
-import { downloadFile, sendMessage, sendTyping, createTypingGuard } from './api';
+import type { TelegramUpdate, TelegramMessage } from './types';
+import { humanTimeAgo } from './types';
+import { downloadFile, sendMessage, editMessage, sendTyping, createTypingGuard } from './api';
 import type { TelegramStateManager } from './state';
 import { finalizeGeneration } from '../../utils/generation-hooks';
+import { generatePreflightAck } from './preflight';
+import { detectCorrection } from './correction-detector';
 
 // ── Handler dependencies ─────────────────────────────
 
@@ -43,6 +42,73 @@ function describeMessageType(msg: { sticker?: any; document?: any; audio?: any; 
     return 'Message';
 }
 
+/**
+ * Build compact text representation of a Telegram message for chat history.
+ * Preserves meaningful context (reply chains, forwards, media descriptions)
+ * while stripping all the JSON noise (from, chat, date, entities, message_id, etc.)
+ * that wastes ~74% of history tokens.
+ */
+function buildCompactMessageText(msg: TelegramMessage): string {
+    const lines: string[] = [];
+
+    // Core text content
+    const content = msg.text || msg.caption || describeMessageType(msg);
+
+    // Reply context — just the replied-to text, not the full JSON
+    if (msg.reply_to_message) {
+        const replyText = msg.reply_to_message.text || msg.reply_to_message.caption || describeMessageType(msg.reply_to_message);
+        const truncated = replyText.length > 80 ? replyText.slice(0, 77) + '...' : replyText;
+        lines.push(`[replying to: "${truncated}"]`);
+    }
+
+    // Forward context
+    if (msg.forward_from) {
+        lines.push(`[forwarded from ${msg.forward_from.first_name}]`);
+    } else if (msg.forward_from_chat) {
+        lines.push(`[forwarded from ${msg.forward_from_chat.title || 'chat'}]`);
+    } else if (msg.forward_sender_name) {
+        lines.push(`[forwarded from ${msg.forward_sender_name}]`);
+    }
+
+    // Media annotations (only if there's also text/caption — otherwise describeMessageType handles it)
+    if (msg.text || msg.caption) {
+        if (msg.photo) lines.push('[with photo]');
+        if (msg.document) lines.push(`[with file: ${msg.document.file_name || 'document'}]`);
+        if (msg.video) lines.push('[with video]');
+        if (msg.audio) lines.push(`[with audio: ${msg.audio.title || msg.audio.file_name || 'audio'}]`);
+        if (msg.voice) lines.push('[with voice message]');
+        if (msg.sticker) lines.push(`[with sticker: ${msg.sticker.emoji || ''}]`);
+        if (msg.location) lines.push(`[with location: ${msg.location.latitude}, ${msg.location.longitude}]`);
+    }
+
+    // URLs from entities (useful context the LLM should see)
+    if (msg.entities) {
+        for (const ent of msg.entities) {
+            if (ent.type === 'url' || (ent.type === 'text_link' && ent.url)) {
+                // url entities: text itself IS the url. text_link: url is in ent.url
+                if (ent.type === 'text_link' && ent.url) {
+                    lines.push(`[link: ${ent.url}]`);
+                }
+            }
+        }
+    }
+
+    lines.push(content);
+    return lines.join('\n');
+}
+// ── Deduplication cache ──────────────────────────
+// Prevents processing identical messages from the same chat within a short window.
+// Key: "chatId:textHash", Value: timestamp. Entries expire after DEDUP_WINDOW_MS.
+const recentMessages = new Map<string, number>();
+const DEDUP_WINDOW_MS = 5_000; // 5 seconds
+
+/** Prune expired entries (called on each message to avoid memory leak) */
+function pruneDedup(): void {
+    const now = Date.now();
+    for (const [key, ts] of recentMessages) {
+        if (now - ts > DEDUP_WINDOW_MS * 2) recentMessages.delete(key);
+    }
+}
 // ── Main handler ─────────────────────────────────────
 
 /**
@@ -50,13 +116,11 @@ function describeMessageType(msg: { sticker?: any; document?: any; audio?: any; 
  * @param update   The Telegram update
  * @param isMissed True if this message was received while the bot was offline
  * @param deps     Injected dependencies (agent, api, state, history helpers)
- * @param resumeContext  If set, this is a resumed conversation — inject as context so the model knows what it already did
  */
 export async function handleTelegramUpdate(
     update: TelegramUpdate,
     isMissed: boolean,
     deps: TelegramHandlerDeps,
-    resumeContext?: string,
 ): Promise<void> {
     const { agent, token, state } = deps;
     const msg = update.message;
@@ -82,8 +146,8 @@ export async function handleTelegramUpdate(
         }
     }
 
-    // Skip commands that start with / unless it's /start
-    if (text.startsWith('/') && !text.startsWith('/start')) {
+    // Skip commands that start with / unless it's /start or /stop
+    if (text.startsWith('/') && !text.startsWith('/start') && !text.startsWith('/stop')) {
         await sendMessage(token, chatId, "I respond to regular messages, not commands. Just type what you need!");
         return;
     }
@@ -94,9 +158,44 @@ export async function handleTelegramUpdate(
         return;
     }
 
+    // Handle /stop — abort without starting new generation
+    if (text.startsWith('/stop')) {
+        const chatIdStr = String(chatId);
+        const aborted = requestTracker.abortByChat('telegram', chatIdStr);
+        if (aborted > 0) {
+            await sendMessage(token, chatId, `⏹️ Stopped ${aborted} active task(s). What would you like to do?`);
+        } else {
+            await sendMessage(token, chatId, "Nothing running right now. What can I help with?");
+        }
+        return;
+    }
+
+    // Handle natural "stop" messages — abort without starting new generation
+    const stopPatterns = /^(stop|ruk|ruko|bas|cancel|abort|band karo|rok|rokdo|enough|halt)(\s+(right now|now|it|please|everything|all|kar|karo|bhai|yaar))*[\s!.]*$/i;
+    if (stopPatterns.test(text.trim())) {
+        const chatIdStr = String(chatId);
+        const aborted = requestTracker.abortByChat('telegram', chatIdStr);
+        if (aborted > 0) {
+            await sendMessage(token, chatId, `⏹️ Stopped! What would you like to do next?`);
+        } else {
+            await sendMessage(token, chatId, "Nothing running right now. What can I help with?");
+        }
+        return;
+    }
+
     const who = user.username ? `@${user.username}` : displayName;
     const missedTag = isMissed ? ' [MISSED]' : '';
     console.log(`\n[telegram/${who} (${userId})${missedTag}]: ${text.slice(0, 200)}`);
+
+    // ── Deduplication: reject identical messages from same chat within 5s ──
+    pruneDedup();
+    const dedupKey = `${chatId}:${text}`;
+    const lastSeen = recentMessages.get(dedupKey);
+    if (lastSeen && Date.now() - lastSeen < DEDUP_WINDOW_MS) {
+        console.log(`[Telegram]: Skipping duplicate message from ${who} in chat ${chatId} (same text within ${DEDUP_WINDOW_MS}ms)`);
+        return;
+    }
+    recentMessages.set(dedupKey, Date.now());
 
     // Build chat context
     const channelAuth = agent.getChannelAuth();
@@ -150,20 +249,19 @@ export async function handleTelegramUpdate(
     // Auto-backs-off on 429, auto-stops after 5 min, deduplicates rapid nudges.
     const typing = createTypingGuard(token, chatId);
 
-    // Pass the raw Telegram message as JSON — LLMs can extract all context
-    // (reply chains, forwards, file metadata, stickers, locations, polls, etc.)
-    const parts: any[] = [];
-    const rawMsgJson = JSON.stringify(msg, null, 2);
-    parts.push({ type: 'text' as const, text: `[Telegram Message]\n${rawMsgJson}` });
-    // Include image binary for vision models (they need actual pixel data, not file_id)
+    // History stores PLAIN text — no JSON blobs, no context annotations.
+    // Telegram context (reply, forward, media) is injected only into the
+    // CURRENT message at generate() time, so past turns stay clean.
+    const plainText = text || msg.caption || describeMessageType(msg);
+    const historyParts: any[] = [{ type: 'text' as const, text: plainText }];
     if (imageData) {
-        parts.push({ type: 'image' as const, image: imageData.base64, mediaType: imageData.mediaType });
+        historyParts.push({ type: 'image' as const, image: imageData.base64, mediaType: imageData.mediaType });
     }
 
     const userMsg: UIMessage = {
         id: `tg-${msg.message_id}`,
         role: 'user' as const,
-        parts,
+        parts: historyParts,
     };
     history.push(userMsg);
 
@@ -175,7 +273,8 @@ export async function handleTelegramUpdate(
     const { id: tgReqId, signal: tgAbortSignal } = requestTracker.start('telegram', who, chatIdStr);
 
     try {
-        // Build user query — include missed-message context for the system prompt
+        // queryForPrompt = plain text for memory search + system prompt.
+        // Telegram context (reply, forward) is in the messages array, not here.
         const queryText = text || describeMessageType(msg);
         let queryForPrompt = queryText;
         if (isMissed) {
@@ -189,16 +288,50 @@ export async function handleTelegramUpdate(
         // Start the typing indicator (rate-limited, auto-backing-off)
         typing.start();
 
-        // Track ALL text fragments sent during generation so we don't double-send
-        const sentFragments: string[] = [];
         let stepCounter = 0;
+
+        // ── Pre-flight acknowledgment ────────────────────
+        // Fire a fast LLM call to produce a quick 1-line ack, sent BEFORE
+        // Pre-flight ack — sends instantly while the main agent warms up.
+        // Returns a Promise<number | null> so we can later EDIT the ack in-place
+        // with the final answer, giving the user one seamless message instead of two.
+        // hasPhoto passed so photo-only messages bypass the short-text skip filter.
+        const ackMessageIdPromise: Promise<number | null> = generatePreflightAck(queryText, agent.getRouter(), hasPhoto)
+            .then(ack => {
+                if (ack) {
+                    return sendMessage(token, chatId, ack).catch(err => {
+                        console.warn(`[Telegram]: Pre-flight ack send failed: ${err instanceof Error ? err.message : err}`);
+                        return null;
+                    });
+                }
+                return null;
+            })
+            .catch(err => {
+                console.warn(`[Telegram]: Pre-flight ack failed: ${err instanceof Error ? err.message : err}`);
+                return null;
+            });
+
+        // ── Automatic correction detection ───────────────
+        // Detects behavioral corrections ("don't call me bhai", "speak in English")
+        // and saves them as permanent rules on the person's entity.
+        // Runs concurrently — does not block the main generation.
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        detectCorrection(queryText, agent.getRouter())
+            .then(correction => {
+                if (correction) {
+                    agent.getMemoryManager().saveBehavioralRule(
+                        displayName, correction.rule, correction.category,
+                    );
+                }
+            })
+            .catch(err => console.warn(`[Telegram]: Correction detection failed: ${err instanceof Error ? err.message : err}`));
 
         // Create a per-request ToolLoopAgent via the centralized factory
         // Sub-agent progress is wired per-request via onSubAgentProgress (no singleton).
-        const { agent: chatAgent, reasoningCtx, modelId: chatModelId, plan } = await agent.createChatAgent({
+        const { agent: chatAgent, reasoningCtx, modelId: chatModelId } = await agent.createChatAgent({
             userText: queryForPrompt,
             ctx,
-            systemPromptSuffix: resumeContext,
+            abortSignal: tgAbortSignal,
             onSubAgentProgress: (agentLabel, message) => {
                 sendMessage(token, chatId, `🤖 *${agentLabel}*: ${message}`).catch(err =>
                     console.warn(`[Telegram]: Sub-agent progress send failed: ${err instanceof Error ? err.message : err}`),
@@ -206,93 +339,78 @@ export async function handleTelegramUpdate(
             },
         });
 
-        // Send ack immediately so the user sees a fast response
-        if (plan.acknowledgment) {
-            sendMessage(token, chatId, plan.acknowledgment).catch(err =>
-                console.warn(`[Telegram]: Ack send failed: ${err instanceof Error ? err.message : err}`),
-            );
-            sentFragments.push(plan.acknowledgment);
-        }
-
-        // Quick tasks with no tools needed — we're done
-        if (plan.effort === 'quick' && !plan.needsTools && plan.acknowledgment) {
-            typing.stop();
-            agent.clearSubAgentProgress();
-            requestTracker.finish(tgReqId);
-            agent.saveToMemory('assistant', plan.acknowledgment, ctx);
-            return;
-        }
-
         typing.nudge();
 
-        const { text: responseText, usage, steps: agentSteps } = await chatAgent.generate({
-            messages: await convertToModelMessages(history),
+        // Build messages: past history is plain text, but the LAST user message
+        // gets enriched with Telegram context (reply chains, forwards, media type).
+        // This matches AI SDK's separation: system | messages (history) | prompt (current).
+        const modelMessages = await convertToModelMessages(history);
+        if (modelMessages.length > 0) {
+            const lastMsg = modelMessages[modelMessages.length - 1];
+            if (lastMsg.role === 'user') {
+                // Replace the last user message content with enriched version
+                const enrichedText = buildCompactMessageText(msg);
+                if (isMissed) {
+                    const msgTime = new Date(msg.date * 1000);
+                    const ago = humanTimeAgo(msgTime);
+                    lastMsg.content = [{ type: 'text' as const, text: `[This message was sent ${ago} while you were offline.]\n\n${enrichedText}` }];
+                } else {
+                    lastMsg.content = [{ type: 'text' as const, text: enrichedText }];
+                }
+                // Re-attach image data if present
+                if (imageData) {
+                    (lastMsg.content as any[]).push({ type: 'image' as const, image: imageData.base64, mediaType: imageData.mediaType });
+                }
+            }
+        }
+
+        const { text: responseText, usage, steps: agentSteps, output: agentOutput } = await chatAgent.generate({
+            messages: modelMessages,
             abortSignal: tgAbortSignal,
-            onStepFinish: async ({ text: stepText, toolCalls, toolResults }: any) => {
+            onStepFinish: async ({ text: stepText, toolCalls }: any) => {
                 const currentStep = stepCounter++;
+                const hasToolCalls = toolCalls?.length > 0;
 
-                // Stream ALL intermediate text (planning, reasoning, progress updates)
-                // to the user as soon as the model produces it — don't wait for the end.
+                // Log everything for debugging
                 if (stepText?.trim()) {
-                    const fragment = stepText.trim();
-                    sendMessage(token, chatId, fragment).catch(err =>
-                        console.warn(`[Telegram]: Step text send failed: ${err instanceof Error ? err.message : err}`),
-                    );
-                    sentFragments.push(fragment);
-                    console.log(`[Telegram/Agent → step ${currentStep}]: ${fragment.slice(0, 150)}`);
+                    console.log(`[Telegram/Agent → step ${currentStep}]: ${stepText.trim().slice(0, 150)}`);
                 }
-
-                // Send contextual tool call descriptions
-                if (toolCalls?.length) {
+                if (hasToolCalls) {
                     console.log(
-                        `[Telegram/Agent]: ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`,
+                        `[Telegram/Agent → step ${currentStep}]: ${toolCalls.length} tool call(s): ${toolCalls.map((tc: any) => tc.toolName).join(', ')}`,
                     );
-                    const descriptions = toolCalls.map(
-                        // AI SDK v6 uses `input` not `args` for tool call parameters
-                        (tc: any) => describeToolCall(tc.toolName, tc.input),
-                    );
-                    const unique = [...new Set(descriptions)];
-                    sendMessage(token, chatId, unique.join('\n')).catch(err =>
-                        console.warn(`[Telegram]: Tool description send failed: ${err instanceof Error ? err.message : err}`),
-                    );
-                    typing.nudge();
                 }
 
-                // Save step checkpoint for mid-task crash recovery.
-                // If the process restarts (e.g. agent edited its own code → rebuild),
-                // these checkpoints let the model know what it already accomplished.
-                const hasTools = toolCalls && toolCalls.length > 0;
-                const hasText = stepText?.trim();
+                // ── Intermediate text: only send if MORE work is coming ──
+                // If this step has tool calls → the loop continues → send text as progress update.
+                // If this step has NO tool calls → this is the FINAL step → skip.
+                //   The post-generation path sends the final answer (avoids duplicate).
+                if (hasToolCalls && stepText?.trim()) {
+                    const trimmed = stepText.trim();
 
-                if (hasTools || hasText) {
-                    const cpParts: string[] = [];
+                    // Filter noise: skip short fragments, raw JSON, narration, and tool names.
+                    // Tool names leak as plain text when the model "thinks aloud" —
+                    // e.g. "searchavailabletools", "runcommand". They have no spaces,
+                    // no punctuation, and are all lowercase/camelCase identifiers.
+                    const looksLikeToolName = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(trimmed);
+                    const isSubstantive = trimmed.length > 15
+                        && !trimmed.startsWith('{')
+                        && !trimmed.startsWith('[')
+                        && !looksLikeToolName
+                        && /\s/.test(trimmed)   // must have at least one space — real sentences do
+                        && !/^(I'll |Let me |Now I |Going to |I will )/.test(trimmed);
 
-                    // Include the model's reasoning/plan text — this is crucial
-                    // so the agent remembers WHY it was doing these steps.
-                    if (hasText) {
-                        cpParts.push(`  Reasoning: ${stepText!.trim().slice(0, 600)}`);
+                    if (isSubstantive) {
+                        const displayText = trimmed.length > 1000
+                            ? trimmed.slice(0, 990) + '…'
+                            : trimmed;
+                        sendMessage(token, chatId, displayText).catch(err =>
+                            console.warn(`[Telegram]: Intermediate text send failed: ${err instanceof Error ? err.message : err}`),
+                        );
                     }
-
-                    if (hasTools) {
-                        const stepSummaries = toolCalls!.map((tc: any, i: number) => {
-                            const tr = (toolResults as any)?.[i];
-                            const argsStr = JSON.stringify(tc.input || {}).slice(0, 500);
-                            const outputStr = tr?.output != null
-                                ? String(typeof tr.output === 'object' ? JSON.stringify(tr.output) : tr.output).slice(0, 800)
-                                : '(no result)';
-                            return `  Tool: ${tc.toolName}\n  Args: ${argsStr}\n  Result: ${outputStr}`;
-                        }).join('\n---\n');
-                        cpParts.push(stepSummaries);
-                    }
-
-                    const checkpoint: UIMessage = {
-                        id: `checkpoint-${msg.message_id}-step${currentStep}`,
-                        role: 'assistant' as const,
-                        parts: [{ type: 'text' as const, text: `[STEP_CHECKPOINT step=${currentStep}]\n${cpParts.join('\n')}` }],
-                    };
-                    history.push(checkpoint);
-                    await deps.flushHistory();
                 }
+
+                typing.nudge();
             },
         });
 
@@ -300,20 +418,14 @@ export async function handleTelegramUpdate(
 
         // ── Post-generation: finalize + send response ────────
 
-        // Remove step checkpoints from history — they were only for crash recovery.
-        // On a clean completion, the final assistant message replaces them.
-        for (let i = history.length - 1; i >= 0; i--) {
-            if (history[i].id.startsWith('checkpoint-')) {
-                history.splice(i, 1);
-            }
-        }
-
-        // Centralised finalize: resolve response, record cost, activity log, failure learning, memory save
         const { response: resolved } = await finalizeGeneration({
             text: responseText, steps: agentSteps, usage,
             reasoningCtx, modelId: chatModelId, channel: 'telegram', agent, ctx,
-            userMessage: queryText,
+            userMessage: queryText, output: agentOutput as any,
         });
+
+        // Await the ack message_id (already resolved by now — main agent takes much longer)
+        const ackMessageId = await ackMessageIdPromise;
 
         // Mark in inbox as responded
         await state.addToInbox(msg, true);
@@ -327,154 +439,45 @@ export async function handleTelegramUpdate(
         history.push(asstMsg);
         deps.trimHistory(chatId);
 
-        if (resolved) {
-            let finalText = resolved;
-
-            // Strip fragments that were already sent during onStepFinish
-            for (const frag of sentFragments) {
-                // Only strip exact full-fragment matches (avoid partial stripping)
-                if (finalText === frag) {
-                    finalText = '';
-                    break;
-                }
-                const idx = finalText.indexOf(frag);
-                if (idx !== -1) {
-                    finalText = (finalText.slice(0, idx) + finalText.slice(idx + frag.length)).trim();
-                }
-            }
-
-            if (finalText) {
-                // Safety guard: truncate absurdly long responses (e.g. raw file dumps)
-                const MAX_RESPONSE_CHARS = 4000;
-                if (finalText.length > MAX_RESPONSE_CHARS) {
-                    console.warn(`[Telegram]: Response too long (${finalText.length} chars) — truncating to ${MAX_RESPONSE_CHARS}`);
-                    finalText = finalText.slice(0, MAX_RESPONSE_CHARS) + '\n\n[… response truncated — full output was too large]';
-                }
-                await sendMessage(token, chatId, finalText);
-                console.log(`[Telegram/Agent → ${who}]: ${finalText.slice(0, 200)}${finalText.length > 200 ? '…' : ''}`);
-            } else if (sentFragments.length > 0) {
-                console.log(`[Telegram/Agent → ${who}]: (response already streamed in ${sentFragments.length} step(s))`);
-            }
+        const finalText = resolved?.trim();
+        if (finalText) {
+            // Final safety truncation for Telegram
+            const truncated = finalText.length > 4000
+                ? finalText.slice(0, 3990) + '... (truncated)'
+                : finalText;
+            // Edit the ack in-place so ack + answer appear as one seamless message.
+            // Fall back to a new sendMessage only if ack wasn't sent or edit fails.
+            const edited = ackMessageId ? await editMessage(token, chatId, ackMessageId, truncated) : false;
+            if (!edited) await sendMessage(token, chatId, truncated);
+            console.log(`[Telegram/Agent response]: ${truncated.slice(0, 200)}...`);
         } else {
-            console.log(`[Telegram/Agent → ${who}]: (empty response — tools ran but no text returned)`);
+            // Agent ran out of steps without delivering an answer
+            const stepCount = agentSteps?.length ?? 0;
+            console.warn(`[Telegram]: Empty response after ${stepCount} step(s) — sending fallback message`);
+            const fallback = `⚠️ I ran out of steps (${stepCount}) before finishing. Try rephrasing your request or asking for a smaller task.`;
+            const edited = ackMessageId ? await editMessage(token, chatId, ackMessageId, fallback) : false;
+            if (!edited) await sendMessage(token, chatId, fallback);
         }
 
+    } catch (err: any) {
+        typing.stop();
+        if (err.name === 'AbortError') {
+            console.log(`[Telegram]: Request ${tgReqId} for ${who} was aborted.`);
+            await sendMessage(token, chatId, "⏹️ Request was cancelled.");
+        } else {
+            console.error(`[Telegram]: Error generating response for ${who}:`, err);
+            await sendMessage(token, chatId, `⚠️ Error: ${err.message || 'Unknown error occurred'}`);
+        }
+    } finally {
         requestTracker.finish(tgReqId);
-        agent.clearSubAgentProgress();
-    } catch (err) {
         typing.stop();
         agent.clearSubAgentProgress();
-        requestTracker.finish(tgReqId);
 
-        // Clean up step checkpoints from the aborted/failed request
+        // Always clean stale checkpoints — even after crashes
         for (let i = history.length - 1; i >= 0; i--) {
             if (history[i].id.startsWith('checkpoint-')) {
                 history.splice(i, 1);
             }
-        }
-
-        const errMsg = err instanceof Error ? err.message : String(err);
-
-        // ── Vision unsupported: strip images and retry ──────────────────
-        if (isVisionUnsupportedError(err)) {
-            console.warn(`[Telegram]: Model does not support image input — stripping images and retrying`);
-
-            // Strip image parts from ALL history messages
-            let imagesStripped = 0;
-            for (const m of history) {
-                if (!Array.isArray(m.parts)) continue;
-                const before = m.parts.length;
-                m.parts = m.parts.filter((p: any) => p.type !== 'image');
-                imagesStripped += before - m.parts.length;
-            }
-
-            // Check if the current user message has any text left after stripping
-            const lastUserMsg = history[history.length - 1];
-            const hasTextContent = lastUserMsg?.parts?.some(
-                (p: any) => p.type === 'text' && p.text && !p.text.startsWith('[Telegram Message]'),
-            ) ?? false;
-            const hasRawJson = lastUserMsg?.parts?.some(
-                (p: any) => p.type === 'text' && p.text?.includes('"text"'),
-            ) ?? false;
-
-            // If the message was image-only (no caption/text), inform user
-            if (!hasTextContent && !hasRawJson && !text) {
-                await sendMessage(
-                    token,
-                    chatId,
-                    '📷 The current model doesn\'t support image input. Please describe what you need in text, or I can switch to a vision-capable model.',
-                );
-                await deps.flushHistory();
-                return;
-            }
-
-            // Add a note so the model knows an image was present but couldn't be processed
-            if (imagesStripped > 0) {
-                // Prepend note to the latest user message text
-                const textPart = lastUserMsg?.parts?.find((p: any) => p.type === 'text');
-                if (textPart && 'text' in textPart) {
-                    (textPart as any).text = `[Note: An image was included but the current model does not support vision input. Respond based on the text and context only.]\n\n${(textPart as any).text}`;
-                }
-            }
-
-            try {
-                // Inform the user that the image couldn't be processed
-                await sendMessage(
-                    token,
-                    chatId,
-                    '📷 The current model doesn\'t support image input — I\'ll respond based on the text only.',
-                );
-
-                await sendTyping(token, chatId);
-                const { model: retryModel } = agent.getModelForTier('balanced');
-                const retrySystemPrompt = await agent.buildSystemPrompt(text || 'User sent an image', ctx);
-
-                const typingRetry = createTypingGuard(token, chatId);
-                typingRetry.start();
-                // Strip image parts since the retry model doesn't support vision
-                const textOnlyHistory: UIMessage[] = history.map(m => ({
-                    ...m,
-                    parts: ((m.parts || []) as any[]).filter((p: any) => p.type !== 'image'),
-                }));
-                const { text: retryText } = await generateTextWithRetry({
-                    model: retryModel,
-                    system: retrySystemPrompt,
-                    messages: await convertToModelMessages(textOnlyHistory),
-                    tools: agent.getToolsForContext(ctx),
-                    stopWhen: buildStopConditions(getConfig().agent),
-                });
-                typingRetry.stop();
-
-                if (retryText?.trim()) {
-                    await sendMessage(token, chatId, retryText);
-                    console.log(`[Telegram/Agent → ${who} (vision-fallback)]: ${retryText.slice(0, 200)}`);
-                }
-
-                agent.saveToMemory('assistant', retryText || '', ctx);
-                const asstMsg2: UIMessage = {
-                    id: `tg-resp-${msg.message_id}`,
-                    role: 'assistant' as const,
-                    parts: [{ type: 'text' as const, text: retryText || '' }],
-                };
-                history.push(asstMsg2);
-                deps.trimHistory(chatId);
-                await deps.flushHistory();
-            } catch (retryErr) {
-                const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-                console.error(`[Telegram]: Vision fallback also failed:`, retryErrMsg);
-                await sendMessage(token, chatId, 'Sorry, I hit an error processing that. Try again in a moment.');
-            }
-            return;
-        }
-
-        console.error(`[Telegram]: Error generating response for ${who}:`, errMsg);
-        // Check if it was an intentional abort (new message arrived or manual cancel)
-        const isAborted = errMsg.includes('aborted') || errMsg.includes('abort');
-        if (isAborted) {
-            // Don't send any message — the user already moved on to a new conversation
-            console.log(`[Telegram]: Request for ${who} was aborted — suppressing error message`);
-        } else {
-            await sendMessage(token, chatId, 'Sorry, I hit an error processing that. Try again in a moment.');
         }
     }
 }
