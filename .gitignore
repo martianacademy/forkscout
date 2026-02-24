@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+*.tsbuildinfo
+.DS_Store
+osint-results/
+tmp/
+lg_tv_store.json
+bun.lockb

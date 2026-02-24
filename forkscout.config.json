@@ -1,0 +1,16 @@
+{
+    "telegram": {
+        "pollingTimeout": 30
+    },
+    "llm": {
+        "model": "openrouter/minimax/minimax-m2.5",
+        "maxTokens": 2048,
+        "maxSteps": 20
+    },
+    "agent": {
+        "systemPrompt": "You are Forkscout, an autonomous AI agent. You have access to tools — use them to help the user. Be concise and direct."
+    },
+    "mcp": {
+        "servers": {}
+    }
+}
