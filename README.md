@@ -177,6 +177,7 @@ docker-compose down -v
 - [Self-Repair Protocol](#self-repair-protocol)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
+- [Run with Docker](#run-with-docker-pre-built-image)
 - [Environment Variables](#environment-variables)
 - [Scripts](#scripts)
 - [Real-World Use Cases](#real-world-use-cases)
@@ -914,6 +915,76 @@ Send your bot a message on Telegram. Try:
 - "Search the web for the latest news about AI agents"
 - "Read the file src/config.ts and explain what it does"
 - "Run `ls -la` and tell me what's in this directory"
+
+---
+
+## Run with Docker (Pre-built Image)
+
+A pre-built image is published to GitHub Container Registry on every release. No Bun, no `bun install` required.
+
+```bash
+docker pull ghcr.io/martianacademy/forkscout:latest
+```
+
+### Run
+
+```bash
+docker run -d \
+  --name forkscout \
+  --restart unless-stopped \
+  --env-file .env \
+  -v $(pwd)/.forkscout:/app/.forkscout \
+  ghcr.io/martianacademy/forkscout:latest
+```
+
+| Flag                                   | Purpose                                                       |
+| -------------------------------------- | ------------------------------------------------------------- |
+| `--env-file .env`                      | Injects `TELEGRAM_BOT_TOKEN`, LLM keys, etc.                  |
+| `-v $(pwd)/.forkscout:/app/.forkscout` | Persists auth, chat history, and activity log across restarts |
+| `--restart unless-stopped`             | Auto-restarts on crash or reboot                              |
+
+### With Docker Compose (recommended — includes SearXNG + memory MCP)
+
+```bash
+# Create .env first, then:
+docker-compose up -d
+```
+
+This starts all three services together: the agent, SearXNG (port 8080), and forkscout-memory-mcp (port 3211).
+
+### Available tags
+
+| Tag      | Description           |
+| -------- | --------------------- |
+| `latest` | Latest stable release |
+| `v3.0.0` | Pinned version        |
+
+**Registry:** `ghcr.io/martianacademy/forkscout`
+**Package page:** https://github.com/martianacademy/forkscout/pkgs/container/forkscout
+
+### View logs
+
+```bash
+docker logs -f forkscout
+
+# Or read the structured activity log
+docker exec forkscout tail -50 /app/.forkscout/activity.log
+```
+
+### Stop / update
+
+```bash
+# Stop
+docker stop forkscout && docker rm forkscout
+
+# Update to latest
+docker pull ghcr.io/martianacademy/forkscout:latest
+docker stop forkscout && docker rm forkscout
+docker run -d --name forkscout --restart unless-stopped \
+  --env-file .env \
+  -v $(pwd)/.forkscout:/app/.forkscout \
+  ghcr.io/martianacademy/forkscout:latest
+```
 
 ---
 
