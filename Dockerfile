@@ -3,7 +3,7 @@ FROM oven/bun:1 AS deps
 WORKDIR /app
 
 # Copy lockfile + manifest first (better layer caching)
-COPY package.json pnpm-lock.yaml* bun.lockb* ./
+COPY package.json bun.lock* bun.lockb* ./
 RUN bun install --frozen-lockfile
 
 # ─── Runtime stage ────────────────────────────────────────────────────────────
