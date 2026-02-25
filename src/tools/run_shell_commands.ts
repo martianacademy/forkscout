@@ -3,7 +3,9 @@ import { tool } from "ai";
 import { z } from "zod";
 import { execSync } from "child_process";
 
-export const shellTool = tool({
+export const IS_BOOTSTRAP_TOOL = true;
+
+export const run_shell_commands = tool({
     description: "Run a shell command and return its output. Use for system tasks, file operations, git, etc.",
     inputSchema: z.object({
         command: z.string().describe("The shell command to run"),

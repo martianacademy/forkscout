@@ -1,0 +1,21 @@
+# Minimal SearXNG config — enables JSON output format for API usage
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "ForkScout Search"
+
+search:
+  # Allow JSON responses (required for the web_search tool)
+  formats:
+    - html
+    - json
+
+server:
+  # Must be set — override with SEARXNG_SECRET env var in docker-compose
+  secret_key: "${SEARXNG_SECRET}"
+  limiter: false # disable rate limiter for local/internal use
+  image_proxy: false
+
+ui:
+  static_use_hash: true

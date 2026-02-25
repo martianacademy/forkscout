@@ -1,0 +1,7 @@
+node_modules
+.forkscout
+.env
+.env.*
+*.log
+tmp/
+workspace/

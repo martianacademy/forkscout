@@ -5,11 +5,25 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "start": "bun run src/index.ts",
-        "dev": "bun --watch src/index.ts"
+        "stop": "pkill -f 'src/index.ts' 2>/dev/null; sleep 1; echo '[forkscout] stopped'",
+        "start": "bun run stop; bun run src/index.ts",
+        "dev": "bun run stop; bun --hot src/index.ts",
+        "cli": "bun run stop; bun run src/index.ts --cli",
+        "cli:dev": "bun run stop; bun --hot src/index.ts --cli",
+        "typecheck": "bun run --bun tsc --noEmit",
+        "devtools": "bun run node_modules/.bin/devtools"
     },
     "dependencies": {
-        "@ai-sdk/openai": "^3.0.29",
+        "@ai-sdk/anthropic": "^3.0.46",
+        "@ai-sdk/deepseek": "^2.0.20",
+        "@ai-sdk/devtools": "^0.0.15",
+        "@ai-sdk/elevenlabs": "^2.0.20",
+        "@ai-sdk/google": "^3.0.30",
+        "@ai-sdk/huggingface": "^1.0.32",
+        "@ai-sdk/openai": "^3.0.31",
+        "@ai-sdk/replicate": "^2.0.20",
+        "@ai-sdk/vercel": "^2.0.32",
+        "@ai-sdk/xai": "^3.0.57",
         "@modelcontextprotocol/sdk": "^1.26.0",
         "ai": "^6.0.86",
         "dotenv": "^17.3.1",

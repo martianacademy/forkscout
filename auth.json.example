@@ -1,0 +1,6 @@
+{
+    "telegram": {
+        "ownerUserIds": [123456789],
+        "allowedUserIds": []
+    }
+}

@@ -1,0 +1,43 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: forkscout-agent
+    restart: unless-stopped
+
+    environment:
+      # ── LLM providers (add only the ones you use) ─────────────────────────
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      HUGGING_FACE_API_KEY: ${HUGGING_FACE_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+
+      # ── Channels ─────────────────────────────────────────────────────────
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+
+      # ── Search ───────────────────────────────────────────────────────────
+      # Points to SearXNG running on the host machine.
+      # host.docker.internal resolves to the host from inside the container.
+      # Override with SEARXNG_URL env var if your instance is elsewhere.
+      SEARXNG_URL: ${SEARXNG_URL:-http://host.docker.internal:8080}
+
+      # ── Optional overrides ────────────────────────────────────────────────
+      # NODE_ENV: production
+
+    volumes:
+      # Persist auth.json + chat history across container restarts
+      - forkscout-data:/app/.forkscout
+
+    # Optional: expose the HTTP server port if src/server is active
+    # ports:
+    #   - "3000:3000"
+
+volumes:
+  forkscout-data:
+    driver: local

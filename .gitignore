@@ -7,3 +7,5 @@ osint-results/
 tmp/
 lg_tv_store.json
 bun.lockb
+.forkscout/
+.devtools
