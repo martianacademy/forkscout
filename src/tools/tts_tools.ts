@@ -6,6 +6,9 @@ import { join } from "path";
 
 export const IS_BOOTSTRAP_TOOL = false;
 
+// Default ElevenLabs API URL
+const DEFAULT_ELEVENLABS_URL = "https://api.elevenlabs.io";
+
 export const tts_tools = tool({
   description: "Convert text to speech using ElevenLabs TTS API and return audio file path.",
   inputSchema: z.object({
@@ -16,6 +19,7 @@ export const tts_tools = tool({
   execute: async (input) => {
     try {
       const apiKey = process.env.ELEVENLABS_API_KEY;
+      const apiUrl = process.env.ELEVENLABS_API_URL || DEFAULT_ELEVENLABS_URL;
       
       if (!apiKey) {
         return { success: false, error: "ELEVENLABS_API_KEY not set in .env" };
@@ -31,7 +35,7 @@ export const tts_tools = tool({
       const model = "eleven_multilingual_v2";
       
       const response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+        `${apiUrl}/v1/text-to-speech/${voiceId}`,
         {
           method: "POST",
           headers: {
