@@ -78,6 +78,27 @@ LLM-powered abstractive summarisation using the fast tier model.
 
 ---
 
+### `retry.ts`
+
+Exponential backoff retry wrapper for any async LLM call.
+
+| Export                  | Description                                                            |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `withRetry(fn, label?)` | Runs `fn()`, retries up to 3× on transient errors with 1s/2s/4s delays |
+
+**Retries on:**
+
+- `APICallError` with `isRetryable === true` (408 timeout, 409 conflict, 429 rate-limit, 5xx server errors)
+- `InvalidResponseDataError` — provider returned non-JSON (e.g. HTML gateway error page from OpenRouter)
+- `JSONParseError` — response body couldn't be parsed
+- Any error with `message.includes("Invalid JSON response")`
+
+**Does NOT retry:** 400 bad request, 401 auth, 403 forbidden — permanent failures; fails immediately.
+
+**Used by:** `src/agent/index.ts` — wraps `generateText` in `runAgent()`.
+
+---
+
 ## Adding a new helper
 
 1. Create `src/llm/my_helper.ts` — named exports only

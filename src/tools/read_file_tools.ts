@@ -5,7 +5,7 @@ import { resolve } from "path";
 
 export const IS_BOOTSTRAP_TOOL = true;
 
-export const read_file = tool({
+export const read_file_tools = tool({
     description:
         "Read the contents of a file. " +
         "Always use startLine/endLine to read in chunks — never read large files all at once. " +

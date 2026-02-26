@@ -5,11 +5,11 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "stop": "pkill -f 'src/index.ts' 2>/dev/null; sleep 1; echo '[forkscout] stopped'",
-        "start": "bun run stop; bun run src/index.ts",
-        "dev": "bun run stop; bun --hot src/index.ts",
+        "stop": "pkill -9 -f 'src/index.ts' 2>/dev/null; pkill -9 -f 'forkscout-agent' 2>/dev/null; sleep 1; echo '[forkscout] stopped'",
+        "start": "bun run stop; DEVTOOLS=1 bun run src/index.ts",
+        "dev": "bun run stop; DEVTOOLS=1 bun --hot src/index.ts",
         "cli": "bun run stop; bun run src/index.ts --cli",
-        "cli:dev": "bun run stop; bun --hot src/index.ts --cli",
+        "cli:dev": "bun run stop; DEVTOOLS=1 bun --hot src/index.ts --cli",
         "typecheck": "bun run --bun tsc --noEmit",
         "devtools": "bun run node_modules/.bin/devtools"
     },
@@ -24,15 +24,19 @@
         "@ai-sdk/replicate": "^2.0.20",
         "@ai-sdk/vercel": "^2.0.32",
         "@ai-sdk/xai": "^3.0.57",
+        "@grammyjs/types": "^3.24.0",
         "@modelcontextprotocol/sdk": "^1.26.0",
-        "ai": "^6.0.86",
+        "ai": "6.0.97",
         "dotenv": "^17.3.1",
         "gpt-tokenizer": "^3.4.0",
-        "zod": "^3.23.8"
+        "node-cron": "^4.2.1",
+        "playwright": "^1.58.2",
+        "zod": "^4.0.0"
     },
     "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^22.0.0",
+        "@types/node-cron": "^3.0.11",
         "typescript": "^5.7.2"
     }
 }

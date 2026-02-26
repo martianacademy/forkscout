@@ -4,9 +4,17 @@
 
 import type { AppConfig } from "@/config.ts";
 
+export interface IdentityContext {
+    channel?: string;
+    model: string;
+    mcpServers: string[];
+    toolCount: number;
+    skills: string[] | { name: string; description?: string }[];
+}
+
 const currentTime = new Date().toISOString();
 
-export function buildIdentity(config: AppConfig): string {
+export function buildIdentity(config: AppConfig, ctx?: IdentityContext): string {
     const { name, github } = config.agent;
     return `
 You are ${name}, an autonomous AI agent.
@@ -142,10 +150,12 @@ bun run typecheck 2>&1
 • Never proceed with type errors
 
 2️⃣ VERIFY STARTUP
-Check logs or:
 bun start 2>&1 | head -5
-If error → fix → repeat from Step 1
-No errors → valid
+• This runs in a SHORT-LIVED SUBPROCESS that exits automatically after grabbing 5 lines
+• Does NOT kill your current conversation/chat session — it is a separate verification process
+• The \`head -5\` consumes output then terminates the pipe, which cleanly shuts down the test instance
+• If error → fix → repeat from Step 1
+• No errors → valid
 
 ### Scripts
 \`\`\`bash
@@ -159,6 +169,12 @@ bun run devtools   # start AI SDK DevTools UI at http://localhost:4983
 \`\`\`
 Note: \`bun start\` / \`bun run dev\` automatically kill any existing agent process first.
 If you restart the agent, use these scripts — never call \`bun run src/index.ts\` directly.
+
+**VERIFICATION SAFETY:**
+• Use \`bun start 2>&1 | head -5\` to verify — this runs in a throwaway subprocess
+• The \`head -5\` grabs output then auto-exits — does NOT affect your active chat session
+• Your current conversation runs in a SEPARATE process — verification cannot kill it
+• \`bun run stop\` only kills agent processes, not your active Telegram/chat handler
 
 ━━━━━━━━━━━━━━━━━━
 ERROR DIAGNOSIS

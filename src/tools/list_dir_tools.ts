@@ -5,7 +5,7 @@ import { resolve } from "path";
 
 export const IS_BOOTSTRAP_TOOL = true;
 
-export const list_dir = tool({
+export const list_dir_tools = tool({
     description: "List files and directories in a folder",
     inputSchema: z.object({
         path: z.string().describe("Path to the directory"),

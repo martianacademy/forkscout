@@ -1,11 +1,12 @@
 // src/providers/index.ts
-// Registry of known providers + getModel() helper.
+// Registry of known providers + getModel() + getModelForRole() helpers.
 // To add a new provider: add a key to `registry` below.
 //
 // Model string format: "<provider>/<model-id>"
 // Example: "openrouter/minimax/minimax-m2.5"
 
 import type { LanguageModel } from "ai";
+import type { LLMConfig } from "@/config.ts";
 import {
     createOpenAICompatibleProvider,
     type OpenAICompatibleProvider,
@@ -78,3 +79,49 @@ export function getModel(modelString: string): LanguageModel {
 
 export type { OpenAICompatibleProvider };
 export { createOpenAICompatibleProvider };
+
+// ── Role-based model selection ────────────────────────────────────────────────
+
+/**
+ * Named purpose/role for model selection.
+ * Each role maps to an optional field in ModelTiers.
+ * If the role field is empty or undefined, a sensible tier is used as fallback.
+ */
+export type ModelRole = keyof import("@/config.ts").ModelTiers;
+
+/** Fallback tier when a role's model string is absent or empty. */
+const ROLE_FALLBACK: Partial<Record<ModelRole, ModelRole>> = {
+    vision: "balanced",
+    summarizer: "fast",
+    browser: "balanced",
+    transcriber: "fast",
+    tts: "balanced",
+};
+
+/**
+ * Return a LanguageModel for the given role using the active provider.
+ *
+ * Resolution order:
+ * 1. `llm.providers[provider][role]` — if non-empty
+ * 2. `llm.providers[provider][ROLE_FALLBACK[role]]` — if defined
+ *
+ * @throws if neither the role nor its fallback tier has a model configured
+ */
+export function getModelForRole(role: ModelRole, llmConfig: LLMConfig): LanguageModel {
+    const { provider, providers } = llmConfig;
+    const tiers = providers[provider];
+    if (!tiers) {
+        throw new Error(`Provider "${provider}" has no model tiers configured`);
+    }
+
+    const direct = tiers[role];
+    if (direct) return getProvider(provider).chat(direct);
+
+    const fallbackRole = ROLE_FALLBACK[role];
+    const fallback = fallbackRole ? tiers[fallbackRole] : undefined;
+    if (fallback) return getProvider(provider).chat(fallback);
+
+    throw new Error(
+        `No model configured for role "${role}" on provider "${provider}" and no fallback available`
+    );
+}

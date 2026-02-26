@@ -16,64 +16,132 @@
     "terminal": {
         "historyTokenBudget": 12000
     },
+    "self": {
+        "historyTokenBudget": 12000
+    },
     "agent": {
         "name": "ForkScout",
         "description": "An autonomous agent that can use tools and access the web to answer questions and perform tasks.",
         "github": "https://github.com/martianacademy/forkscout"
     },
+    "browser": {
+        "headless": false,
+        "profileDir": ".forkscout/browser-profile",
+        "screenshotQuality": 50,
+        "chromePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    },
+    "browserAgent": {
+        "maxSteps": 25,
+        "maxTokens": 4096
+    },
     "llm": {
         "provider": "openrouter",
         "tier": "balanced",
-        "maxTokens": 2048,
-        "maxSteps": 20,
+        "maxTokens": 2000,
+        "maxSteps": 100,
+        "reasoningTag": "think",
         "llmSummarizeMaxTokens": 1200,
         "toolResultAutoCompressWords": 400,
         "providers": {
             "openrouter": {
                 "fast": "google/gemini-2.0-flash-001",
                 "balanced": "minimax/minimax-m2.5",
-                "powerful": "anthropic/claude-sonnet-4-5"
+                "powerful": "anthropic/claude-sonnet-4-5",
+                "vision": "google/gemini-2.0-flash-001",
+                "summarizer": "google/gemini-2.0-flash-001",
+                "browser": "google/gemini-2.0-flash-001",
+                "transcriber": "",
+                "tts": ""
             },
             "anthropic": {
                 "fast": "claude-haiku-4-5",
                 "balanced": "claude-sonnet-4-5",
-                "powerful": "claude-opus-4-5"
+                "powerful": "claude-opus-4-5",
+                "vision": "claude-sonnet-4-5",
+                "summarizer": "claude-haiku-4-5",
+                "browser": "claude-sonnet-4-5",
+                "transcriber": "",
+                "tts": ""
             },
             "google": {
                 "fast": "gemini-2.0-flash",
                 "balanced": "gemini-2.5-pro",
-                "powerful": "gemini-2.5-pro"
+                "powerful": "gemini-2.5-pro",
+                "vision": "gemini-2.0-flash",
+                "summarizer": "gemini-2.0-flash",
+                "browser": "gemini-2.0-flash",
+                "transcriber": "",
+                "tts": ""
             },
             "xai": {
                 "fast": "grok-3-mini-fast",
                 "balanced": "grok-3",
-                "powerful": "grok-3"
+                "powerful": "grok-3",
+                "vision": "grok-3",
+                "summarizer": "grok-3-mini-fast",
+                "browser": "grok-3",
+                "transcriber": "",
+                "tts": ""
             },
             "vercel": {
                 "fast": "openai:gpt-4o-mini",
                 "balanced": "openai:gpt-4o",
-                "powerful": "anthropic:claude-sonnet-4-5"
+                "powerful": "anthropic:claude-sonnet-4-5",
+                "vision": "openai:gpt-4o",
+                "summarizer": "openai:gpt-4o-mini",
+                "browser": "openai:gpt-4o",
+                "transcriber": "",
+                "tts": ""
             },
             "replicate": {
                 "fast": "meta/meta-llama-3-8b-instruct",
                 "balanced": "meta/meta-llama-3.1-405b-instruct",
-                "powerful": "meta/meta-llama-3.1-405b-instruct"
+                "powerful": "meta/meta-llama-3.1-405b-instruct",
+                "vision": "",
+                "summarizer": "meta/meta-llama-3-8b-instruct",
+                "browser": "",
+                "transcriber": "",
+                "tts": ""
             },
             "huggingface": {
                 "fast": "meta-llama/Llama-3.2-3B-Instruct",
                 "balanced": "meta-llama/Llama-3.3-70B-Instruct",
-                "powerful": "meta-llama/Llama-3.3-70B-Instruct"
+                "powerful": "meta-llama/Llama-3.3-70B-Instruct",
+                "vision": "",
+                "summarizer": "meta-llama/Llama-3.2-3B-Instruct",
+                "browser": "",
+                "transcriber": "",
+                "tts": ""
             },
             "deepseek": {
                 "fast": "deepseek-chat",
                 "balanced": "deepseek-chat",
-                "powerful": "deepseek-reasoner"
+                "powerful": "deepseek-reasoner",
+                "vision": "",
+                "summarizer": "deepseek-chat",
+                "browser": "",
+                "transcriber": "",
+                "tts": ""
             },
             "perplexity": {
                 "fast": "sonar",
                 "balanced": "sonar-pro",
-                "powerful": "sonar-pro"
+                "powerful": "sonar-pro",
+                "vision": "",
+                "summarizer": "sonar",
+                "browser": "",
+                "transcriber": "",
+                "tts": ""
             }
         }
+    },
+    "skills": {
+        "dirs": [
+            ".agents/skills",
+            "src/skills/built-in"
+        ]
+    },
+    "n8n": {
+        "baseUrl": "http://localhost:5678"
     }
 }

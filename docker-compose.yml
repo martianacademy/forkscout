@@ -28,7 +28,9 @@ services:
       SEARXNG_URL: ${SEARXNG_URL:-http://host.docker.internal:8080}
 
       # ── Optional overrides ────────────────────────────────────────────────
-      # NODE_ENV: production
+      # Forces headless Chromium in Docker — no display available in containers
+      # Real Chrome path from config is ignored; Playwright bundled Chromium is used
+      BROWSER_HEADLESS: "true"
 
     volumes:
       # Persist auth.json + chat history across container restarts

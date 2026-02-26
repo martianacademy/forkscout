@@ -3,6 +3,6 @@
     "enabled": true,
     "url": "https://mcp.context7.com/mcp",
     "headers": {
-        "Authorization": "Bearer ${CONTEXT7_API_KEY_1}"
+        "Authorization": "Bearer ${CONTEXT7_API_KEY}"
     }
 }

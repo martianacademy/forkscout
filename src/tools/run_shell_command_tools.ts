@@ -5,7 +5,7 @@ import { execSync } from "child_process";
 
 export const IS_BOOTSTRAP_TOOL = true;
 
-export const run_shell_commands = tool({
+export const run_shell_command_tools = tool({
     description: "Run a shell command and return its output. Use for system tasks, file operations, git, etc.",
     inputSchema: z.object({
         command: z.string().describe("The shell command to run"),

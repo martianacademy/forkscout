@@ -11,7 +11,7 @@ const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export const IS_BOOTSTRAP_TOOL = true;
 
-export const read_folder_standards = tool({
+export const read_folder_standard_tools = tool({
     description:
         "Read the coding standards and contracts for a src/ subfolder before modifying it. " +
         "ALWAYS call this before editing or creating files in any src/ subfolder. " +

@@ -5,7 +5,7 @@ import { resolve, dirname } from "path";
 
 export const IS_BOOTSTRAP_TOOL = true;
 
-export const write_file = tool({
+export const write_file_tools = tool({
     description: "Write content to a file (creates or overwrites, creates parent directories if needed)",
     inputSchema: z.object({
         path: z.string().describe("Absolute or relative path to the file"),

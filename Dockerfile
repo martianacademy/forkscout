@@ -10,14 +10,18 @@ RUN bun install --frozen-lockfile
 FROM oven/bun:1 AS runner
 WORKDIR /app
 
-# Copy installed node_modules from deps stage
+# Install Playwright's Chromium + all system dependencies for headless browser
+# chromePath is left empty in Docker — bundled Chromium is used automatically
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl wget gnupg \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
-
-# Copy application source
 COPY . .
+# Install Chromium and its OS-level deps via Playwright CLI
+RUN bunx playwright install chromium --with-deps
 
 # .forkscout/ is mounted as a volume at runtime (auth.json + chat history)
-# Pre-create the directory so the mount point exists with correct ownership
 RUN mkdir -p /app/.forkscout/chats && chown -R bun:bun /app/.forkscout
 
 # Drop privileges

@@ -144,7 +144,7 @@ export async function discoverMcpTools(): Promise<Record<string, Tool>> {
                 const toolName = `${mcpConfig.name}__${t.name}`;
                 allTools[toolName] = tool({
                     description: t.description ?? toolName,
-                    inputSchema: z.record(z.unknown()),
+                    inputSchema: z.object({}).passthrough(),
                     execute: async (input) => {
                         try {
                             // Merge default tool arguments from config

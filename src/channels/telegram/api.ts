@@ -137,3 +137,29 @@ export async function sendTyping(token: string, chatId: number): Promise<void> {
         body: JSON.stringify({ chat_id: chatId, action: "typing" }),
     }).catch(() => { });
 }
+
+export async function deleteMessage(token: string, chatId: number, messageId: number): Promise<void> {
+    await fetch(`${BASE}${token}/deleteMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+    }).catch(() => { });
+}
+
+export async function setMessageReaction(
+    token: string,
+    chatId: number,
+    messageId: number,
+    emoji: string
+): Promise<void> {
+    await fetch(`${BASE}${token}/setMessageReaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: chatId,
+            message_id: messageId,
+            reaction: [{ type: "emoji", emoji }],
+            is_big: false,
+        }),
+    }).catch(() => { });
+}

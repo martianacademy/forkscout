@@ -28,29 +28,52 @@ export interface ModelTiers {
     balanced: string;
     /** Best quality — for complex reasoning tasks */
     powerful: string;
+    /** Vision-capable model — for image analysis and OCR. Falls back to balanced. */
+    vision?: string;
+    /** Summariser model — for LLM-powered content compression. Falls back to fast. */
+    summarizer?: string;
+    /** Browser agent model — for web browsing tasks (should support vision). Falls back to balanced. */
+    browser?: string;
+    /** Transcription model — for audio/voice-to-text. Falls back to fast. */
+    transcriber?: string;
+    /** Text-to-speech model — leave empty to use ElevenLabs provider directly. */
+    tts?: string;
 }
 
-export type ModelTier = keyof ModelTiers;
+/** The three primary quality/cost tiers used for general agent calls. */
+export type ModelTier = "fast" | "balanced" | "powerful";
 
 export interface LLMConfig {
     /** Active provider key, must match a key in `providers` */
     provider: string;
     /** Active tier: "fast" | "balanced" | "powerful" */
     tier: ModelTier;
-    /** Per-provider model tiers. Model IDs are relative (no provider prefix). */
-    providers: Record<string, ModelTiers>;
+    /** Max tokens per response from the LLM. Default: 2000. */
     maxTokens: number;
+    /** Max steps per agent turn. Default: 100. */
     maxSteps: number;
-    /** Max output tokens for LLM summarisation calls (compress_text mode='llm'). Default: 1200. */
-    llmSummarizeMaxTokens: number;
+    /** XML tag name to extract reasoning from model response. Default: "think". */
+    reasoningTag?: string;
+    /** Max tokens for LLM-powered summarisation. Default: 1200. */
+    llmSummarizeMaxTokens?: number;
+    /** Max words per tool result before auto-compressing via LLM. Default: 400. */
+    toolResultAutoCompressWords?: number;
+    /** Provider configurations — add new providers here */
+    providers: {
+        [provider: string]: ModelTiers;
+    };
+}
+
+export interface BrowserAgentConfig {
+    /** Max steps the browser sub-agent can take before returning. Default: 25. */
+    maxSteps: number;
+    /** Max tokens per response from the browser agent LLM. Default: 4096. */
+    maxTokens: number;
     /**
-     * Word count threshold for auto-compressing tool results before they enter the LLM context.
-     * Results under this size pass through as-is. Default: 400.
-     * ≤ 400 words  → no compression
-     * 400–2000     → extractive (instant, free)
-     * > 2000       → LLM synthesis (fast tier)
+     * Optional override for the prompt sent to the vision model after taking a screenshot.
+     * Defaults to a built-in prompt that asks for page layout, interactive elements, and positions.
      */
-    toolResultAutoCompressWords: number;
+    screenshotPrompt?: string;
 }
 
 export interface AgentConfig {
@@ -64,8 +87,32 @@ export interface AgentConfig {
     systemPromptExtra?: string;
 }
 
+export interface SelfJobConfig {
+    /** Unique job name — used as session key: self-{name} */
+    name: string;
+    /** Standard 5-field cron expression, e.g. "0 9 * * *" for daily at 9am */
+    schedule: string;
+    /** Prompt sent to the agent when the job fires */
+    message: string;
+    /**
+     * Telegram notification config.
+     * chatIds: list of Telegram chat IDs (user or group) to send the result to.
+     * Use the numeric chat ID from Telegram (positive = user/group, negative = supergroup).
+     */
+    telegram?: {
+        chatIds: number[];
+    };
+}
+
 export interface ToolDefaults {
     [toolName: string]: Record<string, unknown>;
+}
+
+export interface N8nConfig {
+    /** n8n base URL — e.g. "http://localhost:5678" or cloud URL */
+    baseUrl: string;
+    /** Optional: list of allowed workflow names (whitelist). If empty, all workflows can be triggered. */
+    workflows?: string[];
 }
 
 export interface AppConfig {
@@ -73,9 +120,9 @@ export interface AppConfig {
         pollingTimeout: number;
         /** Max tokens to keep in per-chat history before trimming oldest messages */
         historyTokenBudget: number;
-        /** Owner user IDs — full access including shell tools. Empty = dev mode (allow all as owner). */
+        /** Owner user IDs — full access including shell tools. */
         ownerUserIds: number[];
-        /** Allowed user IDs — agent access only, no owner-only tools. */
+        /** Allowed user IDs — can use the agent but not owner-only tools. Empty = everyone allowed. */
         allowedUserIds: number[];
         /** Max messages per user per minute before rate-limiting. 0 = disabled. */
         rateLimitPerMinute: number;
@@ -92,10 +139,69 @@ export interface AppConfig {
         /** Max tokens to keep in terminal session history before trimming oldest messages */
         historyTokenBudget: number;
     };
+    /** Self channel — agent-to-self scheduled jobs */
+    self?: {
+        /** Max tokens to keep in each job's history before trimming. Default: 12000. */
+        historyTokenBudget: number;
+        /** Cron jobs — can also be defined in .forkscout/self-jobs.json (gitignored). */
+        jobs?: SelfJobConfig[];
+    };
     llm: LLMConfig;
     agent: AgentConfig;
+    /** Browser sub-agent config — drives browse_task autonomously */
+    browserAgent: BrowserAgentConfig;
+    browser: {
+        /**
+         * Run Chromium in visible window mode.
+         * false = headless (CI/server). Default: false (show window).
+         */
+        headless: boolean;
+        /**
+         * Path to the persistent browser profile directory.
+         * Cookies, passwords, localStorage and other state are saved here.
+         * Relative paths are resolved from the workspace root.
+         * Default: ".forkscout/browser-profile"
+         */
+        profileDir: string;
+        /**
+         * JPEG quality for screenshots sent to the vision LLM (1–100).
+         * Lower = smaller base64 payload = fewer tokens consumed per screenshot.
+         * Default: 50 (~10-20× fewer tokens vs. full-quality PNG).
+         */
+        screenshotQuality: number;
+        /**
+         * Absolute path to a real Chrome/Chromium binary.
+         * If set and the file exists, it will be used instead of Playwright's bundled Chromium.
+         * Leave empty/unset in Docker/CI — bundled Chromium will be used automatically.
+         * Mac default: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+         */
+        chromePath?: string;
+        /** Extra Chromium launch args appended to the default set. */
+        extraArgs?: string[];
+        /** Viewport dimensions. Default: { width: 1280, height: 800 }. */
+        viewport?: { width: number; height: number };
+        /** Browser user-agent string override. */
+        userAgent?: string;
+        /** Browser locale, e.g. "en-US". Default: "en-US". */
+        locale?: string;
+        /** Timezone ID, e.g. "Asia/Kolkata". Default: "Asia/Kolkata". */
+        timezone?: string;
+        /** Extra Playwright BrowserContext options spread in last (overrides all above). */
+        context?: Record<string, unknown>;
+    };
     /** Default arguments to inject when calling specific tools */
     toolDefaults?: ToolDefaults;
+    /** Agent Skills configuration */
+    skills?: {
+        /**
+         * Directories to scan for SKILL.md files.
+         * Relative paths are resolved from the project root.
+         * Default: [".agents/skills", "src/skills/built-in"]
+         */
+        dirs?: string[];
+    };
+    /** n8n integration — for triggering workflows */
+    n8n?: N8nConfig;
 }
 
 let _config: AppConfig | null = null;
@@ -114,6 +220,13 @@ export function loadConfig(): AppConfig {
     if (existsSync(AUTH_FILE)) {
         const authRaw = readFileSync(AUTH_FILE, "utf-8");
         config = deepMerge(config, JSON.parse(authRaw) as Partial<AppConfig>);
+    }
+
+    // Apply environment variable overrides (useful in Docker/CI)
+    // BROWSER_HEADLESS=true → forces headless regardless of JSON config
+    if (process.env.BROWSER_HEADLESS === "true") {
+        config.browser.headless = true;
+        config.browser.chromePath = undefined; // Docker has no real Chrome
     }
 
     _config = config;

@@ -13,7 +13,7 @@
 
 import { generateText } from "ai";
 import { getConfig } from "@/config.ts";
-import { getProvider } from "@/providers/index.ts";
+import { getModelForRole } from "@/providers/index.ts";
 import { extractiveSummary } from "@/utils/extractive-summary.ts";
 import { log } from "@/logs/logger.ts";
 
@@ -55,16 +55,9 @@ export async function llmSummarize(
 
     const config = getConfig();
     const { maxOutputTokens = config.llm.llmSummarizeMaxTokens, instruction = DEFAULT_INSTRUCTION } = opts;
-    const { provider, providers } = config.llm;
-    const modelId = providers[provider]?.fast;
-
-    if (!modelId) {
-        logger.warn(`No fast tier model configured for provider "${provider}" — falling back to extractive`);
-        return extractiveSummary(text, { maxSentences: 8 });
-    }
 
     try {
-        const model = getProvider(provider).chat(modelId);
+        const model = getModelForRole("summarizer", config.llm);
         const { text: summary } = await generateText({
             model,
             system: instruction,
@@ -73,7 +66,7 @@ export async function llmSummarize(
         });
         return summary.trim();
     } catch (err: any) {
-        logger.error(`LLM summarise failed (${provider}/${modelId}): ${err?.message} — falling back to extractive`, err);
+        logger.error(`LLM summarise failed (role=summarizer, provider=${config.llm.provider}): ${err?.message} — falling back to extractive`, err);
         return extractiveSummary(text, { maxSentences: 8 });
     }
 }

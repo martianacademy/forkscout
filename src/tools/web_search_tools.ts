@@ -38,7 +38,7 @@ async function searchDuckDuckGo(
         .map((t) => ({ title: t.Text!, url: t.FirstURL! }));
 }
 
-export const web_search = tool({
+export const web_search_tools = tool({
     description:
         "Search the web and return top results. Uses SearXNG when available (SEARXNG_URL env), falls back to DuckDuckGo.",
     inputSchema: z.object({

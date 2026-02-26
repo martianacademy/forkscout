@@ -166,36 +166,20 @@ Per-chat `ModelMessage[]` history with disk persistence (`.forkscout/chats/teleg
 
 ---
 
-### Priority 3 — LLM Retry with Exponential Backoff
+### ✅ Priority 3 — LLM Retry with Exponential Backoff — DONE
 
-**Why**: Rate limit (429) and transient server errors (5xx) currently crash the agent turn. Should retry automatically.
+**Why**: Rate limit (429) and transient server errors (5xx) — and non-JSON gateway error responses (e.g. `minimax/minimax-m2.5` via OpenRouter) — crashed agent turns. Now retried automatically.
 
-**Steps:**
+**Implemented:**
 
-1. Create `src/llm/retry.ts`:
-   ```ts
-   export async function withRetry<T>(
-     fn: () => Promise<T>,
-     maxRetries = 3
-   ): Promise<T> {
-     let delay = 1000;
-     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-       try {
-         return await fn();
-       } catch (err) {
-         const status = (err as any)?.status ?? (err as any)?.statusCode;
-         const retryable = status === 429 || (status >= 500 && status < 600);
-         if (!retryable || attempt === maxRetries) throw err;
-         await new Promise((r) => setTimeout(r, Math.min(delay, 30000)));
-         delay *= 2;
-       }
-     }
-     throw new Error("unreachable");
-   }
-   ```
-2. In `src/agent/index.ts`, wrap the `generateText(...)` call inside `withRetry(() => generateText(...))`
-3. Similarly wrap `streamText(...)` — note: for streaming, retry should only happen before the stream starts
-4. Run `bun run typecheck` → 0 errors
+- `src/llm/retry.ts` — `withRetry(fn, label?)` with exponential backoff (1s, 2s, 4s, max 30s, max 3 retries)
+- Retries: `APICallError.isRetryable` (408/409/429/5xx), `InvalidResponseDataError`, `JSONParseError`, and `"Invalid JSON response"` messages
+- Does NOT retry: 400, 401, 403 — permanent failures
+- `src/agent/index.ts` — `generateText` in `runAgent()` wrapped with `withRetry`
+- `bun run typecheck` → 0 errors
+
+**Root cause of minimax error diagnosed:**\
+The agent has 35 tools (22 forkscout_memory MCP + 8 local + 5 from other MCPs). When OpenRouter routes `minimax/minimax-m2.5` through the Inceptron backend, the large request occasionally returns a non-JSON error page. The retry wrapper will re-submit the request; OpenRouter often routes to Fireworks (which works) on the second attempt.
 
 ---
 

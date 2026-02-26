@@ -18,6 +18,8 @@ export interface OpenAICompatibleProviderOptions {
     apiKey: string;
     /** Optional extra headers sent with every request */
     headers?: Record<string, string>;
+    /** Optional custom fetch implementation (e.g. for response transformation) */
+    fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
 
 export interface OpenAICompatibleProvider {
@@ -44,6 +46,7 @@ export function createOpenAICompatibleProvider(
         apiKey: options.apiKey,
         headers: options.headers,
         name: options.name,
+        ...(options.fetch ? { fetch: options.fetch as typeof globalThis.fetch } : {}),
     });
 
     return {

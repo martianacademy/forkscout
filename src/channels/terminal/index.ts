@@ -34,6 +34,10 @@ function trimHistory(history: ModelMessage[], tokenBudget: number): ModelMessage
         const removed = trimmed.shift()!;
         total -= countTokens(removed);
     }
+    // AI SDK requires the first message to be from 'user'.
+    while (trimmed.length > 0 && (trimmed[0] as any).role !== "user") {
+        trimmed.shift();
+    }
     return trimmed;
 }
 
@@ -91,7 +95,7 @@ async function start(config: AppConfig) {
                 // Collect final messages for history, trim, persist
                 const final = await stream.finalize();
                 history = trimHistory(
-                    [...history, ...final.responseMessages],
+                    [...history, { role: "user", content: text }, ...final.responseMessages],
                     config.terminal.historyTokenBudget
                 );
                 saveHistory(sessionKey, history);

@@ -1,15 +1,30 @@
 // src/channels/telegram/index.ts — Telegram bot channel
+
+// ─────────────────────────────────────────────
+// Imports
+// ─────────────────────────────────────────────
+
 import type { AppConfig } from "@/config.ts";
 import { getConfig } from "@/config.ts";
 import type { Channel } from "@/channels/types.ts";
-import { runAgent } from "@/agent/index.ts";
-import { sendMessage, sendMessageWithInlineKeyboard, answerCallbackQuery, editMessageReplyMarkup, sendTyping } from "@/channels/telegram/api.ts";
-import { log } from "@/logs/logger.ts";
-import { encode } from "gpt-tokenizer";
-import { loadHistory, saveHistory } from "@/channels/chat-store.ts";
+import { runAgent, streamAgent } from "@/agent/index.ts";
+import {
+    sendMessage,
+    sendMessageWithInlineKeyboard,
+    answerCallbackQuery,
+    editMessageReplyMarkup,
+    editMessage,
+    deleteMessage,
+    setMessageReaction,
+} from "@/channels/telegram/api.ts";
 import { mdToHtml, splitMessage, stripHtml } from "@/channels/telegram/format.ts";
-import { compressIfLong } from "@/utils/extractive-summary.ts";
-import type { ModelMessage } from "ai";
+import { compileTelegramMessage } from "@/channels/telegram/compile-message.ts";
+import { prepareHistory, type StoredMessage } from "@/channels/prepare-history.ts";
+import { log } from "@/logs/logger.ts";
+import { LOG_DIR } from "@/logs/activity-log.ts";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { resolve } from "path";
+import type { Message, Update } from "@grammyjs/types";
 import {
     loadRequests,
     saveRequests,
@@ -19,12 +34,40 @@ import {
     type ApprovedRole,
 } from "@/channels/telegram/access-requests.ts";
 
+// ─────────────────────────────────────────────
+// Constants & module-level state
+// ─────────────────────────────────────────────
+
+const CHATS_DIR = resolve(LOG_DIR, "chats");
 const logger = log("telegram");
 
-/** Per-chat conversation history: chatId → ModelMessage[] */
-const chatHistories = new Map<number, ModelMessage[]>();
+// ─── Tool progress helpers ────────────────────────────────────────────────────
 
-/** Per-chat sequential queue: ensures messages are processed one at a time per chat */
+/** Human-readable label for each tool name. Falls back to the tool name itself. */
+const TOOL_LABELS: Record<string, string> = {
+    web_search: "Searching the web",
+    web_broswer_tools: "Browsing",
+    browse_web: "Browsing",
+    navigate: "Navigating",
+    read_file: "Reading file",
+    write_file: "Writing file",
+    list_dir: "Listing directory",
+    run_shell_commands: "Running shell command",
+    think_step_by_step: "Thinking",
+    analyze_image: "Analyzing image",
+    compress_text: "Compressing text",
+};
+
+/** Extracts the most meaningful short preview from a tool's input object. */
+function toolInputPreview(input: unknown): string {
+    if (!input || typeof input !== "object") return "";
+    const i = input as Record<string, unknown>;
+    const best = i.query ?? i.url ?? i.command ?? i.path ?? i.filePath ?? i.text ?? i.prompt ?? i.file_id;
+    if (typeof best === "string") return best.slice(0, 100);
+    return "";
+}
+
+/** Per-chat sequential queue — one message processed at a time per chat, no races. */
 const chatQueues = new Map<number, Promise<void>>();
 
 /** Per-user rate limit tracking: userId → { count, windowStart } */
@@ -32,23 +75,20 @@ const rateLimiter = new Map<number, { count: number; windowStart: number }>();
 
 /**
  * Runtime allowlist — seeded from config.telegram.allowedUserIds at startup.
- * Grows when an owner uses /allow <userId>. Survives without restart.
+ * Grows when an owner uses /allow <userId> without a restart.
  */
 let runtimeAllowedUsers = new Set<number>();
 
 /**
  * Runtime owner set — seeded from config.telegram.ownerUserIds at startup.
- * Grows when an owner uses /allow <userId> admin. Survives without restart.
+ * Grows when an owner uses /allow <userId> admin without a restart.
  */
 let runtimeOwnerUsers = new Set<number>();
 
-/** True when both ownerUserIds and allowedUserIds are empty in config (dev mode). */
+/** True when both ownerUserIds and allowedUserIds are empty in config (dev mode = all owners). */
 let devMode = false;
 
-/**
- * Returns true if the user is within their rate limit window, false if exceeded.
- * Owners are never rate-limited.
- */
+/** Returns true if user is within their rate limit window. Owners are never rate-limited. */
 function checkRateLimit(userId: number, limitPerMin: number): boolean {
     if (limitPerMin <= 0) return true;
     const now = Date.now();
@@ -63,103 +103,32 @@ function checkRateLimit(userId: number, limitPerMin: number): boolean {
     return true;
 }
 
-/**
- * Returns the role of a user: 'owner' | 'user' | 'denied'.
- * devMode (both lists empty in config) = everyone is owner.
- * runtimeAllowedUsers is seeded from config and updated by /allow without restart.
- */
-function getRole(userId: number, config: AppConfig): 'owner' | 'user' | 'denied' {
+// ─────────────────────────────────────────────
+// Auth helpers
+// ─────────────────────────────────────────────
+
+/** Returns 'owner' | 'user' | 'denied'. devMode = everyone is owner. */
+function getRole(userId: number, config: AppConfig): "owner" | "user" | "denied" {
     if (devMode) return 'owner';
-    if (config.telegram.ownerUserIds.includes(userId) || runtimeOwnerUsers.has(userId)) return 'owner';
-    if (runtimeAllowedUsers.has(userId)) return 'user';
+    if (config.telegram.ownerUserIds.includes(userId) || runtimeOwnerUsers.has(userId)) return "owner";
+    if (runtimeAllowedUsers.has(userId)) return "user";
     return 'denied';
 }
 
-/**
- * Count tokens for a message by serialising its content to a string.
- * Tool call inputs and tool results are serialised — not flat-estimated —
- * because they can be arbitrarily large (web pages, shell output, file reads).
- */
-function countMessageTokens(msg: ModelMessage): number {
-    if (typeof msg.content === "string") {
-        return encode(msg.content).length;
-    }
-    if (Array.isArray(msg.content)) {
-        return msg.content.reduce((sum, part: any) => {
-            // text block
-            if (part.type === "text" && typeof part.text === "string") {
-                return sum + encode(part.text).length;
-            }
-            // tool call — serialise the input args
-            if (part.type === "tool-call") {
-                const s = typeof part.input === "string" ? part.input : JSON.stringify(part.input ?? "");
-                return sum + encode(s).length;
-            }
-            // tool result — serialise the output (can be huge: web pages, shell output)
-            // Note: AI SDK uses 'output' field, not 'result'
-            if (part.type === "tool-result") {
-                const s = typeof part.output === "string" ? part.output : JSON.stringify(part.output ?? "");
-                return sum + encode(s).length;
-            }
-            // images / files / unknown — flat 512 token estimate
-            return sum + 512;
-        }, 0);
-    }
-    return 0;
-}
-
-/**
- * Cap individual tool-result parts to maxTokens tokens.
- * When a result exceeds the limit, extractive summarisation is used —
- * the most informative sentences are kept in original order.
- * This preserves meaning instead of blindly truncating.
- */
-function capToolResults(history: ModelMessage[], maxTokens: number, maxSentences: number): ModelMessage[] {
-    // rough char budget: ~4 chars per token
-    const maxChars = maxTokens * 4;
-    return history.map((msg): ModelMessage => {
-        if (!Array.isArray(msg.content)) return msg;
-        const capped = msg.content.map((part: any) => {
-            if (part.type !== "tool-result") return part;
-            // Note: AI SDK uses 'output' field, not 'result'
-            const raw: string = typeof part.output === "string" ? part.output : JSON.stringify(part.output ?? "");
-            if (encode(raw).length <= maxTokens) return part;
-            // Use extractive summarisation — keeps the most informative sentences
-            const sentences = maxSentences;
-            const compressed = compressIfLong(raw, maxChars, sentences);
-            return { ...part, output: compressed };
-        });
-        return { ...msg, content: capped } as ModelMessage;
-    });
-}
-
-/**
- * Trim history so it fits within HISTORY_TOKEN_BUDGET.
- * Removes oldest messages first, never removes the last exchange.
- */
-function trimHistory(history: ModelMessage[], tokenBudget: number): ModelMessage[] {
-    let total = history.reduce((sum, m) => sum + countMessageTokens(m), 0);
-    let trimmed = [...history];
-
-    // Keep removing the oldest message until within budget (retain at least last 2)
-    while (total > tokenBudget && trimmed.length > 2) {
-        const removed = trimmed.shift()!;
-        total -= countMessageTokens(removed);
-    }
-
-    if (trimmed.length < history.length) {
-        logger.info(`History trimmed: ${history.length} → ${trimmed.length} messages (${total} tokens)`);
-    }
-
-    return trimmed;
-}
+// ─────────────────────────────────────────────
+// Channel export
+// ─────────────────────────────────────────────
 
 export default {
     name: "telegram",
     start,
 } satisfies Channel;
 
-async function start(config: AppConfig) {
+// ─────────────────────────────────────────────
+// Poll loop
+// ─────────────────────────────────────────────
+
+async function start(config: AppConfig): Promise<void> {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set in .env");
 
@@ -179,91 +148,42 @@ async function start(config: AppConfig) {
             for (const update of updates) {
                 offset = update.update_id + 1;
 
-                // --- Inline button presses (callback_query) ---
+                // Inline button presses
                 if (update.callback_query) {
-                    const cb = update.callback_query;
-                    const cbUserId = cb.from.id;
-                    const cbChatId = cb.message?.chat.id ?? cbUserId;
-                    const cbMessageId = cb.message?.message_id;
-                    const cbRole = getRole(cbUserId, config);
+                    await handleCallbackQuery(config, token, update.callback_query).catch((err) =>
+                        logger.error("Callback error:", err)
+                    );
+                    continue;
+                }
 
-                    if (cbRole !== 'owner') {
-                        await answerCallbackQuery(token, cb.id, "⛔ Owners only.");
-                    } else {
-                        const [action, rawId] = cb.data.split(":");
-                        const targetId = parseInt(rawId, 10);
-
-                        if (!isNaN(targetId)) {
-                            try {
-                                if (action === "allow_user" || action === "allow_admin") {
-                                    const role: ApprovedRole = action === "allow_admin" ? "admin" : "user";
-                                    const requests = loadRequests();
-                                    const req = requests.find((r) => r.userId === targetId);
-
-                                    if (role === "admin") {
-                                        runtimeOwnerUsers.add(targetId);
-                                        addToAuthAllowList(targetId, "admin");
-                                    } else {
-                                        runtimeAllowedUsers.add(targetId);
-                                        addToAuthAllowList(targetId, "user");
-                                    }
-
-                                    if (req) {
-                                        saveRequests(updateRequestStatus(requests, targetId, "approved", cbUserId, role));
-                                        await sendMessage(token, req.chatId, "✅ Your access request has been approved! You can now use the bot.").catch(() => { });
-                                    }
-
-                                    const name = req
-                                        ? (req.firstName ? `${req.firstName}${req.username ? ` (@${req.username})` : ""}` : `User ${targetId}`)
-                                        : `User ${targetId}`;
-                                    await answerCallbackQuery(token, cb.id, `✅ ${name} approved as ${role}`);
-
-                                    // Remove buttons from original notification
-                                    if (cbMessageId) {
-                                        await editMessageReplyMarkup(token, cbChatId, cbMessageId, null);
-                                    }
-
-                                } else if (action === "deny") {
-                                    const requests = loadRequests();
-                                    const req = requests.find((r) => r.userId === targetId);
-
-                                    if (req) {
-                                        saveRequests(updateRequestStatus(requests, targetId, "denied", cbUserId));
-                                        await sendMessage(token, req.chatId, "⛔ Your access request has been reviewed and denied.").catch(() => { });
-                                    }
-
-                                    const name = req
-                                        ? (req.firstName ? `${req.firstName}${req.username ? ` (@${req.username})` : ""}` : `User ${targetId}`)
-                                        : `User ${targetId}`;
-                                    await answerCallbackQuery(token, cb.id, `⛔ ${name} denied`);
-
-                                    // Remove buttons from original notification
-                                    if (cbMessageId) {
-                                        await editMessageReplyMarkup(token, cbChatId, cbMessageId, null);
-                                    }
-                                } else {
-                                    await answerCallbackQuery(token, cb.id, "Unknown action.");
-                                }
-                            } catch (err: any) {
-                                logger.error("Callback action error:", err);
-                                await answerCallbackQuery(token, cb.id, "⚠️ Error processing action.");
-                            }
-                        } else {
-                            await answerCallbackQuery(token, cb.id, "⚠️ Invalid user ID.");
+                // Emoji reactions on messages
+                if ((update as any).message_reaction) {
+                    const reaction = (update as any).message_reaction;
+                    const chatId = reaction.chat?.id;
+                    const userId = reaction.user?.id ?? reaction.actor_chat?.id;
+                    const newReactions: any[] = reaction.new_reaction ?? [];
+                    if (chatId && newReactions.length > 0) {
+                        const emoji = newReactions
+                            .filter((r: any) => r.type === "emoji")
+                            .map((r: any) => r.emoji)
+                            .join("");
+                        if (emoji) {
+                            logger.info(`reaction from ${userId}: ${emoji} on msg ${reaction.message_id}`);
+                            await setMessageReaction(token, chatId, reaction.message_id, emoji).catch(() => { });
                         }
                     }
                     continue;
                 }
 
-                // --- Regular messages ---
-                const msg = update.message;
-                if (!msg?.text) continue;
+                // Regular messages
+                const msg = update.message as Message | undefined;
+                if (!hasContent(msg)) continue;
 
                 const chatId = msg.chat.id;
                 const userId = msg.from?.id ?? chatId;
                 const username = msg.from?.username ?? null;
                 const firstName = msg.from?.first_name ?? null;
-                const text = msg.text;
+                const text = msg.text ?? "";
 
                 // /start — always allowed, before auth
                 if (text === "/start") {
@@ -271,51 +191,15 @@ async function start(config: AppConfig) {
                     continue;
                 }
 
-                // Layer 1: Role-based auth
+                // Auth check
                 const role = getRole(userId, config);
-
-                if (role === 'denied') {
-                    logger.warn(`Unauthorized userId ${userId} (chatId ${chatId}) username=${username ?? 'none'} — rejected`);
-                    const requests = loadRequests();
-                    const existing = requests.find((r) => r.userId === userId);
-
-                    if (!existing) {
-                        // First contact — save request, notify all owners once
-                        const updated = upsertRequest(requests, { userId, chatId, username, firstName });
-                        saveRequests(updated);
-
-                        const displayName = firstName
-                            ? `${firstName}${username ? ` (@${username})` : ""}`
-                            : username ? `@${username}` : `User ${userId}`;
-                        const adminMsg =
-                            `🔔 <b>New access request</b>\n` +
-                            `👤 <b>Name:</b> ${displayName}\n` +
-                            `🆔 <b>userId:</b> <code>${userId}</code>\n` +
-                            `💬 <b>chatId:</b> <code>${chatId}</code>\n` +
-                            (username ? `🔗 <b>username:</b> @${username}\n` : "");
-                        const buttons = [
-                            [
-                                { text: "✅ Allow (user)", callback_data: `allow_user:${userId}` },
-                                { text: "👑 Allow (admin)", callback_data: `allow_admin:${userId}` },
-                                { text: "❌ Deny", callback_data: `deny:${userId}` },
-                            ]
-                        ];
-                        for (const ownerId of config.telegram.ownerUserIds) {
-                            await sendMessageWithInlineKeyboard(token, ownerId, adminMsg, buttons, "HTML").catch(() => { });
-                        }
-                        await sendMessage(token, chatId, `⛔ You're not on the allowlist yet.\n\nYour request has been sent to the admin. You'll be notified when it's reviewed.`);
-                    } else if (existing.status === "pending") {
-                        await sendMessage(token, chatId, `⏳ Your access request is still pending admin review. You'll be notified once it's approved.`);
-                    } else if (existing.status === "denied") {
-                        await sendMessage(token, chatId, `⛔ Your access request was denied by the admin.`);
-                    } else {
-                        await sendMessage(token, chatId, `⛔ You are not authorized to use this bot.`);
-                    }
+                if (role === "denied") {
+                    await handleDeniedUser(config, token, chatId, userId, username, firstName);
                     continue;
                 }
 
-                // Owner commands (/allow, /deny, /pending, /requests, /whoami)
-                if (text.startsWith("/") && role === 'owner') {
+                // Owner commands
+                if (text.startsWith("/") && role === "owner") {
                     await handleOwnerCommand(token, chatId, userId, text).catch(async (err) => {
                         logger.error("Owner command error:", err);
                         await sendMessage(token, chatId, `⚠️ Command error: <code>${String(err?.message ?? err).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`, "HTML").catch(() => { });
@@ -326,15 +210,15 @@ async function start(config: AppConfig) {
                 // Silently ignore unknown commands for non-owners
                 if (text.startsWith("/")) continue;
 
-                // Layer 2: Input length cap
+                // Input length cap
                 const maxLen = config.telegram.maxInputLength;
                 if (maxLen > 0 && text.length > maxLen) {
                     await sendMessage(token, chatId, `⚠️ Message too long (max ${maxLen} characters).`);
                     continue;
                 }
 
-                // Layer 3: Rate limiting (owners bypass)
-                if (role !== 'owner' && !checkRateLimit(userId, config.telegram.rateLimitPerMinute)) {
+                // Rate limiting (owners bypass)
+                if (role !== "owner" && !checkRateLimit(userId, config.telegram.rateLimitPerMinute)) {
                     logger.warn(`Rate limit exceeded for userId ${userId}`);
                     await sendMessage(token, chatId, "⏳ Too many messages. Please wait a moment.");
                     continue;
@@ -342,154 +226,417 @@ async function start(config: AppConfig) {
 
                 logger.info(`[${role}] ${userId}/${chatId}: ${text.slice(0, 80)}`);
 
-                // Layer 4: Tool restrictions by role
-                const excludeTools = role !== 'owner' ? config.telegram.ownerOnlyTools : [];
-
                 // Queue per chat — serialises concurrent messages, never races
                 const prev = chatQueues.get(chatId) ?? Promise.resolve();
                 const next = prev.then(() =>
-                    handleMessage(config, token, chatId, userId, text, excludeTools).catch((err) =>
+                    handleMessage(config, token, chatId, msg).catch((err) =>
                         logger.error("Handler error:", err)
                     )
                 );
                 chatQueues.set(chatId, next);
             }
         } catch (err) {
+            // TimeoutError from AbortSignal is expected during long-poll — not a real error
+            if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+                continue;
+            }
             logger.error("Poll error:", err);
             await sleep(3000);
         }
     }
 }
 
+// ─────────────────────────────────────────────
+// Message handlers
+// ─────────────────────────────────────────────
+
+/** Main message handler — compiles history, calls agent, saves response, sends reply. */
 async function handleMessage(
     config: AppConfig,
     token: string,
     chatId: number,
-    userId: number,
-    text: string,
-    excludeTools: string[]
-) {
-    // Send typing indicator while agent is running (Telegram clears it after ~5s)
-    const typingInterval = setInterval(() => sendTyping(token, chatId), 4000);
-    void sendTyping(token, chatId);
+    rawMsg: Message
+): Promise<void> {
+    const chatDir = resolve(CHATS_DIR, `telegram-${chatId}`);
+    mkdirSync(chatDir, { recursive: true });
 
-    // Load history: in-memory cache with disk fallback (survives restart)
-    const sessionKey = `telegram-${chatId}`;
-    if (!chatHistories.has(chatId)) {
-        chatHistories.set(chatId, loadHistory(sessionKey));
-    }
-    const history = trimHistory(chatHistories.get(chatId)!, config.telegram.historyTokenBudget);
+    // ── 1. Save raw user message ─────────────────────────────────────────────
+    const userFile = resolve(chatDir, "user.json");
+    const rawUsers = readJsonFile<Message[]>(userFile, []);
+    rawUsers.push(rawMsg);
+    writeFileSync(userFile, JSON.stringify(rawUsers, null, 2), "utf-8");
 
-    try {
-        const result = await runAgent(config, {
-            userMessage: text,
-            chatHistory: history,
-            excludeTools,
-            meta: { channel: "telegram", chatId },
-        });
-        clearInterval(typingInterval);
+    // Acknowledge receipt — react 👀 on user's message so they know it's being processed
+    await setMessageReaction(token, chatId, rawMsg.message_id, "👀").catch(() => { });
 
-        // Persist updated history: cap large tool results first, then trim by age
-        const capped = capToolResults([...history, ...result.responseMessages], config.telegram.maxToolResultTokens, config.telegram.maxSentencesPerToolResult);
-        const updated = trimHistory(capped, config.telegram.historyTokenBudget);
-        chatHistories.set(chatId, updated);
-        saveHistory(sessionKey, updated);
+    // ── 2. Compile raw Telegram messages → StoredMessage[] ───────────────────
+    // Each message's seq = its Telegram date (Unix seconds) — chronologically stable.
+    const compiledUsers: StoredMessage[] = rawUsers.map((m) => ({
+        seq: m.date,
+        ...compileTelegramMessage(m),
+    }));
 
-        if (result.text) {
-            const html = mdToHtml(result.text);
-            for (const chunk of splitMessage(html)) {
-                const msgId = await sendMessage(token, chatId, chunk, "HTML");
-                if (msgId === null) {
-                    // HTML rejected by Telegram — fallback to plain text
-                    logger.warn("HTML send failed, retrying as plain text");
-                    await sendMessage(token, chatId, stripHtml(chunk));
-                }
+    // ── 3. Load existing agent response messages (assistant + tool) ──────────
+    const assistantFile = resolve(chatDir, "assistant.json");
+    const toolFile = resolve(chatDir, "tool.json");
+    const storedAssistant = readJsonFile<StoredMessage[]>(assistantFile, []);
+    const storedTool = readJsonFile<StoredMessage[]>(toolFile, []);
+
+    // ── 4. Prepare history via shared pipeline ───────────────────────────────
+    const allHistory = prepareHistory(
+        { user: compiledUsers, assistant: storedAssistant, tool: storedTool },
+        { tokenBudget: config.telegram.historyTokenBudget }
+    );
+
+    // The current user message is the last in allHistory — pass it as userMessage,
+    // everything before it as chatHistory.
+    const currentMsg = compiledUsers[compiledUsers.length - 1];
+    const currentContent = typeof currentMsg.content === "string"
+        ? currentMsg.content
+        : JSON.stringify(currentMsg.content);
+    const chatHistory = allHistory.slice(0, -1);
+
+    // ── 5. Stream agent response live into a single Telegram message ─────────
+    //
+    // One "response message" is created on the first token and edited in-place
+    // as tokens arrive — this becomes the final reply, never deleted.
+    //
+    // Tool calls get a separate short-lived "tool bubble" that is deleted once
+    // the tool step finishes and the agent resumes generating text.
+    //
+    // Reasoning (thinking) is shown as an italic suffix on the response message
+    // while it lasts; it disappears when real text tokens follow.
+
+    // ── Animated thinking placeholder ─────────────────────────────────────
+    // Sent immediately so user sees feedback before the first LLM token.
+    // Deleted the moment the first real token arrives.
+    const DOTS = [".", "..", "..."];
+    let dotIdx = 0;
+    let thinkingMsgId: number | null = await sendMessage(token, chatId, "⚡ Thinking.").catch(() => null);
+    let thinkingActive = true;
+    const thinkingLoop = (async () => {
+        while (thinkingActive) {
+            await sleep(500);
+            if (!thinkingActive) break;
+            dotIdx = (dotIdx + 1) % DOTS.length;
+            if (thinkingMsgId) {
+                await editMessage(token, chatId, thinkingMsgId, `⚡ Thinking${DOTS[dotIdx]}`).catch(() => { });
             }
         }
+    })();
+
+    /** The live response message — created on first token, kept as final reply. */
+    let responseMsgId: number | null = null;
+    /** Accumulated plain text from all text tokens so far. */
+    let responseText = "";
+    /** Italic thinking suffix appended to responseText while reasoning is active. */
+    let thinkingSuffix = "";
+    /** Temporary tool bubble sent when a tool call fires — deleted after step. */
+    let toolBubbleId: number | null = null;
+    /** Flush timer for edit-rate limiting (max ~1 edit/sec per Telegram TOS). */
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    /** True once the first text token arrives — turns off typing loop. */
+    let firstToken = true;
+
+    const reasoningTagCfg = config.llm.reasoningTag?.trim();
+    const thinkStripRe = reasoningTagCfg
+        ? new RegExp(`<${reasoningTagCfg}>[\\s\\S]*?<\\/${reasoningTagCfg}>\\n?`, "gi")
+        : null;
+
+    const flushToTelegram = async (): Promise<void> => {
+        // Strip any leaked <think> blocks before displaying
+        const cleanText = thinkStripRe ? responseText.replace(thinkStripRe, "").trim() : responseText;
+        if (!cleanText && !thinkingSuffix) return;
+
+        let display: string;
+        let parseMode: "HTML" | undefined;
+
+        if (thinkingSuffix) {
+            // Escape plain response text for HTML, append italic thinking suffix
+            const escapedText = cleanText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            display = escapedText + thinkingSuffix;
+            parseMode = "HTML";
+        } else {
+            display = cleanText;
+            parseMode = undefined;
+        }
+
+        // Cap at 3900 chars during streaming (Telegram limit 4096)
+        const safe = display.length > 3900 ? display.slice(0, 3897) + "…" : display;
+        if (responseMsgId) {
+            await editMessage(token, chatId, responseMsgId, safe, parseMode).catch(() => { });
+        } else {
+            responseMsgId = await sendMessage(token, chatId, safe, parseMode).catch(() => null);
+        }
+    };
+
+    const scheduleFlush = (): void => {
+        if (flushTimer) return; // already scheduled
+        flushTimer = setTimeout(() => {
+            flushTimer = null;
+            flushToTelegram().catch(() => { });
+        }, 800);
+    };
+
+    const onToolCall = async (toolName: string, input: unknown): Promise<void> => {
+        const label = TOOL_LABELS[toolName] ?? toolName.replace(/_/g, " ");
+        const preview = toolInputPreview(input);
+        const text = preview
+            ? `⚙️ <b>${label}</b>\n<code>${preview.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`
+            : `⚙️ <b>${label}</b>`;
+        toolBubbleId = await sendMessage(token, chatId, text, "HTML").catch(() => null);
+    };
+
+    const onStepFinish = async (hadToolCalls: boolean): Promise<void> => {
+        if (hadToolCalls && toolBubbleId) {
+            await deleteMessage(token, chatId, toolBubbleId).catch(() => { });
+            toolBubbleId = null;
+        }
+    };
+
+    const onThinking = async (text: string): Promise<void> => {
+        const escaped = text.slice(0, 200).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        thinkingSuffix = `\n\n<i>\ud83d\udcad ${escaped}</i>`;
+        scheduleFlush();
+    };
+
+    let streamResult: Awaited<ReturnType<typeof streamAgent>>;
+    try {
+        streamResult = await streamAgent(config, {
+            userMessage: currentContent,
+            chatHistory,
+            meta: { channel: "telegram", chatId },
+            onToolCall,
+            onStepFinish,
+            onThinking,
+        });
+
+        // Consume the token stream — each chunk updates the response message
+        for await (const token_text of streamResult.textStream) {
+            // First token: stop thinking animation and delete placeholder
+            if (firstToken) {
+                firstToken = false;
+                thinkingActive = false;
+                if (thinkingMsgId) {
+                    await deleteMessage(token, chatId, thinkingMsgId).catch(() => { });
+                    thinkingMsgId = null;
+                }
+                thinkingSuffix = "";
+            }
+            responseText += token_text;
+            scheduleFlush();
+        }
+
+        // Final flush — ensure last tokens are sent
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+        await flushToTelegram();
+
+    } finally {
+        thinkingActive = false;
+        if (thinkingMsgId) {
+            await deleteMessage(token, chatId, thinkingMsgId).catch(() => { });
+            thinkingMsgId = null;
+        }
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+        await thinkingLoop;
+    }
+
+    const result = await streamResult!.finalize();
+
+    // Clean up any leftover tool bubble (edge case: agent ended mid-tool)
+    if (toolBubbleId) await deleteMessage(token, chatId, toolBubbleId).catch(() => { });
+
+    // ── 6. Save response messages split by role ──────────────────────────────
+    const turnBase = rawMsg.date + 1;
+    const newAssistant: StoredMessage[] = [];
+    const newTool: StoredMessage[] = [];
+
+    result.responseMessages.forEach((msg, i) => {
+        const stored: StoredMessage = { seq: turnBase + i, ...msg };
+        if ((msg as any).role === "tool") {
+            newTool.push(stored);
+        } else {
+            newAssistant.push(stored);
+        }
+    });
+
+    writeFileSync(assistantFile, JSON.stringify([...storedAssistant, ...newAssistant], null, 2), "utf-8");
+    if (newTool.length > 0) {
+        writeFileSync(toolFile, JSON.stringify([...storedTool, ...newTool], null, 2), "utf-8");
+    }
+
+    // ── 7. Finalise reply ────────────────────────────────────────────────────
+    // The response message already exists with streamed plain text.
+    // Now upgrade it to final formatted HTML. If the final text is longer than
+    // what was streamed (truncated), send proper split chunks and delete the draft.
+    const replyText = result.text?.trim();
+    if (!replyText) {
+        logger.warn(`[agent] empty reply for chatId=${chatId} message_id=${rawMsg.message_id}`);
+        if (responseMsgId) await deleteMessage(token, chatId, responseMsgId).catch(() => { });
+        await sendMessage(token, chatId, "⚠️ No response from agent.");
+        await setMessageReaction(token, chatId, rawMsg.message_id, "✅").catch(() => { });
+        return;
+    }
+
+    const html = mdToHtml(replyText);
+    const chunks = splitMessage(html);
+
+    if (chunks.length === 1) {
+        // Single chunk — upgrade the existing message in-place
+        if (responseMsgId) {
+            await editMessage(token, chatId, responseMsgId, chunks[0], "HTML")
+                .catch(() => editMessage(token, chatId, responseMsgId!, stripHtml(chunks[0])));
+        } else {
+            await sendMessage(token, chatId, chunks[0], "HTML")
+                .catch(() => sendMessage(token, chatId, stripHtml(chunks[0])));
+        }
+    } else {
+        // Multiple chunks — delete the draft and send all chunks fresh
+        if (responseMsgId) await deleteMessage(token, chatId, responseMsgId).catch(() => { });
+        for (const chunk of chunks) {
+            await sendMessage(token, chatId, chunk, "HTML")
+                .catch(() => sendMessage(token, chatId, stripHtml(chunk)));
+        }
+    }
+
+    // Mark done — upgrade 👀 to ✅ on user's message
+    await setMessageReaction(token, chatId, rawMsg.message_id, "✅").catch(() => { });
+}
+
+/** Handles inline keyboard button presses (callback_query updates). */
+async function handleCallbackQuery(
+    config: AppConfig,
+    token: string,
+    cb: NonNullable<Update["callback_query"]>
+): Promise<void> {
+    const cbUserId = cb.from.id;
+    const cbChatId = cb.message?.chat.id ?? cbUserId;
+    const cbMessageId = cb.message?.message_id;
+    const cbRole = getRole(cbUserId, config);
+
+    if (cbRole !== "owner") {
+        await answerCallbackQuery(token, cb.id, "⛔ Owners only.");
+        return;
+    }
+
+    const [action, rawId] = cb.data!.split(":");
+    const targetId = parseInt(rawId, 10);
+
+    if (isNaN(targetId)) {
+        await answerCallbackQuery(token, cb.id, "⚠️ Invalid user ID.");
+        return;
+    }
+
+    try {
+        if (action === "allow_user" || action === "allow_admin") {
+            const role: ApprovedRole = action === "allow_admin" ? "admin" : "user";
+            const requests = loadRequests();
+            const req = requests.find((r) => r.userId === targetId);
+
+            if (role === "admin") {
+                runtimeOwnerUsers.add(targetId);
+                addToAuthAllowList(targetId, "admin");
+            } else {
+                runtimeAllowedUsers.add(targetId);
+                addToAuthAllowList(targetId, "user");
+            }
+
+            if (req) {
+                saveRequests(updateRequestStatus(requests, targetId, "approved", cbUserId, role));
+                await sendMessage(token, req.chatId, "✅ Your access request has been approved! You can now use the bot.").catch(() => { });
+            }
+
+            const name = req
+                ? (req.firstName ? `${req.firstName}${req.username ? ` (@${req.username})` : ""}` : `User ${targetId}`)
+                : `User ${targetId}`;
+            await answerCallbackQuery(token, cb.id, `✅ ${name} approved as ${role}`);
+            if (cbMessageId) await editMessageReplyMarkup(token, cbChatId, cbMessageId, null);
+
+        } else if (action === "deny") {
+            const requests = loadRequests();
+            const req = requests.find((r) => r.userId === targetId);
+
+            if (req) {
+                saveRequests(updateRequestStatus(requests, targetId, "denied", cbUserId));
+                await sendMessage(token, req.chatId, "⛔ Your access request has been reviewed and denied.").catch(() => { });
+            }
+
+            const name = req
+                ? (req.firstName ? `${req.firstName}${req.username ? ` (@${req.username})` : ""}` : `User ${targetId}`)
+                : `User ${targetId}`;
+            await answerCallbackQuery(token, cb.id, `⛔ ${name} denied`);
+            if (cbMessageId) await editMessageReplyMarkup(token, cbChatId, cbMessageId, null);
+
+        } else {
+            await answerCallbackQuery(token, cb.id, "Unknown action.");
+        }
     } catch (err: any) {
-        clearInterval(typingInterval);
-        logger.error("Agent error:", err.message, err);
-        await sendMessage(token, chatId, `⚠️ <b>Error:</b> <code>${String(err.message).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`, "HTML");
+        logger.error("Callback action error:", err);
+        await answerCallbackQuery(token, cb.id, "⚠️ Error processing action.");
     }
 }
 
-async function handleOwnerCommand(token: string, chatId: number, ownerUserId: number, text: string) {
+/** Handles denied users — sends access request to owners on first contact. */
+async function handleDeniedUser(
+    config: AppConfig,
+    token: string,
+    chatId: number,
+    userId: number,
+    username: string | null,
+    firstName: string | null
+): Promise<void> {
+    logger.warn(`Unauthorized userId ${userId} (chatId ${chatId}) username=${username ?? "none"} — rejected`);
+
+    const requests = loadRequests();
+    const existing = requests.find((r) => r.userId === userId);
+
+    if (!existing) {
+        const updated = upsertRequest(requests, { userId, chatId, username, firstName });
+        saveRequests(updated);
+
+        const displayName = firstName
+            ? `${firstName}${username ? ` (@${username})` : ""}`
+            : username ? `@${username}` : `User ${userId}`;
+
+        const adminMsg =
+            `🔔 <b>New access request</b>\n` +
+            `👤 <b>Name:</b> ${displayName}\n` +
+            `🆔 <b>userId:</b> <code>${userId}</code>\n` +
+            `💬 <b>chatId:</b> <code>${chatId}</code>\n` +
+            (username ? `🔗 <b>username:</b> @${username}\n` : "");
+
+        const buttons = [[
+            { text: "✅ Allow (user)", callback_data: `allow_user:${userId}` },
+            { text: "👑 Allow (admin)", callback_data: `allow_admin:${userId}` },
+            { text: "❌ Deny", callback_data: `deny:${userId}` },
+        ]];
+
+        for (const ownerId of config.telegram.ownerUserIds) {
+            await sendMessageWithInlineKeyboard(token, ownerId, adminMsg, buttons, "HTML").catch(() => { });
+        }
+        await sendMessage(token, chatId, `⛔ You're not on the allowlist yet.\n\nYour request has been sent to the admin. You'll be notified when it's reviewed.`);
+
+    } else if (existing.status === "pending") {
+        await sendMessage(token, chatId, `⏳ Your access request is still pending admin review. You'll be notified once it's approved.`);
+    } else if (existing.status === "denied") {
+        await sendMessage(token, chatId, `⛔ Your access request was denied by the admin.`);
+    } else {
+        await sendMessage(token, chatId, `⛔ You are not authorized to use this bot.`);
+    }
+}
+
+// ─────────────────────────────────────────────
+// Owner commands & restart
+// ─────────────────────────────────────────────
+
+/** Handles privileged slash commands for owners: /restart, /whoami, /allow, /deny, /pending, /requests. */
+async function handleOwnerCommand(token: string, chatId: number, ownerUserId: number, text: string): Promise<void> {
     const parts = text.trim().split(/\s+/);
     const cmd = parts[0];
     const arg = parts[1] ?? "";
 
-    // /restart — blue-green restart: typecheck → spawn → verify alive → swap
     if (cmd === "/restart") {
-        await sendMessage(token, chatId, "🔄 Checking code before restart...");
-
-        // Step 1: typecheck
-        const tsc = Bun.spawnSync(["bun", "run", "typecheck"], { cwd: process.cwd() });
-        if (tsc.exitCode !== 0) {
-            const output = (new TextDecoder().decode(tsc.stdout) + new TextDecoder().decode(tsc.stderr)).trim().slice(0, 1500);
-            await sendMessage(
-                token, chatId,
-                `❌ <b>Restart aborted — typecheck failed.</b>\n<pre>${output}</pre>`,
-                "HTML"
-            );
-            return;
-        }
-
-        await sendMessage(token, chatId, "✅ Typecheck passed. Spawning new instance...");
-
-        // Step 2: spawn new process
-        const child = Bun.spawn(["bun", "run", "src/index.ts"], {
-            cwd: process.cwd(),
-            stdio: ["ignore", "ignore", "ignore"],
-            detached: true,
-        });
-
-        // Step 3: wait 6s and check if it's still alive
-        await new Promise((r) => setTimeout(r, 6000));
-
-        if (child.exitCode !== null) {
-            // New process already died — startup failure (bad API key, config error, etc.)
-            await sendMessage(
-                token, chatId,
-                `❌ <b>Restart aborted — new instance crashed at startup</b> (exit ${child.exitCode}).\nThe current bot is still running.\n\n🔍 Asking the agent to self-diagnose...`,
-                "HTML"
-            );
-
-            // Feed the failure back into the agent — it will diagnose, fix, and retry
-            const diagTask =
-                `SYSTEM: Self-restart just failed. The new instance crashed at startup with exit code ${child.exitCode}.\n` +
-                `The current process is still running.\n\n` +
-                `Your job:\n` +
-                `1. Check recent logs: tail -50 .forkscout/activity.log\n` +
-                `2. Check for startup errors: bun run src/index.ts 2>&1 | head -40 (kill after 5s)\n` +
-                `3. Identify the root cause (broken code, missing env var, bad config, MCP failure, etc.)\n` +
-                `4. Fix it\n` +
-                `5. Run bun run typecheck to verify\n` +
-                `6. Send /restart to try again\n\n` +
-                `Do not wait for instructions. Start diagnosing now.`;
-
-            // Fire async — don't block the command handler
-            runAgent(getConfig(), {
-                userMessage: diagTask,
-                meta: { channel: "telegram", chatId },
-            }).then(async (result) => {
-                if (result.text) {
-                    const html = mdToHtml(result.text);
-                    for (const chunk of splitMessage(html)) {
-                        await sendMessage(token, chatId, chunk, "HTML").catch(() =>
-                            sendMessage(token, chatId, stripHtml(chunk))
-                        );
-                    }
-                }
-            }).catch((err) => {
-                logger.error("Self-diagnosis agent error:", err);
-            });
-
-            return;
-        }
-
-        // Step 4: new process is healthy — hand off and exit
-        await sendMessage(token, chatId, "✅ New instance is healthy. Handing off now.");
-        process.exit(0);
+        await handleRestart(token, chatId);
         return;
     }
 
@@ -596,37 +743,112 @@ async function handleOwnerCommand(token: string, chatId: number, ownerUserId: nu
         return;
     }
 
-    // Unknown command — silently ignore (don't accidentally send to agent)
+    // Unknown owner command — silently ignore (don't route to agent)
 }
 
-async function getUpdates(
-    token: string,
-    offset: number,
-    timeout: number
-): Promise<TelegramUpdate[]> {
-    const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=${timeout}&allowed_updates=["message","callback_query"]`;
-    const res = await fetch(url, { signal: AbortSignal.timeout((timeout + 10) * 1000) });
-    const data = await res.json() as { ok: boolean; result: TelegramUpdate[] };
-    if (!data.ok) return [];
-    return data.result;
+/** Blue-green restart: typecheck → spawn → verify alive → hand off. */
+async function handleRestart(token: string, chatId: number): Promise<void> {
+    await sendMessage(token, chatId, "🔄 Checking code before restart...");
+
+    const tsc = Bun.spawnSync(["bun", "run", "typecheck"], { cwd: process.cwd() });
+    if (tsc.exitCode !== 0) {
+        const output = (new TextDecoder().decode(tsc.stdout) + new TextDecoder().decode(tsc.stderr)).trim().slice(0, 1500);
+        await sendMessage(token, chatId, `❌ <b>Restart aborted — typecheck failed.</b>\n<pre>${output}</pre>`, "HTML");
+        return;
+    }
+
+    await sendMessage(token, chatId, "✅ Typecheck passed. Spawning new instance...");
+
+    const child = Bun.spawn(["bun", "run", "src/index.ts"], {
+        cwd: process.cwd(),
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+    });
+
+    await sleep(6000);
+
+    if (child.exitCode !== null) {
+        await sendMessage(
+            token, chatId,
+            `❌ <b>Restart aborted — new instance crashed at startup</b> (exit ${child.exitCode}).\nThe current bot is still running.\n\n🔍 Asking the agent to self-diagnose...`,
+            "HTML"
+        );
+
+        const diagTask =
+            `SYSTEM: Self-restart just failed. The new instance crashed at startup with exit code ${child.exitCode}.\n` +
+            `The current process is still running.\n\n` +
+            `Your job:\n` +
+            `1. Check recent logs: tail -50 .forkscout/activity.log\n` +
+            `2. Check for startup errors: bun run src/index.ts 2>&1 | head -40 (kill after 5s)\n` +
+            `3. Identify the root cause (broken code, missing env var, bad config, MCP failure, etc.)\n` +
+            `4. Fix it\n` +
+            `5. Run bun run typecheck to verify\n` +
+            `6. Send /restart to try again\n\n` +
+            `Do not wait for instructions. Start diagnosing now.`;
+
+        runAgent(getConfig(), { userMessage: diagTask, meta: { channel: "telegram", chatId } })
+            .then(async (result) => {
+                if (!result.text) return;
+                const html = mdToHtml(result.text);
+                for (const chunk of splitMessage(html)) {
+                    await sendMessage(token, chatId, chunk, "HTML").catch(() => sendMessage(token, chatId, stripHtml(chunk)));
+                }
+            })
+            .catch((err) => logger.error("Self-diagnosis agent error:", err));
+
+        return;
+    }
+
+    await sendMessage(token, chatId, "✅ New instance is healthy. Handing off now.");
+    process.exit(0);
 }
 
-function sleep(ms: number) {
+// ─────────────────────────────────────────────
+// Telegram API utils
+// ─────────────────────────────────────────────
+
+async function getUpdates(token: string, offset: number, timeout: number): Promise<Update[]> {
+    const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=${timeout}&allowed_updates=["message","callback_query","message_reaction"]`;
+    try {
+        const res = await fetch(url, { signal: AbortSignal.timeout((timeout + 10) * 1000) });
+        const data = await res.json() as { ok: boolean; result: Update[] };
+        if (!data.ok) return [];
+        return data.result;
+    } catch (err) {
+        if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return [];
+        throw err;
+    }
+}
+
+function sleep(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
 }
 
-interface TelegramUpdate {
-    update_id: number;
-    message?: {
-        chat: { id: number };
-        message_id?: number;
-        text?: string;
-        from?: { id: number; username?: string; first_name?: string };
-    };
-    callback_query?: {
-        id: string;
-        from: { id: number; username?: string; first_name?: string };
-        message?: { chat: { id: number }; message_id: number };
-        data: string;
-    };
+// ─────────────────────────────────────────────
+// File helpers
+// ─────────────────────────────────────────────
+
+/** Read a JSON file, returning `fallback` if missing or unparsable. */
+function readJsonFile<T>(filePath: string, fallback: T): T {
+    try {
+        return JSON.parse(readFileSync(filePath, "utf-8")) as T;
+    } catch {
+        return fallback;
+    }
+}
+
+// ─────────────────────────────────────────────
+// Guards
+// ─────────────────────────────────────────────
+
+/** Returns true if the message carries any supported content type. */
+function hasContent(msg: Message | undefined): msg is Message {
+    if (!msg) return false;
+    return !!(
+        msg.text || msg.photo || msg.voice || msg.audio ||
+        msg.video || msg.video_note || msg.animation ||
+        msg.document || msg.sticker || msg.location ||
+        msg.venue || msg.contact || msg.poll || msg.dice ||
+        msg.story || msg.game || msg.paid_media
+    );
 }

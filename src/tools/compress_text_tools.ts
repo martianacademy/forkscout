@@ -23,7 +23,7 @@ import { llmSummarize } from "@/llm/summarize.ts";
 
 export const IS_BOOTSTRAP_TOOL = false;
 
-export const compress_text = tool({
+export const compress_text_tools = tool({
     description:
         "Condense long text (web pages, search results, file contents, command output) into a concise summary. " +
         "WHEN TO USE: automatically after any tool returns >500 words; always before quoting long content in a reply. " +
