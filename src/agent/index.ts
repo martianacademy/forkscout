@@ -370,6 +370,11 @@ export async function streamAgent(
 
     const reasoningTag = config.llm.reasoningTag?.trim();
 
+    // Shared accumulator — loggedTokenStream writes text here; finalize() reads
+    // it instead of stream.text (which throws "No output generated" when fullStream
+    // was already consumed — AI SDK v6 dual-consumption bug).
+    const acc = { text: "" };
+
     // Consume fullStream so we can intercept both text-delta and reasoning-delta.
     // extractReasoningMiddleware strips <think> from the text stream and emits
     // reasoning-delta chunks — we forward those to onThinking live as they arrive.
@@ -402,6 +407,7 @@ export async function streamAgent(
                     await flushReasoning();
                     accumulatedReasoning = "";
                 }
+                acc.text += delta;
                 activity.token(delta, channel, chatId);
                 process.stdout.write(delta);
                 yield delta;
@@ -431,11 +437,13 @@ export async function streamAgent(
         textStream: loggedTokenStream(),
         bootstrapToolNames: Object.keys(bootstrapTools),
         async finalize(): Promise<AgentRunResult> {
-            const [rawText, response, steps] = await Promise.all([
-                stream.text,
+            // stream.response and stream.steps are safe to await after fullStream
+            // is consumed. stream.text is NOT — use acc.text instead.
+            const [response, steps] = await Promise.all([
                 stream.response,
                 stream.steps,
             ]);
+            const rawText = acc.text;
             const text = reasoningTag
                 ? rawText.replace(new RegExp(`<${reasoningTag}>[\\s\\S]*?<\\/${reasoningTag}>\\n?`, "gi"), "").trim()
                 : rawText;

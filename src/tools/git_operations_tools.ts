@@ -33,18 +33,19 @@ export const git_operations_tools = tool({
         cmd += ` ${input.args.join(" ")}`;
       }
 
-      const { completed, stdout, stderr } = await Bun.spawnAsync(["sh", "-c", cmd], { cwd: process.cwd() });
-      
-      if (completed.signal) {
-        return { success: false, error: `Process killed by signal: ${completed.signal}` };
-      }
+      const proc = Bun.spawn(["sh", "-c", cmd], { cwd: process.cwd() });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text()
+      ]);
+      const exitCode = await proc.exited;
       
       return {
         success: true,
         command: cmd,
         stdout: stdout || "(no output)",
         stderr: stderr || "(no error)",
-        exitCode: completed.exitCode
+        exitCode
       };
     } catch (error) {
       return { success: false, error: String(error) };
