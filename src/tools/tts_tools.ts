@@ -1,17 +1,10 @@
 // src/tools/tts_tools.ts — ElevenLabs TTS tool
 import { tool } from "ai";
 import { z } from "zod";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 
 export const IS_BOOTSTRAP_TOOL = false;
-
-// Load config for API key
-function getConfig() {
-  const configPath = join(process.cwd(), "src/forkscout.config.json");
-  const configFile = readFileSync(configPath, "utf-8");
-  return JSON.parse(configFile);
-}
 
 export const tts_tools = tool({
   description: "Convert text to speech using ElevenLabs TTS API and return audio file path.",
@@ -22,11 +15,10 @@ export const tts_tools = tool({
   }),
   execute: async (input) => {
     try {
-      const config = getConfig();
-      const apiKey = config.elevenlabsApiKey;
+      const apiKey = process.env.ELEVENLABS_API_KEY;
       
       if (!apiKey) {
-        return { success: false, error: "ElevenLabs API key not configured in forkscout.config.json" };
+        return { success: false, error: "ELEVENLABS_API_KEY not set in .env" };
       }
 
       // Default voices based on language
