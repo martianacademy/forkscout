@@ -1,4 +1,4 @@
-// src/providers/deepseek_provider.ts
+// src/providers/deepseek_provider.ts — DeepSeek provider via @ai-sdk/deepseek.
 // DeepSeek provider using the official @ai-sdk/deepseek package.
 // Docs: https://ai-sdk.dev/providers/ai-sdk-providers/deepseek
 

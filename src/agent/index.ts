@@ -1,5 +1,7 @@
 // src/agent/index.ts — LLM agent runner
 import { generateText, streamText, wrapLanguageModel, stepCountIs, extractReasoningMiddleware, type ModelMessage } from "ai";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { AppConfig } from "@/config.ts";
 import { getProvider } from "@/providers/index.ts";
 import { discoverTools } from "@/tools/index.ts";
@@ -14,12 +16,30 @@ import { sanitizeForPrompt } from "@/channels/chat-store.ts";
 import { stripMedia } from "@/channels/prepare-history.ts";
 import { getSkills } from "@/skills/index.ts";
 
+// ── Role extension loader ─────────────────────────────────────────────────────
+// Reads the appropriate role-.md file and returns its content to inject into the
+// system prompt. Owner gets no extra restrictions — they already have full trust.
+
+const EXTENSIONS_DIR = resolve(import.meta.dir, "system-prompts/extensions");
+
+function loadRoleExtension(role: "owner" | "admin" | "user" | "self"): string {
+    if (role === "owner" || role === "self") return "";
+    const file = resolve(EXTENSIONS_DIR, `role-${role}.md`);
+    try {
+        return readFileSync(file, "utf-8").trim();
+    } catch {
+        return "";
+    }
+}
+
 const logger = log("agent");
 
 
 export interface AgentRunOptions {
     userMessage: string;
     chatHistory?: ModelMessage[];
+    /** Trust role of the calling user — injects role-specific instructions into the system prompt */
+    role?: "owner" | "admin" | "user" | "self";
     /** Tool names to exclude from this run (e.g. restricted tools for non-owner users) */
     excludeTools?: string[];
     /** Optional channel metadata for activity logging */
@@ -191,9 +211,14 @@ async function buildAgentParams(config: AppConfig, options: AgentRunOptions) {
         }) as typeof baseModel;
     }
 
-    const systemPrompt = config.agent.systemPromptExtra
+    const basePrompt = config.agent.systemPromptExtra
         ? `${buildIdentity(config, ctx)}\n\n${config.agent.systemPromptExtra}`
         : buildIdentity(config, ctx);
+
+    const roleExtension = options.role ? loadRoleExtension(options.role) : "";
+    const systemPrompt = roleExtension
+        ? `${basePrompt}\n\n---\n\n## Active Role Instructions\n\n${roleExtension}`
+        : basePrompt;
 
     const messages: ModelMessage[] = [
         // Raw history from disk → sanitize for schema validity → strip media → LLM

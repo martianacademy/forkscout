@@ -17,7 +17,8 @@
         "historyTokenBudget": 12000
     },
     "self": {
-        "historyTokenBudget": 12000
+        "historyTokenBudget": 12000,
+        "httpPort": 3200
     },
     "agent": {
         "name": "ForkScout",
@@ -28,7 +29,7 @@
         "headless": false,
         "profileDir": ".forkscout/browser-profile",
         "screenshotQuality": 50,
-        "chromePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        "chromePath": ""
     },
     "browserAgent": {
         "maxSteps": 25,

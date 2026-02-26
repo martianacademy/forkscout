@@ -10,6 +10,9 @@
         "dev": "bun run stop; DEVTOOLS=1 bun --hot src/index.ts",
         "cli": "bun run stop; bun run src/index.ts --cli",
         "cli:dev": "bun run stop; DEVTOOLS=1 bun --hot src/index.ts --cli",
+        "restart": "DEVTOOLS=1 nohup bun run src/index.ts > /tmp/forkscout.log 2>&1 & sleep 2 && bun run stop; echo '[forkscout] restarted'",
+        "restart:dev": "DEVTOOLS=1 nohup bun --hot src/index.ts > /tmp/forkscout.log 2>&1 & sleep 2 && bun run stop; echo '[forkscout] restarted (hot)'",
+        "safe-restart": "bash scripts/safe-restart.sh",
         "typecheck": "bun run --bun tsc --noEmit",
         "devtools": "bun run node_modules/.bin/devtools"
     },

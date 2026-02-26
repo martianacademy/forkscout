@@ -1,4 +1,4 @@
-// src/providers/perplexity_provider.ts
+// src/providers/perplexity_provider.ts — Perplexity provider: models with built-in web search grounding.
 // Perplexity provider — OpenAI-compatible endpoint, no dedicated SDK needed.
 // Perplexity models have built-in web search grounding.
 // Docs: https://docs.perplexity.ai/api-reference/chat-completions

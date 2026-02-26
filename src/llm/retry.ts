@@ -1,5 +1,5 @@
-// src/llm/retry.ts
-// Exponential backoff retry wrapper for LLM calls.
+// src/llm/retry.ts — Exponential backoff retry wrapper for LLM calls.
+// Retries on 429 and 5xx only; fails fast on 401/400.
 //
 // Handles transient errors from LLM providers via OpenRouter or direct APIs:
 //   - APICallError with isRetryable (408 timeout, 409 conflict, 429 rate-limit, 5xx server errors)

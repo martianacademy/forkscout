@@ -1,4 +1,4 @@
-// src/providers/reasoning-fetch-transform.ts
+// src/providers/reasoning-fetch-transform.ts — Fetch middleware: injects <think> reasoning tags into streamed LLM responses.
 //
 // Fetch wrapper that transforms OpenRouter's (and compatible providers') non-standard
 // `message.reasoning` / `delta.reasoning` field into <think>...</think> tags inside

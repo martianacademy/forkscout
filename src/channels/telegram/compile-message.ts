@@ -1,5 +1,5 @@
-// src/channels/telegram/compile-message.ts
-// Compiles a single raw Telegram Message object → ModelMessage (user role).
+// src/channels/telegram/compile-message.ts — Compiles raw Telegram Message → ModelMessage (user role).
+// Handles text, photos, documents, voice, captions.
 //
 // Called per message before passing history to the LLM.
 // Does NOT fetch file content from Telegram API — that is handled separately.

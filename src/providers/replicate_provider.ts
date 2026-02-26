@@ -1,4 +1,4 @@
-// src/providers/replicate_provider.ts
+// src/providers/replicate_provider.ts — Replicate provider: run open-source models (Llama, Mistral, etc.).
 // Replicate provider using the official @ai-sdk/replicate package.
 // Run open-source models (Llama, Mistral, etc.) on Replicate's infrastructure.
 // Docs: https://ai-sdk.dev/providers/ai-sdk-providers/replicate

@@ -81,9 +81,14 @@ let runtimeAllowedUsers = new Set<number>();
 
 /**
  * Runtime owner set — seeded from config.telegram.ownerUserIds at startup.
- * Grows when an owner uses /allow <userId> admin without a restart.
  */
 let runtimeOwnerUsers = new Set<number>();
+
+/**
+ * Runtime admin set — seeded from approved admin requests at startup.
+ * Grows when an owner grants admin via the inline button.
+ */
+let runtimeAdminUsers = new Set<number>();
 
 /** True when both ownerUserIds and allowedUserIds are empty in config (dev mode = all owners). */
 let devMode = false;
@@ -107,10 +112,11 @@ function checkRateLimit(userId: number, limitPerMin: number): boolean {
 // Auth helpers
 // ─────────────────────────────────────────────
 
-/** Returns 'owner' | 'user' | 'denied'. devMode = everyone is owner. */
-function getRole(userId: number, config: AppConfig): "owner" | "user" | "denied" {
+/** Returns 'owner' | 'admin' | 'user' | 'denied'. devMode = everyone is owner. */
+function getRole(userId: number, config: AppConfig): "owner" | "admin" | "user" | "denied" {
     if (devMode) return 'owner';
     if (config.telegram.ownerUserIds.includes(userId) || runtimeOwnerUsers.has(userId)) return "owner";
+    if (runtimeAdminUsers.has(userId)) return "admin";
     if (runtimeAllowedUsers.has(userId)) return "user";
     return 'denied';
 }
@@ -132,10 +138,15 @@ async function start(config: AppConfig): Promise<void> {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set in .env");
 
-    // Seed runtime auth state from config (updated live by /allow without restart)
+    // Seed runtime auth state from config + persisted requests
     devMode = config.telegram.ownerUserIds.length === 0 && config.telegram.allowedUserIds.length === 0;
     runtimeAllowedUsers = new Set(config.telegram.allowedUserIds);
     runtimeOwnerUsers = new Set(config.telegram.ownerUserIds);
+    // Seed admins from persisted approved requests
+    const savedRequests = loadRequests();
+    runtimeAdminUsers = new Set(
+        savedRequests.filter((r) => r.status === "approved" && r.role === "admin").map((r) => r.userId)
+    );
 
     logger.info("Starting long-poll...");
 
@@ -217,8 +228,8 @@ async function start(config: AppConfig): Promise<void> {
                     continue;
                 }
 
-                // Rate limiting (owners bypass)
-                if (role !== "owner" && !checkRateLimit(userId, config.telegram.rateLimitPerMinute)) {
+                // Rate limiting (owners and admins bypass)
+                if (role !== "owner" && role !== "admin" && !checkRateLimit(userId, config.telegram.rateLimitPerMinute)) {
                     logger.warn(`Rate limit exceeded for userId ${userId}`);
                     await sendMessage(token, chatId, "⏳ Too many messages. Please wait a moment.");
                     continue;
@@ -229,7 +240,7 @@ async function start(config: AppConfig): Promise<void> {
                 // Queue per chat — serialises concurrent messages, never races
                 const prev = chatQueues.get(chatId) ?? Promise.resolve();
                 const next = prev.then(() =>
-                    handleMessage(config, token, chatId, msg).catch((err) =>
+                    handleMessage(config, token, chatId, msg, role as "owner" | "admin" | "user").catch((err) =>
                         logger.error("Handler error:", err)
                     )
                 );
@@ -255,7 +266,8 @@ async function handleMessage(
     config: AppConfig,
     token: string,
     chatId: number,
-    rawMsg: Message
+    rawMsg: Message,
+    role: "owner" | "admin" | "user" = "user"
 ): Promise<void> {
     const chatDir = resolve(CHATS_DIR, `telegram-${chatId}`);
     mkdirSync(chatDir, { recursive: true });
@@ -291,9 +303,11 @@ async function handleMessage(
     // The current user message is the last in allHistory — pass it as userMessage,
     // everything before it as chatHistory.
     const currentMsg = compiledUsers[compiledUsers.length - 1];
-    const currentContent = typeof currentMsg.content === "string"
+    const rawContent = typeof currentMsg.content === "string"
         ? currentMsg.content
         : JSON.stringify(currentMsg.content);
+    const roleTag = role === "owner" ? "OWNER" : role === "admin" ? "ADMIN" : "USER";
+    const currentContent = `[${roleTag}] ${rawContent}`;
     const chatHistory = allHistory.slice(0, -1);
 
     // ── 5. Stream agent response live into a single Telegram message ─────────
@@ -405,6 +419,7 @@ async function handleMessage(
         streamResult = await streamAgent(config, {
             userMessage: currentContent,
             chatHistory,
+            role,
             meta: { channel: "telegram", chatId },
             onToolCall,
             onStepFinish,
@@ -534,7 +549,7 @@ async function handleCallbackQuery(
             const req = requests.find((r) => r.userId === targetId);
 
             if (role === "admin") {
-                runtimeOwnerUsers.add(targetId);
+                runtimeAdminUsers.add(targetId);
                 addToAuthAllowList(targetId, "admin");
             } else {
                 runtimeAllowedUsers.add(targetId);

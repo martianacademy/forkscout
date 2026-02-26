@@ -2,52 +2,85 @@
 
 ## Purpose
 
-The **self** channel lets the agent talk to itself on a schedule (cron jobs).
-All agent-to-self interactions are recorded in their own persistent history,
-isolated from user-facing channels.
+The **self** channel lets the agent talk to itself in two ways:
+
+1. **Cron jobs** — scheduled autonomous tasks that fire on a schedule.
+2. **HTTP trigger** — on-demand `POST /trigger` endpoint. Any tool (e.g. `message_self`) can POST a prompt here to start a fresh agent session with persistent history. This is the backbone of the **Task Offload Pattern**.
 
 ## Use cases
 
 - Scheduled autonomous tasks (daily reports, health checks, cleanup routines)
 - Background research jobs that run without user prompting
-- Any code path that calls `runAgent` on behalf of the agent itself (not a human)
+- Task Offload Pattern: break huge multi-file tasks into sequential sessions, each with fresh context
 
 ## File standard
 
-| File                      | Role                                              |
-| ------------------------- | ------------------------------------------------- |
-| `index.ts`                | Channel implementation + `startCronJobs()` export |
-| `ai_agent_must_readme.md` | This file                                         |
+| File                      | Role                                                                     |
+| ------------------------- | ------------------------------------------------------------------------ |
+| `index.ts`                | Channel implementation + `startCronJobs()` + `startHttpServer()` exports |
+| `ai_agent_must_readme.md` | This file                                                                |
 
 ## Session key convention
 
-Every job gets its own isolated history:
+| Source       | Storage key              | Path                                       |
+| ------------ | ------------------------ | ------------------------------------------ |
+| Cron job     | `self-{jobName}`         | `.forkscout/chats/self-{jobName}/`         |
+| HTTP trigger | `self-http-{sessionKey}` | `.forkscout/chats/self-http-{sessionKey}/` |
 
-```
-self-{jobName}   →   .forkscout/chats/self-{jobName}.json
+## HTTP API
+
+Server port: `config.self.httpPort` (default: `3200`). Set `0` to disable.
+
+### POST /trigger
+
+```json
+{
+  "prompt": "Optimize src/tools/browse_web.ts for readability",
+  "sessionKey": "optimize-tools",
+  "role": "owner"
+}
 ```
 
-e.g. `self-daily-report`, `self-health-check`
+Response:
+
+```json
+{
+  "ok": true,
+  "text": "Done. Made the following changes...",
+  "steps": 4,
+  "sessionKey": "self-http-optimize-tools"
+}
+```
+
+- `sessionKey` optional — defaults to `"default"` → stored as `self-http-default`
+- `role` optional — defaults to `"owner"`
+- Requests to the same `sessionKey` are serialised (no concurrent history races)
+- History trimmed to `config.self.historyTokenBudget` using the same pipeline as all other channels
+
+### GET /health
+
+Returns `{ "ok": true }` — used by `scripts/safe-restart.sh` smoke test.
 
 ## Config schema
-
-Jobs are defined in `forkscout.config.json` under `"self"`:
 
 ```json
 {
   "self": {
     "historyTokenBudget": 12000,
+    "httpPort": 3200,
     "jobs": [
       {
         "name": "daily-report",
         "schedule": "0 9 * * *",
-        "message": "Run the daily status report and summarise what happened.",
-        "notifyTelegram": true
+        "message": "Run the daily status report.",
+        "telegram": { "chatIds": [123456789] }
       }
     ]
   }
 }
 ```
+
+Jobs can also live in `.forkscout/self-jobs.json` (gitignored). File jobs override config jobs (deduplicated by name).
 
 | Field            | Type    | Required | Description                                          |
 | ---------------- | ------- | -------- | ---------------------------------------------------- |

@@ -1,5 +1,5 @@
-// src/channels/prepare-history.ts
-// Shared history preparation pipeline for all channels.
+// src/channels/prepare-history.ts — Shared history preparation pipeline for all channels.
+// Trims to token budget, merges user/assistant/tool messages in chronological order.
 //
 // Any channel calls prepareHistory({ user, assistant, tool }) and gets back
 // a clean ModelMessage[] that is safe to pass directly to the LLM:

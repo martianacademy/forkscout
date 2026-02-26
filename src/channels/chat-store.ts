@@ -1,5 +1,5 @@
-// src/channels/chat-store.ts
-// Persists per-session ModelMessage[] split by role into separate files.
+// src/channels/chat-store.ts — Persists per-session ModelMessage[] split by role into separate files.
+// Used by all channels.
 // Used by all channels. Each channel prefixes its own session key:
 //   telegram-<chatId>   → Telegram users
 //   terminal-<username> → Terminal (OS user)

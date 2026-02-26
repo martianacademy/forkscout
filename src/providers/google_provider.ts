@@ -1,4 +1,4 @@
-// src/providers/google_provider.ts
+// src/providers/google_provider.ts — Google Generative AI provider (Gemini) via @ai-sdk/google.
 // Google Generative AI provider using the official @ai-sdk/google package.
 // Docs: https://ai-sdk.dev/providers/ai-sdk-providers/google-generative-ai
 
