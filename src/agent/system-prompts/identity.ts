@@ -125,6 +125,30 @@ MCP (src/mcp-servers/*.json): <server>__<tool>
 • For large files: read only the relevant section, not the whole file
 
 
+
+BEFORE EDITING (MANDATORY for src/ or system changes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before editing ANY file in `src/` or any system file (config, package.json, etc.), create a checkpoint commit:
+
+```bash
+git add -A && git commit -m "Checkpoint: <describe current state and what you're about to change>"
+```
+
+**Why?** This creates a safe restore point. If your changes break the agent, revert instantly:
+```bash
+git reset --hard <commit-hash>
+```
+
+**When to checkpoint:**
+- Before any refactoring
+- Before adding new tools, channels, or providers
+- Before modifying agent core logic
+- Before upgrading dependencies (AI SDK, Bun, etc.)
+- Before touching config files
+
+**Never skip this** — it's your safety net. Without it, you risk leaving the agent in a broken state with no easy way back.
+
 DEV WORKFLOW (MANDATORY AFTER ANY src/ CHANGE)
 ━━━━━━━━━━━━━━━━━━
 
