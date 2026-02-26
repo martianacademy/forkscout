@@ -1,13 +1,29 @@
-// src/tools/tts_tools.ts — ElevenLabs TTS tool
+// src/tools/tts_tools.ts — ElevenLabs TTS tool (secure keychain version)
 import { tool } from "ai";
 import { z } from "zod";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
+import { execSync } from "child_process";
 
 export const IS_BOOTSTRAP_TOOL = false;
 
 // Default ElevenLabs API URL
 const DEFAULT_ELEVENLABS_URL = "https://api.elevenlabs.io";
+const KEYCHAIN_SERVICE = "forkscout-elevenlabs";
+
+/**
+ * Get secret from macOS Keychain (secure storage)
+ */
+function getKeychainPassword(service: string): string | null {
+    try {
+        return execSync(`security find-generic-password -wa "${service}"`, {
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"]
+        }).trim();
+    } catch {
+        return null;
+    }
+}
 
 export const tts_tools = tool({
   description: "Convert text to speech using ElevenLabs TTS API and return audio file path.",
@@ -18,11 +34,12 @@ export const tts_tools = tool({
   }),
   execute: async (input) => {
     try {
-      const apiKey = process.env.ELEVENLABS_API_KEY;
+      // Get API key from macOS Keychain (secure storage)
+      const apiKey = getKeychainPassword(KEYCHAIN_SERVICE);
       const apiUrl = process.env.ELEVENLABS_API_URL || DEFAULT_ELEVENLABS_URL;
       
       if (!apiKey) {
-        return { success: false, error: "ELEVENLABS_API_KEY not set in .env" };
+        return { success: false, error: "ElevenLabs API key not found in Keychain. Run: security add-generic-password -a 'forkscout-elevenlabs' -s 'ElevenLabs API Key for ForkScout' -w 'YOUR_KEY'" };
       }
 
       // Default voices based on language
