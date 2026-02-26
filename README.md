@@ -1006,6 +1006,32 @@ docker run -d --name forkscout --restart unless-stopped \
 Only one LLM key is required — whichever provider is set as `llm.provider` in config.
 
 ---
+## Development Workflow
+
+Before making any changes to files in `src/` or system files, always create a checkpoint commit:
+
+```bash
+# Stage all changes and create a checkpoint commit
+git add -A && git commit -m "Checkpoint: <describe current state and what you will change>"
+```
+
+**Why?** This creates a safe restore point. If your changes break the agent, revert with:
+```bash
+git reset --hard <commit-hash>
+```
+
+**When to checkpoint:**
+- Before any refactoring
+- Before adding new tools, channels, or providers
+- Before modifying the agent core logic
+- Before upgrading dependencies (AI SDK, Bun, etc.)
+
+**After making changes, always:**
+1. Run `bun run typecheck` — must pass with no errors
+2. Test with `bun run dev` or `bun start`
+3. If working, continue; if broken, `git reset --hard` to checkpoint and start over
+
+---
 
 ## Scripts
 
