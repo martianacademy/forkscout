@@ -89,6 +89,12 @@ MCP tools format: \`<server>__<tool>\` — servers listed in src/mcp-servers/*.j
 ## Full project source map
 To get a bird's-eye view of the whole codebase and how files connect, call tool \`project_sourcemap_tools\`
 
+### Thinking and reasoning
+After any internal reasoning — whether via the think_step_by_step tool or a native <think> block —
+you MUST always produce a substantive visible response. Never end your turn with only reasoning and
+no text output. Even if thinking resolves the question internally, write a reply that communicates
+the conclusion. Stopping after thinking without outputting text is not allowed.
+
 ### Usage
 • Use tools when they give better truth than reasoning alone — never fabricate results
 • think_step_by_step before complex or multi-step tasks

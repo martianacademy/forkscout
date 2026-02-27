@@ -307,9 +307,15 @@ export async function runAgent(
     // extractReasoningMiddleware should handle this, but on the non-streaming
     // path it can leak into result.text — strip as a safety net.
     const reasoningTag = config.llm.reasoningTag?.trim();
-    const cleanText = reasoningTag
+    const strippedText = reasoningTag
         ? result.text.replace(new RegExp(`<${reasoningTag}>[\\s\\S]*?<\\/${reasoningTag}>\\n?`, "gi"), "").trim()
         : result.text;
+
+    // Safety net: model stopped after thinking and produced no visible text.
+    // Return a notice instead of sending a silent blank reply to the user.
+    const cleanText = strippedText ||
+        "(I finished thinking but produced no response. Please ask again or rephrase.)";
+    if (!strippedText) logger.warn("[runAgent] empty text after reasoning strip — model stopped after thinking");
 
     activity.msgOut(channel ?? "unknown", chatId, cleanText, result.steps?.length ?? 0, Date.now() - startMs);
 
@@ -447,9 +453,13 @@ export async function streamAgent(
                 stream.steps,
             ]);
             const rawText = acc.text;
-            const text = reasoningTag
+            const strippedText = reasoningTag
                 ? rawText.replace(new RegExp(`<${reasoningTag}>[\\s\\S]*?<\\/${reasoningTag}>\\n?`, "gi"), "").trim()
                 : rawText;
+            // Safety net: model stopped after thinking and produced no visible text.
+            const text = strippedText ||
+                "(I finished thinking but produced no response. Please ask again or rephrase.)";
+            if (!strippedText) logger.warn("[streamAgent] empty text after reasoning strip — model stopped after thinking");
             activity.msgOut(channel ?? "unknown", chatId, text, (steps as any)?.length ?? 0, Date.now() - startMs);
             return {
                 text,

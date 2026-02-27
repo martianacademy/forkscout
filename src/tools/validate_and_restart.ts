@@ -2,52 +2,51 @@
 // Safe self-restart tool for the agent.
 //
 // Flow (current agent stays alive throughout until the test passes):
-//   1. Run `bun run typecheck` — abort immediately if TS errors found
+//   1. Run TypeScript typecheck
 //   2. Spawn a SEPARATE CLI process with a smoke message — current agent keeps running
 //   3. Smoke test must produce non-empty output within timeout
-//   4. ONLY if smoke passes: kill existing instances → start fresh production process
-//   5. If smoke fails: return error report — nothing was killed, agent keeps running
+//   4. Only if the test passes does it kill the current agent and start fresh.
+//   5. After new agent starts, notify owner via Telegram.
+//
+// "If anything fails the current agent keeps running — use this instead of bun run safe-restart or bun start."
 
 import { tool } from "ai";
 import { z } from "zod";
-import { spawnSync, spawn } from "child_process";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
-import { existsSync, appendFileSync } from "fs";
+import { spawn, spawnSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
+
+const ROOT = process.cwd();
+const AGENT_LOG = `${ROOT}/.forkscout/agent.log`;
+const SMOKE_LOG = `${ROOT}/.forkscout/smoke.log`;
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const OWNER_ID = OWNER_CHAT_ID; // From .forkscout/auth.json
 
 export const IS_BOOTSTRAP_TOOL = false;
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const AGENT_LOG = "/tmp/forkscout.log";
-const SMOKE_LOG = "/tmp/forkscout-validate-smoke.log";
+const inputSchema = z.object({
+    reason: z.string().describe("Why a restart is needed (shown in logs)"),
+    smoke_message: z
+        .string()
+        .default("reply with only the single word: ok")
+        .describe("Custom test message to send to the new process"),
+    timeout_seconds: z
+        .number()
+        .default(90)
+        .describe("Seconds to wait for smoke test response"),
+});
 
 export const validate_and_restart = tool({
     description:
-        "Safely restart the agent after code changes. " +
-        "Runs typecheck then boots a SEPARATE test process (current agent stays alive). " +
-        "Only if the test passes does it kill the current agent and start fresh. " +
-        "If anything fails the current agent keeps running — use this instead of bun run safe-restart or bun start.",
-    inputSchema: z.object({
-        reason: z.string().describe("Why a restart is needed (shown in logs)"),
-        smoke_message: z
-            .string()
-            .optional()
-            .describe(
-                "Custom test message to send to the new process. Default: 'reply with only the single word: ok'"
-            ),
-        timeout_seconds: z
-            .number()
-            .optional()
-            .describe("Seconds to wait for smoke test response. Default: 90"),
-    }),
-    execute: async (input) => {
-        const smokeMsg = input.smoke_message ?? "reply with only the single word: ok";
-        const timeoutSec = input.timeout_seconds ?? 90;
+        "Safely restart the agent after code changes. Runs typecheck then boots a SEPARATE test process (current agent stays alive). Only if the test passes does it kill the current agent and start fresh. After restart, automatically notifies the owner that the agent is back online.",
+    inputSchema: inputSchema as any,
+    execute: async (input: z.infer<typeof inputSchema>) => {
+        const smokeMsg = input.smoke_message;
+        const timeoutSec = input.timeout_seconds;
 
         log(`Validate-and-restart triggered: ${input.reason}`);
 
         // ── Step 1: Typecheck ──────────────────────────────────────────────────
-        log("Step 1/3: Running typecheck...");
+        log("Step 1/4: Running typecheck...");
         const tc = spawnSync("bun", ["run", "--bun", "tsc", "--noEmit"], {
             cwd: ROOT,
             encoding: "utf-8",
@@ -67,7 +66,7 @@ export const validate_and_restart = tool({
         log("Typecheck passed ✓");
 
         // ── Step 2: Smoke test in separate process (agent stays alive) ─────────
-        log(`Step 2/3: Smoke testing new code (timeout ${timeoutSec}s)...`);
+        log(`Step 2/4: Smoke testing new code (timeout ${timeoutSec}s)...`);
         const smokeResult = await runSmokeTest(smokeMsg, timeoutSec);
 
         if (!smokeResult.passed) {
@@ -82,28 +81,8 @@ export const validate_and_restart = tool({
         }
         log(`Smoke test passed ✓ (response: "${smokeResult.output.slice(0, 80)}")`);
 
-        // ── Step 3: Kill current + start fresh ────────────────────────────────
-        log("Step 3/3: Smoke passed — scheduling deferred restart...");
-
-        // Notify owners BEFORE killing — agent is still alive here.
-        try {
-            const authPath = resolve(ROOT, ".forkscout/auth.json");
-            const { readFileSync: rfs } = await import("fs");
-            const auth = JSON.parse(rfs(authPath, "utf-8"));
-            const ownerChatIds: number[] = auth?.telegram?.ownerUserIds ?? [];
-            const botToken = process.env.TELEGRAM_BOT_TOKEN;
-            if (botToken && ownerChatIds.length > 0) {
-                const { sendMessage } = await import("@/channels/telegram/api.ts");
-                const escapedReason = input.reason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                for (const chatId of ownerChatIds) {
-                    await sendMessage(
-                        botToken, chatId,
-                        `🔄 <b>Agent restarting…</b>\n<i>Reason: ${escapedReason}</i>`,
-                        "HTML"
-                    ).catch(() => { });
-                }
-            }
-        } catch { /* no auth file or send failed — continue with restart */ }
+        // ── Step 3: Kill current + start fresh ─────────────────────────────────
+        log("Step 3/4: Smoke passed — scheduling deferred restart...");
 
         // CRITICAL: this tool runs INSIDE the agent process.
         // Calling `pkill -f src/index.ts` here kills ourselves mid-execution,
@@ -111,9 +90,6 @@ export const validate_and_restart = tool({
         // Fix: write a detached shell script that waits 2s (lets this response
         // flush to Telegram), then kills the old process and starts fresh.
         spawnSync("git", ["tag", "-f", "forkscout-last-good", "HEAD"], { cwd: ROOT });
-
-        // Encode reason safely for shell env var (no single-quotes inside)
-        const safeReason = input.reason.replace(/'/g, "'\\''");
 
         const restartScript = [
             "#!/bin/sh",
@@ -123,9 +99,15 @@ export const validate_and_restart = tool({
             "lsof -ti :3200 | xargs kill -9 2>/dev/null || true",
             "sleep 2",
             `echo "[validate_and_restart] Starting fresh agent -- $(date -u)" >> ${AGENT_LOG}`,
-            // Pass restart reason via env — new agent sends Telegram notification itself
-            `cd ${ROOT} && DEVTOOLS=1 FORKSCOUT_RESTART_REASON='${safeReason}' nohup bun run src/index.ts >> ${AGENT_LOG} 2>&1 &`,
+            `cd ${ROOT} && DEVTOOLS=1 nohup bun run src/index.ts >> ${AGENT_LOG} 2>&1 &`,
             `echo "[validate_and_restart] Fresh agent spawned (PID $!)" >> ${AGENT_LOG}`,
+            "",
+            "# Step 4: Wait for new agent to be ready, then notify owner",
+            "sleep 5",
+            `curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \\`,
+            `   -d "chat_id=${OWNER_ID}" \\`,
+            `   -d "text=✅ *ForkScout is back online!*\\n\\nReason: ${input.reason.replace(/"/g, '\\"')}\\n\\nSmoke test: ✓ passed" \\`,
+            `   --max-time 10 >> ${AGENT_LOG} 2>&1 || true`,
         ].join("\n");
 
         const scriptPath = "/tmp/forkscout-restart.sh";
@@ -139,10 +121,10 @@ export const validate_and_restart = tool({
         });
         restarter.unref();
 
-        log(`Restart script spawned (PID ${restarter.pid}). Agent will reload in ~4s. Log: ${AGENT_LOG}`);
+        log(`Restart script spawned (PID ${restarter.pid}). Log: ${AGENT_LOG}`);
         return {
             success: true,
-            message: `Restart scheduled (PID ${restarter.pid}). Old instance will be replaced in ~4 seconds. Reason: ${input.reason}`,
+            message: `Restart scheduled (PID ${restarter.pid}). Reason: ${input.reason}`,
             smoke_response: smokeResult.output.trim(),
         };
     },
@@ -224,23 +206,10 @@ function runSmokeTest(message: string, timeoutSec: number): Promise<SmokeResult>
         // Hard timeout — last resort if process never responds or closes
         const hardTimer = setTimeout(() => {
             if (output.trim().length > 0) {
-                finish(true, `responded within ${timeoutSec}s timeout`);
+                finish(true, "timeout but output received");
             } else {
-                finish(false, `No output after ${timeoutSec}s — process may have crashed`);
+                finish(false, `timeout after ${timeoutSec}s with no output`);
             }
-        }, timeoutSec * 1000);
-
-        child.on("error", (err) => {
-            finish(false, `Spawn error: ${err.message}`);
-        });
-
-        child.on("close", (code) => {
-            if (settled) return;
-            if (output.trim().length > 0) {
-                finish(true, `process exited (code ${code}) with output`);
-            } else {
-                finish(false, `process exited (code ${code}) with no output`);
-            }
-        });
+        }, timeoutSec * 1_000);
     });
 }
