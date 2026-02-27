@@ -92,6 +92,25 @@ export const validate_and_restart = tool({
         // flush to Telegram), then kills the old process and starts fresh.
         spawnSync("git", ["tag", "-f", "forkscout-last-good", "HEAD"], { cwd: ROOT });
 
+        // Read owner chat IDs from auth.json for post-restart notification
+        let ownerChatIds: number[] = [];
+        try {
+            const authPath = resolve(ROOT, ".forkscout/auth.json");
+            const { readFileSync } = await import("fs");
+            const auth = JSON.parse(readFileSync(authPath, "utf-8"));
+            ownerChatIds = auth?.telegram?.ownerUserIds ?? [];
+        } catch { /* no auth file — no notification */ }
+
+        const botToken = process.env.TELEGRAM_BOT_TOKEN ?? "";
+
+        // Build curl notification lines — one per owner chat ID
+        const notifyLines = ownerChatIds.map((chatId) =>
+            `curl -s -X POST "https://api.telegram.org/bot${botToken}/sendMessage" ` +
+            `-d "chat_id=${chatId}" ` +
+            `-d "text=✅ Agent restarted successfully.%0AReason: ${encodeURIComponent(input.reason)}" ` +
+            `>> ${AGENT_LOG} 2>&1 || true`
+        );
+
         const restartScript = [
             "#!/bin/sh",
             "sleep 2",
@@ -102,6 +121,12 @@ export const validate_and_restart = tool({
             `echo "[validate_and_restart] Starting fresh agent -- $(date -u)" >> ${AGENT_LOG}`,
             `cd ${ROOT} && DEVTOOLS=1 nohup bun run src/index.ts >> ${AGENT_LOG} 2>&1 &`,
             `echo "[validate_and_restart] Fresh agent spawned (PID $!)" >> ${AGENT_LOG}`,
+            // Wait for new agent to be ready, then notify owners
+            ...(notifyLines.length > 0 ? [
+                "sleep 6",
+                `echo "[validate_and_restart] Sending restart notification to ${ownerChatIds.length} owner(s)" >> ${AGENT_LOG}`,
+                ...notifyLines,
+            ] : []),
         ].join("\n");
 
         const scriptPath = "/tmp/forkscout-restart.sh";
