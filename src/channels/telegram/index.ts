@@ -148,6 +148,19 @@ async function start(config: AppConfig): Promise<void> {
         savedRequests.filter((r) => r.status === "approved" && r.role === "admin").map((r) => r.userId)
     );
 
+    // If this process was started by validate_and_restart, notify owners that the agent is back.
+    const restartReason = process.env.FORKSCOUT_RESTART_REASON;
+    if (restartReason) {
+        logger.info(`Restarted — notifying ${config.telegram.ownerUserIds.length} owner(s)`);
+        for (const chatId of config.telegram.ownerUserIds) {
+            await sendMessage(
+                token, chatId,
+                `✅ <b>Agent restarted successfully.</b>\n<i>Reason: ${restartReason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>`,
+                "HTML"
+            ).catch(() => { });
+        }
+    }
+
     logger.info("Starting long-poll...");
 
     let offset = 0;
