@@ -361,3 +361,33 @@ export async function sendPoll(
         return null;
     }
 }
+// ── Bot command menu ───────────────────────────────────────────────────────────
+
+export interface BotCommand {
+    command: string;
+    description: string;
+}
+
+export interface BotCommandScope {
+    type: string;
+    chat_id?: number;
+}
+
+/**
+ * Register commands in Telegram's bot command menu (the "/" autocomplete).
+ * Pass `scope` to target a specific chat (e.g. owner-only commands).
+ * Silently ignores failures — command menu is cosmetic, not critical.
+ */
+export async function setMyCommands(
+    token: string,
+    commands: BotCommand[],
+    scope?: BotCommandScope
+): Promise<void> {
+    const body: Record<string, unknown> = { commands };
+    if (scope) body.scope = scope;
+    await fetch(`${BASE}${token}/setMyCommands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    }).catch(() => { });
+}

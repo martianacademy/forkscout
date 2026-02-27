@@ -16,6 +16,7 @@ import {
     editMessage,
     deleteMessage,
     setMessageReaction,
+    setMyCommands,
 } from "@/channels/telegram/api.ts";
 import { mdToHtml, splitMarkdown, stripHtml } from "@/channels/telegram/format.ts";
 import { compileTelegramMessage } from "@/channels/telegram/compile-message.ts";
@@ -162,6 +163,28 @@ async function start(config: AppConfig): Promise<void> {
     }
 
     logger.info("Starting long-poll...");
+
+    // Register bot commands in Telegram's "/" autocomplete menu
+    const generalCommands = [
+        { command: "start", description: "Start the bot" },
+        { command: "secret", description: "Manage encrypted secrets (store, list, delete, env, sync)" },
+    ];
+    const ownerCommands = [
+        ...generalCommands,
+        { command: "restart", description: "Safely restart the agent" },
+        { command: "whoami", description: "Show your user ID and role" },
+        { command: "allow", description: "Approve a pending access request" },
+        { command: "deny", description: "Deny an access request" },
+        { command: "pending", description: "List pending access requests" },
+        { command: "requests", description: "Show all access requests" },
+    ];
+    // All users see the general commands
+    await setMyCommands(token, generalCommands);
+    // Each owner gets the extended owner command set scoped to their chat
+    for (const ownerId of config.telegram.ownerUserIds) {
+        await setMyCommands(token, ownerCommands, { type: "chat", chat_id: ownerId });
+    }
+    logger.info("Bot commands registered in Telegram menu.");
 
     let offset = 0;
 
