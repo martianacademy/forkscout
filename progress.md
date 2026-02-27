@@ -1,6 +1,78 @@
 # ForkScout Agent — Progress Tracker
 
-> Last updated: 25 February 2026 — Priority 1 (Logging) + Priority 2a (Telegram auth + access requests) + Priority 4 (read_folder_standards tool) complete | Autonomy roadmap redesigned (23 priorities, 4 phases)
+> Last updated: 27 February 2026 — Agent thinking/silent-stop bugs fixed | Restart notification formatting fixed | Git history cleaned (hardcoded owner ID removed) | Repo consolidated to single `main` branch
+
+---
+
+## 🆕 Session — 27 February 2026
+
+### ✅ Agent Silent-Stop After Thinking — FIXED
+
+**Problem**: Agent would think (native `<think>` block) then silently stop — no response, no tool call. User got blank reply.
+
+**Root cause**: Native `<think>` blocks run outside the AI SDK tool loop — the SDK has no hook to enforce a follow-up. Model could finish reasoning and simply end its turn.
+
+**Fix (3-layer)**:
+
+1. `identity.ts` — explicit rule: use `think_step_by_step_tools` for planning, NOT native `<think>`. Tool calls force an SDK step, guaranteeing a follow-up.
+2. `think_step_by_step_tools.ts` — description strengthened: "after this tool returns you MUST follow up". Return value now includes `instruction: "Now act on the plan above"` so the model sees its plan and is pushed to act.
+3. `agent/index.ts` — code-level safety net: if `cleanText` is empty after reasoning strip, returns `"(I finished thinking but produced no response...)"` instead of blank. Logs a warning.
+
+**Commits**: `543f59c`, `3789dda`, `9a21158`
+
+---
+
+### ✅ Restart Notification Formatting — FIXED
+
+**Problem**: After `validate_and_restart`, user received: `✅ *ForkScout is back online!*\n\nReason: ...` — literal `\n`, no formatting.
+
+**Root cause**: Restart shell script used `curl -d "text=...\n\n..."` — bash double-quotes don't expand `\n` as newline. Also had no `parse_mode`, so `*bold*` was shown as-is. This was a duplicate notification — the proper one already existed in `telegram/index.ts` startup.
+
+**Fix**: Removed curl notification entirely. New agent now starts with `FORKSCOUT_RESTART_REASON='...'` env var. `telegram/index.ts` startup notification fires automatically — already uses HTML parse mode with proper newlines and escaping. Also removed hardcoded `BOT_TOKEN` and `OWNER_ID` constants.
+
+**Commit**: `7798284`
+
+---
+
+### ✅ Hardcoded Owner Chat ID Removed from Git History
+
+**Problem**: `OWNER_ID = 961713986` was hardcoded in 3 commits — visible on GitHub.
+
+**Fix**: `git filter-repo --replace-text` rewrote all 282 commits replacing ID with `OWNER_CHAT_ID`. Force pushed to `origin/rewrite` → then merged into `main`.
+
+---
+
+### ✅ Repo Consolidated to Single `main` Branch
+
+- `rewrite` branch merged into `main`, force pushed, deleted (local + remote)
+- `feat/intelligence-upgrades` and `feat/plugin-system` local branches deleted
+- Only `main` + `origin/main` remain
+
+---
+
+## 🎯 Next Targets
+
+### Target 1 — Priority 5: Error Classification (Quick win, ~1hr)
+
+Raw SDK errors still leak to users in Telegram (e.g. stack traces, "401 Unauthorized"). Create `src/llm/error-classifier.ts` — map HTTP codes to clean user-facing messages. Pipe through both channel catch blocks.
+
+### Target 2 — Priority 2b: Memory Auto-Bridging
+
+Agent has forkscout-memory MCP connected but never auto-saves facts. After each turn, fire a background job to extract + save key facts. Prevents context loss on history trim.
+
+### Target 3 — Agent Self-Improvement Loop
+
+Agent should periodically review its own activity log, identify repeated failures/patterns, and update its own system prompt extension (`config.agent.systemPromptExtra`) or create new tools to fix them. True autonomy milestone.
+
+### Target 4 — Priority 6: Tests
+
+Zero test coverage. At minimum: `discoverTools()`, `loadConfig()`, `getProvider()` for all 9 providers, and one integration test with mock LLM.
+
+### Target 5 — Priority 7: Voice Channel
+
+ElevenLabs TTS+STT already installed. Voice channel would complete the multi-channel goal.
+
+---
 
 ---
 
