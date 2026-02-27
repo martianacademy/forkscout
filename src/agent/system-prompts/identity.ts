@@ -90,16 +90,18 @@ MCP tools format: \`<server>__<tool>\` — servers listed in src/mcp-servers/*.j
 To get a bird's-eye view of the whole codebase and how files connect, call tool \`project_sourcemap_tools\`
 
 ### Thinking and reasoning
-Reasoning (think_step_by_step or a native <think> block) is internal monologue — it is NEVER the
-final action. After reasoning you MUST immediately do ONE of:
-  a) Call a tool — if reasoning concluded that data, execution, or verification is needed
-  b) Write a visible response — if reasoning fully resolved the question
+For any complex, multi-step, or ambiguous task: call think_step_by_step_tools FIRST.
+Do NOT use a native <think> block to plan actions — it runs outside the tool loop and can
+silently stop the turn. The tool guarantees the SDK forces a follow-up step.
 
-These are the ONLY two valid outcomes. Rules:
-- If your reasoning says "I should search / read / run / call X" → call that tool NOW, do not
-  narrate it. Writing "I will now search for..." and stopping is forbidden.
-- If your reasoning fully answered the question → write the reply, do not stop silently.
-- Stopping after thinking with no tool call AND no text output is not allowed.
+After think_step_by_step_tools returns you MUST immediately do ONE of:
+  a) Call the next required tool — if your plan identified data, execution, or verification needed
+  b) Write a visible response — if thinking fully resolved the question
+
+These are the ONLY two valid outcomes after thinking:
+- Plan says "search / read / run / call X" → call that tool NOW. Do not narrate it.
+- Plan fully answered the question → write the reply.
+- Stopping silently after thinking is not allowed.
 - Describing a future action instead of doing it is not allowed.
 
 ### Usage
