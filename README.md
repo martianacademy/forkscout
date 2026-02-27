@@ -713,18 +713,43 @@ If user messages after denial: "⛔ Your request was denied."
 
 ## Telegram Commands
 
-All commands work for **owners only** (except `/start` which is open to all).
+All commands work for **owners only** (except `/start` which is open to all). Commands are registered in Telegram's autocomplete menu at startup, scoped per owner chat — other users see no command list until explicitly opened up.
 
-| Command                 | Description                                        |
-| ----------------------- | -------------------------------------------------- |
-| `/start`                | Greeting message. Available to all users.          |
-| `/whoami`               | Shows your userId, chatId, and confirms owner role |
-| `/allow <userId>`       | Approve a user with `user` role                    |
-| `/allow <userId> admin` | Approve a user with `admin` (owner) role           |
-| `/deny <userId>`        | Deny an access request                             |
-| `/pending`              | List all pending access requests                   |
-| `/requests`             | List all access requests with status and role      |
-| `/restart`              | Blue-green restart with typecheck + health check   |
+### General
+
+| Command   | Description                                                                                  |
+| --------- | -------------------------------------------------------------------------------------------- |
+| `/start`  | Greeting message. Available to all users before authentication.                              |
+| `/whoami` | Shows your Telegram user ID, chat ID, and confirms your current role (owner / admin / user). |
+
+### Access Control
+
+| Command                 | Description                                                               |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `/allow <userId>`       | Approve a pending access request and grant the user `user` role.          |
+| `/allow <userId> admin` | Approve a pending access request and grant the user `admin` (owner) role. |
+| `/deny <userId>`        | Reject a pending access request.                                          |
+| `/pending`              | List all users with a pending access request, including their username.   |
+| `/requests`             | List all access requests with their current status and assigned role.     |
+
+### Agent Management
+
+| Command    | Description                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `/restart` | Trigger a blue-green restart: runs typecheck, starts new instance, health-checks, then kills old. |
+
+### Secret Vault
+
+| Command                          | Description                                                                                         |
+| -------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `/secret store <alias> <value>`  | Encrypt and store a secret under the given alias. The message is immediately deleted from Telegram. |
+| `/secret list`                   | List all stored secret aliases (values are never shown).                                            |
+| `/secret delete <alias>`         | Delete a stored secret by alias.                                                                    |
+| `/secret env <VAR_NAME> [alias]` | Import an environment variable from the server into the vault. Value never passes through Telegram. |
+| `/secret sync`                   | Import all variables from the server's `.env` file into the vault at once.                          |
+| `/secret help`                   | Show all `/secret` subcommands and usage.                                                           |
+
+Secrets are stored AES-256-GCM encrypted in `.forkscout/vault.enc.json` (gitignored). The agent uses `{{secret:alias}}` placeholders in tool calls — raw values are never passed through Telegram or visible in logs.
 
 ---
 
