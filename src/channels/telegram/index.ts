@@ -433,8 +433,9 @@ async function handleMessage(
                 firstToken = false;
                 thinkingActive = false;
                 if (thinkingMsgId) {
-                    await deleteMessage(token, chatId, thinkingMsgId).catch(() => { });
-                    thinkingMsgId = null;
+                    const _id = thinkingMsgId;
+                    thinkingMsgId = null; // null first — prevents loop from editing a deleted message
+                    await deleteMessage(token, chatId, _id).catch(() => { });
                 }
                 thinkingSuffix = "";
             }
@@ -449,8 +450,9 @@ async function handleMessage(
     } finally {
         thinkingActive = false;
         if (thinkingMsgId) {
-            await deleteMessage(token, chatId, thinkingMsgId).catch(() => { });
-            thinkingMsgId = null;
+            const _id = thinkingMsgId;
+            thinkingMsgId = null; // null first — prevents loop from editing a deleted message
+            await deleteMessage(token, chatId, _id).catch(() => { });
         }
         if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
         await thinkingLoop;
