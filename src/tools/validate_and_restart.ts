@@ -83,36 +83,42 @@ export const validate_and_restart = tool({
         log(`Smoke test passed ✓ (response: "${smokeResult.output.slice(0, 80)}")`);
 
         // ── Step 3: Kill current + start fresh ────────────────────────────────
-        log("Step 3/3: Smoke passed — stopping current agent and starting fresh...");
+        log("Step 3/3: Smoke passed — scheduling deferred restart...");
 
-        // Kill existing by process name
-        spawnSync("pkill", ["-9", "-f", "src/index.ts"], { cwd: ROOT });
-        spawnSync("pkill", ["-9", "-f", "forkscout-agent"], { cwd: ROOT });
-
-        // Force-kill whatever holds the HTTP port (belt-and-suspenders).
-        // This catches any edge case where pkill didn't match the exact cmdline.
-        const port = 3200; // must match config.self.httpPort default
-        spawnSync("sh", ["-c", `lsof -ti :${port} | xargs kill -9 2>/dev/null || true`], { cwd: ROOT });
-
-        await sleep(2000); // give OS time to release socket
-
-        // Tag HEAD as last-known-good
+        // CRITICAL: this tool runs INSIDE the agent process.
+        // Calling `pkill -f src/index.ts` here kills ourselves mid-execution,
+        // before spawn() completes — new agent never starts.
+        // Fix: write a detached shell script that waits 2s (lets this response
+        // flush to Telegram), then kills the old process and starts fresh.
         spawnSync("git", ["tag", "-f", "forkscout-last-good", "HEAD"], { cwd: ROOT });
 
-        // Start fresh detached process
-        appendFileSync(AGENT_LOG, `\n[validate_and_restart] Starting fresh agent — ${new Date().toISOString()}\n`);
-        const child = spawn("bun", ["run", "src/index.ts"], {
-            cwd: ROOT,
-            detached: true,
-            stdio: ["ignore", "ignore", "ignore"],
-            env: { ...process.env, DEVTOOLS: "1" },
-        });
-        child.unref();
+        const restartScript = [
+            "#!/bin/sh",
+            "sleep 2",
+            "pkill -9 -f 'src/index.ts' 2>/dev/null || true",
+            "pkill -9 -f 'forkscout-agent' 2>/dev/null || true",
+            "lsof -ti :3200 | xargs kill -9 2>/dev/null || true",
+            "sleep 2",
+            `echo "[validate_and_restart] Starting fresh agent -- $(date -u)" >> ${AGENT_LOG}`,
+            `cd ${ROOT} && DEVTOOLS=1 nohup bun run src/index.ts >> ${AGENT_LOG} 2>&1 &`,
+            `echo "[validate_and_restart] Fresh agent spawned (PID $!)" >> ${AGENT_LOG}`,
+        ].join("\n");
 
-        log(`Fresh agent started (PID ${child.pid}). Log: ${AGENT_LOG}`);
+        const scriptPath = "/tmp/forkscout-restart.sh";
+        const { writeFileSync: wfs, chmodSync } = await import("fs");
+        wfs(scriptPath, restartScript, "utf-8");
+        chmodSync(scriptPath, 0o755);
+
+        const restarter = spawn("sh", [scriptPath], {
+            detached: true,
+            stdio: "ignore",
+        });
+        restarter.unref();
+
+        log(`Restart script spawned (PID ${restarter.pid}). Agent will reload in ~4s. Log: ${AGENT_LOG}`);
         return {
             success: true,
-            message: `Agent restarted successfully (PID ${child.pid}). Reason: ${input.reason}`,
+            message: `Restart scheduled (PID ${restarter.pid}). Old instance will be replaced in ~4 seconds. Reason: ${input.reason}`,
             smoke_response: smokeResult.output.trim(),
         };
     },
