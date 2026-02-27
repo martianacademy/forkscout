@@ -77,33 +77,93 @@ export function stripHtml(html: string): string {
 }
 
 /**
- * Telegram has a 4096-char limit per message.
- * Split on paragraph breaks, keeping chunks under the limit.
+ * Split raw Markdown into chunks under `limit` chars.
+ *
+ * Fenced code blocks (``` ... ```) are treated as atomic units and are never
+ * split mid-block, which avoids producing unbalanced <pre><code> tags when
+ * each chunk is later passed through mdToHtml().
+ *
+ * Usage pattern:
+ *   const chunks = splitMarkdown(rawText).map(mdToHtml);
+ *
+ * Replaces the old splitMessage(html) pattern which split post-conversion and
+ * could bisect HTML tags, producing "Unexpected end tag" errors in Telegram.
  */
-export function splitMessage(text: string, limit = 4000): string[] {
-    if (text.length <= limit) return [text];
+export function splitMarkdown(md: string, limit = 4000): string[] {
+    if (md.length <= limit) return [md];
+
+    // Tokenize: fenced code blocks are "atomic" (unsplittable), everything else is "splittable"
+    const tokens: { text: string; atomic: boolean }[] = [];
+    const fenceRe = /```[\w]*\n[\s\S]*?```/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    fenceRe.lastIndex = 0;
+    while ((match = fenceRe.exec(md)) !== null) {
+        if (match.index > lastIndex) {
+            tokens.push({ text: md.slice(lastIndex, match.index), atomic: false });
+        }
+        tokens.push({ text: match[0], atomic: true });
+        lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < md.length) {
+        tokens.push({ text: md.slice(lastIndex), atomic: false });
+    }
 
     const chunks: string[] = [];
-    const paragraphs = text.split(/\n\n+/);
     let current = "";
 
-    for (const para of paragraphs) {
-        const next = current ? `${current}\n\n${para}` : para;
-        if (next.length > limit) {
-            if (current) chunks.push(current);
-            // If a single paragraph is too long, hard-split it
-            if (para.length > limit) {
-                for (let i = 0; i < para.length; i += limit) {
-                    chunks.push(para.slice(i, i + limit));
-                }
+    const pushChunk = (s: string) => { if (s.trim()) chunks.push(s.trim()); };
+    const appendToCurrent = (s: string) => {
+        current = current ? `${current}\n\n${s}` : s;
+    };
+
+    for (const tok of tokens) {
+        if (tok.atomic) {
+            // Atomic block: try to fit in current chunk; otherwise flush and start fresh
+            if (current && current.length + 2 + tok.text.length > limit) {
+                pushChunk(current);
                 current = "";
+            }
+            if (tok.text.length > limit) {
+                // Oversized code block: hard-split (rare, accepts degraded formatting)
+                if (current) { pushChunk(current); current = ""; }
+                for (let i = 0; i < tok.text.length; i += limit) {
+                    pushChunk(tok.text.slice(i, i + limit));
+                }
             } else {
-                current = para;
+                appendToCurrent(tok.text);
             }
         } else {
-            current = next;
+            // Non-atomic prose: split on blank lines
+            const paragraphs = tok.text.split(/\n\n+/);
+            for (const para of paragraphs) {
+                if (!para.trim()) continue;
+                const next = current ? `${current}\n\n${para}` : para;
+                if (next.length > limit) {
+                    if (current) { pushChunk(current); current = ""; }
+                    if (para.length > limit) {
+                        for (let i = 0; i < para.length; i += limit) {
+                            pushChunk(para.slice(i, i + limit));
+                        }
+                    } else {
+                        current = para;
+                    }
+                } else {
+                    current = next;
+                }
+            }
         }
     }
-    if (current) chunks.push(current);
-    return chunks;
+    if (current.trim()) chunks.push(current.trim());
+    return chunks.length ? chunks : [md];
+}
+
+/**
+ * @deprecated Use splitMarkdown(text).map(mdToHtml) instead.
+ * Splits already-converted HTML, which can bisect tags inside <pre> blocks.
+ * Kept for any callers that haven't been migrated yet.
+ */
+export function splitMessage(text: string, limit = 4000): string[] {
+    return splitMarkdown(text, limit);
 }

@@ -17,7 +17,7 @@ import {
     deleteMessage,
     setMessageReaction,
 } from "@/channels/telegram/api.ts";
-import { mdToHtml, splitMessage, stripHtml } from "@/channels/telegram/format.ts";
+import { mdToHtml, splitMarkdown, stripHtml } from "@/channels/telegram/format.ts";
 import { compileTelegramMessage } from "@/channels/telegram/compile-message.ts";
 import { prepareHistory, type StoredMessage } from "@/channels/prepare-history.ts";
 import { log } from "@/logs/logger.ts";
@@ -495,8 +495,10 @@ async function handleMessage(
         return;
     }
 
-    const html = mdToHtml(replyText);
-    const chunks = splitMessage(html);
+    // Split raw markdown first (protecting fenced code blocks), then convert each
+    // chunk to HTML independently. This ensures tags are always balanced — the old
+    // splitMessage(html) pattern could bisect <pre><code> blocks containing \n\n.
+    const chunks = splitMarkdown(replyText).map(mdToHtml);
 
     if (chunks.length === 1) {
         // Single chunk — upgrade the existing message in-place
@@ -813,8 +815,7 @@ async function handleRestart(token: string, chatId: number): Promise<void> {
         runAgent(getConfig(), { userMessage: diagTask, meta: { channel: "telegram", chatId } })
             .then(async (result) => {
                 if (!result.text) return;
-                const html = mdToHtml(result.text);
-                for (const chunk of splitMessage(html)) {
+                for (const chunk of splitMarkdown(result.text).map(mdToHtml)) {
                     await sendMessage(token, chatId, chunk, "HTML").catch(() => sendMessage(token, chatId, stripHtml(chunk)));
                 }
             })

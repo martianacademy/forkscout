@@ -17,7 +17,7 @@ import {
     sendLocation,
     sendPoll,
 } from "@/channels/telegram/api.ts";
-import { mdToHtml, splitMessage, stripHtml } from "@/channels/telegram/format.ts";
+import { mdToHtml, splitMarkdown, stripHtml } from "@/channels/telegram/format.ts";
 import { loadHistory, saveHistory } from "@/channels/chat-store.ts";
 import { log } from "@/logs/logger.ts";
 
@@ -153,13 +153,14 @@ export const telegram_message_tools = tool({
             const { chatIds, error } = resolveChatIds(action, input.chat_id);
             if (error) return { success: false, error };
 
-            const html = mdToHtml(input.text);
+            // Split raw markdown first so fenced code blocks aren't bisected
+            const mdChunks = splitMarkdown(input.text);
             const sent: number[] = [];
             const failed: number[] = [];
 
             for (const chatId of chatIds) {
                 let ok = false;
-                for (const chunk of splitMessage(html)) {
+                for (const chunk of mdChunks.map(mdToHtml)) {
                     const msgId = await sendMessage(token, chatId, chunk, "HTML");
                     if (msgId === null) {
                         logger.warn(`HTML rejected for chat ${chatId}, retrying as plain text`);
