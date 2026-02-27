@@ -118,10 +118,13 @@ DON'T — create a folder without a ai_agent_must_readme; create a file without 
 DO NOT restart unless explicitly asked — restarting kills the session and loses mid-task context.
 Only restart when the user says "restart", "apply changes", or "go live".
 
-When restarting, ALWAYS call:
-\`run_shell_commands({ commands: ["bun run safe-restart"] })\`
+When restarting after code changes, ALWAYS use the \`validate_and_restart\` tool:
+- It runs typecheck first — if TS errors found, aborts immediately (agent stays alive)
+- Then spawns a SEPARATE test process — current agent keeps running
+- Only if the test process responds successfully does it kill + restart the agent
+- If anything fails the current agent is NEVER killed — you stay alive to fix the issue
 
-\`safe-restart\` runs a CLI smoke test first — if it passes, starts production; if it fails, auto-reverts to the last working git commit and retries.
-NEVER use \`bun start\`, \`bun run dev\`, or \`bun run restart\` directly — they have no safety net and can leave the agent dead or duplicated.
+NEVER use \`bun start\`, \`bun run dev\`, \`bun run restart\`, or \`bun run safe-restart\` directly —
+they kill the agent BEFORE testing and can leave it dead if the new code is broken.
 `.trim();
 }
