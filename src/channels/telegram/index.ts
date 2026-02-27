@@ -698,11 +698,15 @@ async function handleSecretCommand(token: string, chatId: number, text: string):
             `🔐 <b>Secret Vault</b>\n\n` +
             `<code>/secret store &lt;alias&gt; &lt;value&gt;</code>\n` +
             `  Save a secret. Use <code>{{secret:alias}}</code> in any message.\n\n` +
+            `<code>/secret env &lt;ENV_VAR&gt; [alias]</code>\n` +
+            `  Import a server-side env var — value never travels through Telegram.\n\n` +
+            `<code>/secret sync</code>\n` +
+            `  Import ALL env vars from .env file into the vault at once.\n\n` +
             `<code>/secret list</code>\n` +
             `  Show stored alias names (values never shown).\n\n` +
             `<code>/secret delete &lt;alias&gt;</code>\n` +
             `  Remove an alias from the vault.\n\n` +
-            `⚠️ This message and your /secret messages are deleted immediately — the value never stays in chat.`,
+            `⚠️ Your /secret messages are deleted immediately — values never stay in chat.`,
             "HTML"
         );
         return;
@@ -758,6 +762,78 @@ async function handleSecretCommand(token: string, chatId: number, text: string):
             deleted ? `🗑️ Secret <code>${alias}</code> deleted.` : `⚠️ Alias <code>${alias}</code> not found.`,
             "HTML"
         );
+        return;
+    }
+
+    // /secret env <ENV_VAR_NAME> [alias]
+    // Reads the value from process.env server-side — value never travels through Telegram.
+    if (sub === "env") {
+        const envVar = parts[2];
+        if (!envVar) {
+            await sendMessage(token, chatId,
+                `⚠️ Usage: <code>/secret env &lt;ENV_VAR_NAME&gt; [alias]</code>\n` +
+                `Example: <code>/secret env OPENROUTER_API_KEY openrouter</code>\n` +
+                `If alias is omitted, uses lowercase of the var name.`,
+                "HTML"
+            );
+            return;
+        }
+        const value = process.env[envVar];
+        if (!value) {
+            await sendMessage(token, chatId,
+                `⚠️ Env var <code>${envVar}</code> is not set or empty on this server.`,
+                "HTML"
+            );
+            return;
+        }
+        const alias = (parts[3] ?? envVar).trim().toLowerCase().replace(/[^a-z0-9_\-]/g, "_");
+        setSecret(alias, value);
+        logger.info(`[vault] env var imported: ${envVar} → ${alias} (value redacted)`);
+        await sendMessage(token, chatId,
+            `✅ <b>Env var imported.</b>\n\n` +
+            `<code>${envVar}</code> → alias <code>${alias}</code>\n` +
+            `Use as: <code>{{secret:${alias}}}</code>\n\n` +
+            `<i>Value was read server-side — never sent through Telegram.</i>`,
+            "HTML"
+        );
+        return;
+    }
+
+    // /secret sync — import ALL env vars from .env file into the vault
+    if (sub === "sync") {
+        const { existsSync, readFileSync: rfs } = await import("node:fs");
+        const { resolve: res } = await import("node:path");
+        const envFile = res(process.cwd(), ".env");
+        if (!existsSync(envFile)) {
+            await sendMessage(token, chatId, "⚠️ No .env file found in project root.", "HTML");
+            return;
+        }
+        const lines = rfs(envFile, "utf-8").split("\n");
+        const stored: string[] = [];
+        const skipped: string[] = [];
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("#")) continue;
+            const eqIdx = trimmed.indexOf("=");
+            if (eqIdx === -1) continue;
+            const key = trimmed.slice(0, eqIdx).trim();
+            let val = trimmed.slice(eqIdx + 1).trim();
+            // Strip surrounding quotes if present
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+                val = val.slice(1, -1);
+            }
+            if (!key || !val) { skipped.push(key || "(empty)"); continue; }
+            const alias = key.toLowerCase().replace(/[^a-z0-9_\-]/g, "_");
+            setSecret(alias, val);
+            stored.push(`<code>${key}</code> → <code>{{secret:${alias}}}</code>`);
+        }
+        logger.info(`[vault] sync: stored ${stored.length} vars, skipped ${skipped.length}`);
+        const msg = stored.length === 0
+            ? "⚠️ No valid entries found in .env file."
+            : `✅ <b>Synced ${stored.length} env var(s) to vault.</b>\n\n${stored.join("\n")}` +
+            (skipped.length > 0 ? `\n\n<i>Skipped ${skipped.length} empty/invalid entries.</i>` : "") +
+            `\n\n<i>Values were read server-side — never sent through Telegram.</i>`;
+        await sendMessage(token, chatId, msg, "HTML");
         return;
     }
 
