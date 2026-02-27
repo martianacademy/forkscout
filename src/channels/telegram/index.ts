@@ -168,7 +168,7 @@ async function start(config: AppConfig): Promise<void> {
     // Scoped to owners only — after testing, move to default scope to open up for all users.
     const ownerCommands = [
         { command: "start", description: "Start the bot" },
-        { command: "secret", description: "Manage encrypted secrets (store, list, delete, env, sync)" },
+        { command: "secret", description: "Manage encrypted secrets. Usage: store <alias> <value> | list | delete <alias> | env <VAR_NAME> [alias] | sync (imports all .env vars into vault)" },
         { command: "restart", description: "Safely restart the agent" },
         { command: "whoami", description: "Show your user ID and role" },
         { command: "allow", description: "Approve a pending access request" },
