@@ -13,7 +13,7 @@ export interface IdentityContext {
 }
 
 export function buildIdentity(config: AppConfig, ctx?: IdentityContext): string {
-    const currentTime = new Date().toISOString();
+    const currentTime = new Date().toLocaleString();
     const { name, github } = config.agent;
     const { provider, tier, providers, maxSteps, maxTokens } = config.llm;
     const modelId = providers[provider]?.[tier] ?? "unknown";
