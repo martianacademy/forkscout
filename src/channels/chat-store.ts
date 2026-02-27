@@ -18,6 +18,7 @@ import { resolve } from "path";
 import type { ModelMessage } from "ai";
 import { LOG_DIR } from "@/logs/activity-log.ts";
 import { log } from "@/logs/logger.ts";
+import { sanitizeUserMessage } from "@/utils/secrets.ts";
 
 const logger = log("chat-store");
 
@@ -260,7 +261,11 @@ export function sanitizeForPrompt(msgs: any[]): ModelMessage[] {
             }
         }
 
-        valid.push(msg as ModelMessage);
+        // Sanitize user messages to mask secrets before sending to LLM
+        const sanitizedMsg = msg.role === "user" && typeof msg.content === "string"
+            ? { ...msg, content: sanitizeUserMessage(msg.content) }
+            : msg;
+        valid.push(sanitizedMsg as ModelMessage);
     }
 
     // Second pass: remove assistant messages whose tool-calls have no following tool-result.

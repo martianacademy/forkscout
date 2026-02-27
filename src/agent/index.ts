@@ -13,6 +13,7 @@ import { compressIfLong } from "@/utils/extractive-summary.ts";
 import { llmSummarize } from "@/llm/summarize.ts";
 import { withRetry } from "@/llm/retry.ts";
 import { sanitizeForPrompt } from "@/channels/chat-store.ts";
+import { sanitizeUserMessage, sanitizeForDisplay } from "@/utils/secrets.ts";
 import { stripMedia } from "@/channels/prepare-history.ts";
 import { getSkills } from "@/skills/index.ts";
 
@@ -223,7 +224,7 @@ async function buildAgentParams(config: AppConfig, options: AgentRunOptions) {
     const messages: ModelMessage[] = [
         // Raw history from disk → sanitize for schema validity → strip media → LLM
         ...stripMedia(sanitizeForPrompt(options.chatHistory ?? [])),
-        { role: "user", content: options.userMessage },
+        { role: "user", content: sanitizeUserMessage(options.userMessage) },
     ];
 
     return { tools, bootstrapTools, model, systemPrompt, messages, devtoolsEnabled };
@@ -241,7 +242,7 @@ export async function runAgent(
     const { channel, chatId } = options.meta ?? {};
     const startMs = Date.now();
 
-    activity.msgIn(channel ?? "unknown", chatId, options.userMessage);
+    activity.msgIn(channel ?? "unknown", chatId, sanitizeForDisplay(options.userMessage));
 
     // ── FAKE_LLM mode — bypass real LLM, log assembled messages, return stub ─
     if (process.env.FAKE_LLM === "1") {
@@ -330,7 +331,7 @@ export async function streamAgent(
     const { channel, chatId } = options.meta ?? {};
     const startMs = Date.now();
 
-    activity.msgIn(channel ?? "unknown", chatId, options.userMessage);
+    activity.msgIn(channel ?? "unknown", chatId, sanitizeForDisplay(options.userMessage));
 
     let streamStep = 0;
 
