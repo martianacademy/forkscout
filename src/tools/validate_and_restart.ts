@@ -85,10 +85,16 @@ export const validate_and_restart = tool({
         // ── Step 3: Kill current + start fresh ────────────────────────────────
         log("Step 3/3: Smoke passed — stopping current agent and starting fresh...");
 
-        // Kill existing
+        // Kill existing by process name
         spawnSync("pkill", ["-9", "-f", "src/index.ts"], { cwd: ROOT });
         spawnSync("pkill", ["-9", "-f", "forkscout-agent"], { cwd: ROOT });
-        await sleep(1200);
+
+        // Force-kill whatever holds the HTTP port (belt-and-suspenders).
+        // This catches any edge case where pkill didn't match the exact cmdline.
+        const port = 3200; // must match config.self.httpPort default
+        spawnSync("sh", ["-c", `lsof -ti :${port} | xargs kill -9 2>/dev/null || true`], { cwd: ROOT });
+
+        await sleep(2000); // give OS time to release socket
 
         // Tag HEAD as last-known-good
         spawnSync("git", ["tag", "-f", "forkscout-last-good", "HEAD"], { cwd: ROOT });

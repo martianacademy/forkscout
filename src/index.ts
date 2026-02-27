@@ -22,11 +22,17 @@ if (!channel) throw new Error(`Unknown channel: ${channelName}`);
 
 logger.info(`Starting channel: ${channel.name}`);
 
-// When running telegram or terminal, start self subsystems in the background
+// When running telegram or terminal, start self subsystems in the background.
+// Skip in smoke-test mode (FORKSCOUT_SMOKE=1) — we must not bind port 3200
+// so the validate_and_restart smoke process doesn't steal the port from production.
 if (channelName === "telegram" || channelName === "terminal") {
-    startCronJobs(config);
-    startHttpServer(config);
-    checkOrphanedMonitors(config).catch(() => { });
+    if (process.env.FORKSCOUT_SMOKE !== "1") {
+        startCronJobs(config);
+        startHttpServer(config);
+        checkOrphanedMonitors(config).catch(() => { });
+    } else {
+        logger.info("Smoke mode — HTTP server, cron jobs, and orphan monitor disabled");
+    }
 }
 
 channel.start(config);
