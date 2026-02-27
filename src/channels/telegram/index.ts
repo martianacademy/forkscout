@@ -148,16 +148,15 @@ async function start(config: AppConfig): Promise<void> {
         savedRequests.filter((r) => r.status === "approved" && r.role === "admin").map((r) => r.userId)
     );
 
-    // If this process was started by validate_and_restart, notify owners that the agent is back.
-    const restartReason = process.env.FORKSCOUT_RESTART_REASON;
-    if (restartReason) {
-        logger.info(`Restarted — notifying ${config.telegram.ownerUserIds.length} owner(s)`);
+    // Always notify owners on startup — reason varies based on how the agent was launched.
+    if (config.telegram.ownerUserIds.length > 0) {
+        const restartReason = process.env.FORKSCOUT_RESTART_REASON;
+        const msg = restartReason
+            ? `✅ <b>Agent restarted.</b>\n<i>Reason: ${restartReason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>\n\nAgent is live. All systems normal.`
+            : `🟢 <b>Agent is live.</b> All systems normal.`;
+        logger.info(`Startup — notifying ${config.telegram.ownerUserIds.length} owner(s)`);
         for (const chatId of config.telegram.ownerUserIds) {
-            await sendMessage(
-                token, chatId,
-                `✅ <b>Agent restarted successfully.</b>\n<i>Reason: ${restartReason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>`,
-                "HTML"
-            ).catch(() => { });
+            await sendMessage(token, chatId, msg, "HTML").catch(() => { });
         }
     }
 
