@@ -89,6 +89,18 @@ MCP tools format: \`<server>__<tool>\` — servers listed in src/mcp-servers/*.j
 ## Full project source map
 To get a bird's-eye view of the whole codebase and how files connect, call tool \`project_sourcemap_tools\`
 
+### Secret vault — MANDATORY rules
+NEVER ask a user to type a password, API key, or token directly into chat.
+NEVER repeat, echo, log, or include a secret value in any response or tool input.
+
+Instead, use the vault:
+1. Store once:   secret_vault_tools(action="store", alias="my_key", value=<user provides>)
+2. Use always:   pass {{secret:my_key}} as a placeholder in tool inputs — the value is injected
+                 at runtime INSIDE the tool, never visible to the LLM
+
+If a user pastes a secret value directly: immediately store it via secret_vault_tools and
+tell them to use the alias. Never use the raw value again.
+
 ### Thinking and reasoning
 For any complex, multi-step, or ambiguous task: call think_step_by_step_tools FIRST.
 Do NOT use a native <think> block to plan actions — it runs outside the tool loop and can

@@ -1,6 +1,8 @@
 // src/utils/secrets.ts — Mask secrets before sending to LLM
 // NEVER let passwords, API keys, tokens reach the LLM
 
+import { censorSecrets } from "@/secrets/vault.ts";
+
 /**
  * Patterns that indicate secrets in user messages
  */
@@ -27,27 +29,30 @@ const MASK = "[REDACTED_SECRET]";
 function looksLikeSecret(value: string): boolean {
     // Skip obvious placeholders
     if (value === "[REDACTED_SECRET]" || value === "REDACTED") return false;
-    
+
     // Long random-looking strings are suspicious
     if (value.length > 20 && /^[a-zA-Z0-9_\-]+$/.test(value)) {
         return true;
     }
-    
+
     // Common secret formats
     if (/^sk\-[a-zA-Z0-9]{20,}$/.test(value)) return true; // OpenAI keys
     if (/^sk\-ant\-[a-zA-Z0-9_\-]{20,}$/.test(value)) return true; // Anthropic keys
     if (/^gsk_[a-zA-Z0-9_\-]{20,}$/.test(value)) return true; // Groq keys
     if (/^xox[baprs]-[a-zA-Z0-9_\-]{10,}$/.test(value)) return true; // Slack tokens
-    
+
     return false;
 }
 
 /**
- * Sanitize user message to remove secrets before sending to LLM
+ * Sanitize user message to remove secrets before sending to LLM.
+ * 1. Pattern-based masking (API keys, passwords, tokens)
+ * 2. Entropy heuristic (long random strings)
+ * 3. Known vault secrets — in case user accidentally types an actual stored value
  */
 export function sanitizeUserMessage(message: string): string {
     let sanitized = message;
-    
+
     // First pass: mask pattern matches
     for (const pattern of SECRET_PATTERNS) {
         sanitized = sanitized.replace(pattern, (match, group) => {
@@ -57,7 +62,7 @@ export function sanitizeUserMessage(message: string): string {
             return MASK;
         });
     }
-    
+
     // Second pass: detect and mask suspicious values
     // This catches secrets that don't match known patterns
     const words = sanitized.split(/(\s+)/);
@@ -68,8 +73,9 @@ export function sanitizeUserMessage(message: string): string {
         }
         return word;
     });
-    
-    return maskedWords.join('');
+
+    // Third pass: censor any known vault secret values that slipped through
+    return censorSecrets(maskedWords.join(''));
 }
 
 /**
@@ -78,17 +84,17 @@ export function sanitizeUserMessage(message: string): string {
  */
 export function sanitizeForDisplay(message: string): string {
     let sanitized = message;
-    
+
     // Only mask common patterns
     const displayPatterns = [
         /(api[_-]?key|apikey)["':\s=]+[^\s"']+/gi,
         /(password|passwd|pwd)["':\s=]+[^\s"']+/gi,
         /Bearer\s+[a-zA-Z0-9_\-\.]+/gi,
     ];
-    
+
     for (const pattern of displayPatterns) {
         sanitized = sanitized.replace(pattern, (_, key) => `${key}: ${MASK}`);
     }
-    
+
     return sanitized;
 }

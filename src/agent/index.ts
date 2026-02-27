@@ -16,6 +16,7 @@ import { sanitizeForPrompt } from "@/channels/chat-store.ts";
 import { sanitizeUserMessage, sanitizeForDisplay } from "@/utils/secrets.ts";
 import { stripMedia } from "@/channels/prepare-history.ts";
 import { getSkills } from "@/skills/index.ts";
+import { resolveSecrets, censorSecrets } from "@/secrets/vault.ts";
 
 // ── Role extension loader ─────────────────────────────────────────────────────
 // Reads the appropriate role-.md file and returns its content to inject into the
@@ -128,6 +129,63 @@ function wrapToolsWithAutoCompress(
     );
 }
 
+// ── Wrap tools with secret handling ──────────────────────────────────────────
+// 1. RESOLVE: replace {{secret:alias}} in all string inputs before execution
+// 2. CENSOR:  replace known secret values in outputs before they reach the LLM
+// Applied to every tool — secrets never enter the LLM context window.
+
+function wrapToolsWithSecretHandling(tools: Record<string, any>): Record<string, any> {
+    return Object.fromEntries(
+        Object.entries(tools).map(([name, t]) => {
+            // Never wrap the vault tool itself — it manages secrets directly
+            if (name === "secret_vault_tools" || typeof t.execute !== "function") {
+                return [name, t];
+            }
+            const original = t.execute;
+            return [name, {
+                ...t,
+                execute: async (input: any) => {
+                    // Resolve {{secret:alias}} placeholders in any string values
+                    let resolvedInput = input;
+                    try {
+                        const inputStr = JSON.stringify(input);
+                        if (inputStr.includes("{{secret:")) {
+                            resolvedInput = JSON.parse(
+                                resolvedInput = inputStr.replace(
+                                    /\{\{secret:([a-zA-Z0-9_\-]+)\}\}/g,
+                                    (_, alias) => {
+                                        const val = resolveSecrets(`{{secret:${alias}}}`);
+                                        // escape for JSON string embedding
+                                        return val.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                                    }
+                                )
+                            );
+                        }
+                    } catch (err) {
+                        logger.warn(`[secret-wrap] ${name}: failed to resolve secrets in input: ${err}`);
+                    }
+
+                    const result = await original(resolvedInput);
+
+                    // Censor any secret values that leaked into the output
+                    try {
+                        const raw = typeof result === "string" ? result : JSON.stringify(result);
+                        const censored = censorSecrets(raw);
+                        if (censored !== raw) {
+                            logger.warn(`[secret-wrap] ${name}: censored secret value from tool output`);
+                            return typeof result === "string" ? censored : JSON.parse(censored);
+                        }
+                    } catch {
+                        // If censor fails, still return result — don't break the tool
+                    }
+
+                    return result;
+                },
+            }];
+        })
+    );
+}
+
 // ── Wrap tools with progress hook ────────────────────────────────────────────
 // Fires onToolCall before each tool executes so the channel can show live progress.
 
@@ -166,7 +224,10 @@ async function buildAgentParams(config: AppConfig, options: AgentRunOptions) {
     );
 
     // Wrap every tool's execute() to auto-compress large results before they enter the LLM context
-    const tools = wrapToolsWithAutoCompress(rawTools, config);
+    const compressedTools = wrapToolsWithAutoCompress(rawTools, config);
+
+    // Wrap every tool to resolve {{secret:alias}} in inputs and censor values in outputs
+    const tools = wrapToolsWithSecretHandling(compressedTools);
 
     const { provider, tier, providers } = config.llm;
     const modelId = providers[provider][tier];
