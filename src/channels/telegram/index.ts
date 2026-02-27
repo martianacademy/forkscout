@@ -491,9 +491,16 @@ async function handleMessage(
                 .catch(() => sendMessage(token, chatId, stripHtml(chunks[0])));
         }
     } else {
-        // Multiple chunks — delete the draft and send all chunks fresh
-        if (responseMsgId) await deleteMessage(token, chatId, responseMsgId).catch(() => { });
-        for (const chunk of chunks) {
+        // Multiple chunks — edit first chunk in-place (no flicker), send rest fresh
+        const [first, ...rest] = chunks;
+        if (responseMsgId) {
+            await editMessage(token, chatId, responseMsgId, first, "HTML")
+                .catch(() => editMessage(token, chatId, responseMsgId!, stripHtml(first)));
+        } else {
+            await sendMessage(token, chatId, first, "HTML")
+                .catch(() => sendMessage(token, chatId, stripHtml(first)));
+        }
+        for (const chunk of rest) {
             await sendMessage(token, chatId, chunk, "HTML")
                 .catch(() => sendMessage(token, chatId, stripHtml(chunk)));
         }
