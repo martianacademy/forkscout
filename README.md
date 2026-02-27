@@ -165,6 +165,8 @@ docker-compose down -v
 - [Features](#features)
 - [Channels](#channels)
 - [Tools](#tools)
+- [Task Orchestration](#task-orchestration)
+- [Proactive Telegram Messaging](#proactive-telegram-messaging)
 - [MCP Servers](#mcp-servers)
 - [LLM Providers](#llm-providers)
 - [Configuration](#configuration)
@@ -289,6 +291,19 @@ src/utils/
 - **Auto-compression pipeline** — every tool result is automatically compressed before entering LLM context (≤400 words: pass-through; 400–2000: extractive; >2000: LLM synthesis on fast tier)
 - **Streaming** — terminal channel streams tokens live; Telegram sends typing indicator every 4s
 - **Configurable identity** — agent name, github, description, and extra system prompt instructions from JSON
+
+### Task Orchestration
+
+- **Self HTTP server** — embedded HTTP server on configurable port (default `3200`) accepts trigger requests to spawn new agent self-sessions
+- **`chain_of_workers`** — sequential self-session chain where each step's output feeds the next. Agent writes a todo file, fires the next session, current session ends cleanly. Each step can optionally post a `🔄 Step started` notification to Telegram
+- **`parallel_workers`** — dispatches N independent worker self-sessions concurrently. Each worker writes results to `.forkscout/tasks/{batch}/` and flips its plan.md checkbox when done
+- **Live progress card** — pure-JS monitor (zero LLM cost while waiting) updates a single Telegram message every 3 seconds showing `[ ]`/`[x]` status per worker. Auto-fires the aggregator session when all tasks complete
+- **Aggregator session** — when all workers finish, a final self-session compiles results, sends summary to user via Telegram, and cleans up task files
+- **Confirmation gate** — on human channels (Telegram/terminal), agent always presents the full execution plan (workers, tasks, aggregator action) and waits for explicit user confirmation before firing. Self-sessions skip this gate
+- **`list_active_workers`** — inspect all active batches: per-worker status, progress fraction (e.g. `3/5`), which batches have a live monitor
+- **Monitor state persistence** — monitor state is saved to `.forkscout/monitors/{batch}.json`. Survives Bun restarts
+- **Orphan recovery on restart** — on startup, agent detects orphaned monitors from previous run, sends a detailed Telegram notification (progress, per-task status, started timestamp) to all owners. Does NOT auto-resume — user must explicitly confirm
+- **`manage_workers`** — resume, cancel, or delete an orphaned batch after restart. `resume` restarts the progress card; `cancel` stops monitor keeping files; `delete` removes everything including task files
 
 ### Channels
 
@@ -420,6 +435,91 @@ Parameters: `text`, `mode`, `maxSentences` (extractive), `maxTokens` (LLM), `ins
 ### `read_folder_standards`
 
 Reads `src/<folder>/ai_agent_must_readme.md` before the agent modifies any folder. Returns the full standards document. Agent is instructed to call this before editing any `src/` subfolder.
+
+---
+
+## Task Orchestration
+
+ForkScout can spawn independent self-sessions to run work in parallel or sequentially — long tasks that would time out in a single turn, or multiple independent analyses running concurrently.
+
+### `chain_of_workers`
+
+Fire a sequential self-session chain. The next session receives full shared history. Pattern:
+
+```
+1. Write .forkscout/tasks/{name}/todo.md with all steps
+2. chain_of_workers({ prompt: "Read todo.md, do step 1, mark done, call chain_of_workers for step 2", chat_id: <id> })
+3. Current session ends
+4. Next session reads todo.md, does one step, marks done, calls chain again
+5. Repeat until all steps ✅ — last session notifies user via telegram_message_tools
+```
+
+Optional `chat_id` sends `🔄 Step started: "..."` to Telegram at each step.
+
+### `parallel_workers`
+
+Dispatch N concurrent independent worker self-sessions:
+
+```
+parallel_workers({
+  batch_name: "analyse-codebase",
+  tasks: [
+    { session_key: "task-auth", label: "Analyse auth", prompt: "...fully self-contained..." },
+    { session_key: "task-db",   label: "Analyse DB",   prompt: "...fully self-contained..." },
+  ],
+  aggregator_prompt: "Read results, compile summary, send via telegram_message_tools, delete .forkscout/tasks/analyse-codebase/",
+  chat_id: <user_chat_id>,
+})
+```
+
+Each worker:
+
+- Writes results to `.forkscout/tasks/{batch}/{session_key}-result.md`
+- Flips `- [ ] \`{session_key}\``→`- [x]`in`plan.md` when done
+
+**Progress monitor** — pure JS, no LLM calls, updates a single Telegram message every 3s. Aggregator fires automatically when all tasks are `[x]`.
+
+**Confirmation gate** — before firing any workers on a human channel, agent presents the full plan and waits for explicit confirmation ("yes", "karo", "go ahead", etc.).
+
+### `list_active_workers`
+
+Lists all batch directories in `.forkscout/tasks/`. Shows per-worker `[ ]`/`[x]` status, progress fraction, and which batches have a live monitor.
+
+### `manage_workers`
+
+Recover after a Bun restart. On startup, orphaned monitors are detected and owners are notified via Telegram with full details. User then explicitly calls:
+
+| Action   | Effect                                                          |
+| -------- | --------------------------------------------------------------- |
+| `resume` | Restart monitor from saved state, send fresh progress card      |
+| `cancel` | Stop monitor, delete state — task files kept                    |
+| `delete` | Stop monitor, delete state + entire `.forkscout/tasks/{batch}/` |
+
+---
+
+## Proactive Telegram Messaging
+
+The `telegram_message_tools` tool lets the agent reach users without waiting for them to send a message first. Used by cron jobs, background workers, aggregators, and any self-session that needs to notify the user.
+
+### Actions
+
+| Action           | What it sends                   | Required fields                 | Limits                  |
+| ---------------- | ------------------------------- | ------------------------------- | ----------------------- |
+| `send`           | Text/Markdown                   | `chat_id`, `text`               | 4096 chars (auto-split) |
+| `send_to_owners` | Text to all owners              | `text`                          | 4096 chars (auto-split) |
+| `send_photo`     | Image                           | `file_path_or_url`              | 10 MB upload / 5 MB URL |
+| `send_document`  | Any file (PDF, ZIP, CSV, JSON…) | `file_path_or_url`              | 50 MB                   |
+| `send_voice`     | Voice message (OGG/Opus)        | `file_path_or_url`              | 50 MB                   |
+| `send_audio`     | Music player card (MP3/M4A)     | `file_path_or_url`              | 50 MB                   |
+| `send_video`     | Video (MP4)                     | `file_path_or_url`              | 50 MB                   |
+| `send_animation` | GIF / silent MP4                | `file_path_or_url`              | 50 MB                   |
+| `send_location`  | Map pin                         | `latitude`, `longitude`         | —                       |
+| `send_poll`      | Interactive poll                | `poll_question`, `poll_options` | 2–10 options            |
+
+- `file_path_or_url` — absolute local path **or** public HTTPS URL
+- `caption` — optional Markdown caption for all media actions
+- Media sent to `chat_id` if provided, otherwise broadcast to all `ownerUserIds`
+- Sent messages are saved to recipient's chat history — next turn the agent knows what it already sent
 
 ---
 
@@ -1006,6 +1106,7 @@ docker run -d --name forkscout --restart unless-stopped \
 Only one LLM key is required — whichever provider is set as `llm.provider` in config.
 
 ---
+
 ## Development Workflow
 
 Before making any changes to files in `src/` or system files, always create a checkpoint commit:
@@ -1016,17 +1117,20 @@ git add -A && git commit -m "Checkpoint: <describe current state and what you wi
 ```
 
 **Why?** This creates a safe restore point. If your changes break the agent, revert with:
+
 ```bash
 git reset --hard <commit-hash>
 ```
 
 **When to checkpoint:**
+
 - Before any refactoring
 - Before adding new tools, channels, or providers
 - Before modifying the agent core logic
 - Before upgrading dependencies (AI SDK, Bun, etc.)
 
 **After making changes, always:**
+
 1. Run `bun run typecheck` — must pass with no errors
 2. Test with `bun run dev` or `bun start`
 3. If working, continue; if broken, `git reset --hard` to checkpoint and start over
@@ -1270,6 +1374,11 @@ Local docs are in `node_modules/ai/docs/` — check there before guessing or fet
 
 ### Autonomy (Phase 1 — Foundation)
 
+- [x] **Self HTTP server** — embedded trigger endpoint for self-sessions
+- [x] **Task orchestration** — `chain_of_workers`, `parallel_workers`, `list_active_workers`, `manage_workers`
+- [x] **Live Telegram progress card** — pure-JS monitor, zero LLM cost, auto-fires aggregator
+- [x] **Monitor state persistence** — survives restarts, orphan recovery with confirmation gate
+- [x] **Proactive Telegram messaging** — `telegram_message_tools` with text, photo, document, voice, audio, video, animation, location, poll
 - [ ] Trust & authorization model (admin/user/self roles with full access matrix)
 - [ ] Emotional state model (energy, mood, curiosity, social need, stress — proper state machine with event-driven transitions and time decay)
 - [ ] Goals & long-term planning (goal types: life/high/medium/low, milestones, agent-managed via tools)

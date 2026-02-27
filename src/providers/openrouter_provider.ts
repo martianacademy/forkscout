@@ -1,4 +1,4 @@
-// src/providers/openrouter_provider.ts
+// src/providers/openrouter_provider.ts — OpenRouter provider: access 200+ models via one API key.
 // OpenRouter provider — wraps createOpenAICompatibleProvider with OpenRouter-specific config.
 //
 // OpenRouter is an OpenAI-compatible proxy that only supports Chat Completions,

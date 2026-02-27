@@ -1,4 +1,4 @@
-// src/providers/anthropic_provider.ts
+// src/providers/anthropic_provider.ts — Anthropic provider (Claude) via @ai-sdk/anthropic.
 // Anthropic provider using the official @ai-sdk/anthropic package.
 //
 // Unlike OpenAI-compatible providers, Anthropic has its own native SDK integration

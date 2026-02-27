@@ -139,10 +139,16 @@ export interface AppConfig {
         /** Max tokens to keep in terminal session history before trimming oldest messages */
         historyTokenBudget: number;
     };
-    /** Self channel — agent-to-self scheduled jobs */
+    /** Self channel — agent-to-self scheduled jobs + HTTP trigger */
     self?: {
         /** Max tokens to keep in each job's history before trimming. Default: 12000. */
         historyTokenBudget: number;
+        /**
+         * Port for the HTTP trigger server.
+         * POST /trigger { prompt, sessionKey?, role? } → runs agent with persistent history.
+         * 0 = disabled. Default: 3200.
+         */
+        httpPort: number;
         /** Cron jobs — can also be defined in .forkscout/self-jobs.json (gitignored). */
         jobs?: SelfJobConfig[];
     };

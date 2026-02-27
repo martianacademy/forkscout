@@ -1,5 +1,5 @@
-// src/channels/telegram/access-requests.ts
-// Persists Telegram access requests in .forkscout/access-requests.json
+// src/channels/telegram/access-requests.ts — Persists Telegram access requests and owner approval flow.
+// Stores to .forkscout/access-requests.json
 // Owners use /allow <userId> or /deny <userId> to action them.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";

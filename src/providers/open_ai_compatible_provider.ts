@@ -1,4 +1,4 @@
-// src/providers/open_ai_compatible_provider.ts
+// src/providers/open_ai_compatible_provider.ts — Factory for any OpenAI-compatible HTTP endpoint.
 // Factory for any OpenAI-compatible HTTP endpoint (OpenRouter, Groq, Together, etc.)
 //
 // IMPORTANT: AI SDK v6 defaults to the Responses API for openai(modelId).

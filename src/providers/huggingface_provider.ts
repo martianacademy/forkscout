@@ -1,4 +1,4 @@
-// src/providers/huggingface_provider.ts
+// src/providers/huggingface_provider.ts — HuggingFace Inference provider: thousands of open-source models.
 // HuggingFace Inference provider using the official @ai-sdk/huggingface package.
 // Access thousands of open-source models via HuggingFace's Inference API.
 // Docs: https://ai-sdk.dev/providers/ai-sdk-providers/huggingface

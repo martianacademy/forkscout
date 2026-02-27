@@ -1,4 +1,4 @@
-// src/providers/elevenlabs_provider.ts
+// src/providers/elevenlabs_provider.ts — ElevenLabs TTS/STT provider via @ai-sdk/elevenlabs.
 // ElevenLabs provider using the official @ai-sdk/elevenlabs package.
 //
 // ⚠️  ElevenLabs provides SPEECH (TTS) and TRANSCRIPTION (STT) — NOT language models.

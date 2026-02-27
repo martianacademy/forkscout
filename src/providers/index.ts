@@ -1,4 +1,4 @@
-// src/providers/index.ts
+// src/providers/index.ts — Provider registry: getProvider(), getModel(), getModelForRole().
 // Registry of known providers + getModel() + getModelForRole() helpers.
 // To add a new provider: add a key to `registry` below.
 //

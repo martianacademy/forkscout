@@ -83,6 +83,7 @@ async function start(config: AppConfig) {
                 const stream = await streamAgent(config, {
                     userMessage: text,
                     chatHistory: history,
+                    role: "owner",
                     meta: { channel: "terminal" },
                 });
 

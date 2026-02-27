@@ -37,6 +37,12 @@ Your instructions here.
 | ------------- | ------------------------------------------------------------------ |
 | `identity.ts` | Base system prompt — agent name, interface, tools, core principles |
 
+## Subfolders
+
+| Folder        | Purpose                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `extensions/` | On-demand instruction modules loaded by the agent via `read_file` when needed. See `extensions/ai_agent_must_readme.md` for details. |
+
 ---
 
 ## Composing Prompts

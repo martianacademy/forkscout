@@ -1,4 +1,4 @@
-// src/providers/vercel_provider.ts
+// src/providers/vercel_provider.ts — Vercel AI Gateway: unified billing + observability across providers.
 // Vercel AI Gateway provider using the official @ai-sdk/vercel package.
 // Routes requests through Vercel's AI Gateway with unified billing + observability.
 // Docs: https://ai-sdk.dev/providers/ai-sdk-providers/vercel

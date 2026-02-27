@@ -1,4 +1,4 @@
-// src/providers/xai_provider.ts
+// src/providers/xai_provider.ts — xAI (Grok) provider via @ai-sdk/xai.
 // xAI (Grok) provider using the official @ai-sdk/xai package.
 // Docs: https://ai-sdk.dev/providers/ai-sdk-providers/xai
 
