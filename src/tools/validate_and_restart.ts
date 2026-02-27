@@ -85,6 +85,26 @@ export const validate_and_restart = tool({
         // ── Step 3: Kill current + start fresh ────────────────────────────────
         log("Step 3/3: Smoke passed — scheduling deferred restart...");
 
+        // Notify owners BEFORE killing — agent is still alive here.
+        try {
+            const authPath = resolve(ROOT, ".forkscout/auth.json");
+            const { readFileSync: rfs } = await import("fs");
+            const auth = JSON.parse(rfs(authPath, "utf-8"));
+            const ownerChatIds: number[] = auth?.telegram?.ownerUserIds ?? [];
+            const botToken = process.env.TELEGRAM_BOT_TOKEN;
+            if (botToken && ownerChatIds.length > 0) {
+                const { sendMessage } = await import("@/channels/telegram/api.ts");
+                const escapedReason = input.reason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                for (const chatId of ownerChatIds) {
+                    await sendMessage(
+                        botToken, chatId,
+                        `🔄 <b>Agent restarting…</b>\n<i>Reason: ${escapedReason}</i>`,
+                        "HTML"
+                    ).catch(() => { });
+                }
+            }
+        } catch { /* no auth file or send failed — continue with restart */ }
+
         // CRITICAL: this tool runs INSIDE the agent process.
         // Calling `pkill -f src/index.ts` here kills ourselves mid-execution,
         // before spawn() completes — new agent never starts.
