@@ -7,6 +7,8 @@
     "scripts": {
         "stop": "pkill -9 -f 'src/index.ts' 2>/dev/null; pkill -9 -f 'forkscout-agent' 2>/dev/null; sleep 1; echo '[forkscout] stopped'",
         "start": "bun run stop; DEVTOOLS=1 bun run src/index.ts",
+        "start:bg": "bun run stop; DEVTOOLS=1 nohup bun run src/index.ts >> /tmp/forkscout.log 2>&1 & echo \"[forkscout] started in background (PID $!). Run: bun run logs\"",
+        "logs": "tail -f /tmp/forkscout.log",
         "dev": "bun run stop; DEVTOOLS=1 bun --hot src/index.ts",
         "cli": "bun run stop; bun run src/index.ts --cli",
         "cli:dev": "bun run stop; DEVTOOLS=1 bun --hot src/index.ts --cli",
