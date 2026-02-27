@@ -14,7 +14,8 @@
         "restart:dev": "DEVTOOLS=1 nohup bun --hot src/index.ts > /tmp/forkscout.log 2>&1 & sleep 2 && bun run stop; echo '[forkscout] restarted (hot)'",
         "safe-restart": "bash scripts/safe-restart.sh",
         "typecheck": "bun run --bun tsc --noEmit",
-        "devtools": "bun run node_modules/.bin/devtools"
+        "devtools": "node node_modules/@ai-sdk/devtools/bin/cli.js",
+        "dev:tools": "bun run stop; concurrently -k -n AGENT,DEVTOOLS -c cyan,yellow \"DEVTOOLS=1 bun --hot src/index.ts\" \"node node_modules/@ai-sdk/devtools/bin/cli.js\""
     },
     "dependencies": {
         "@ai-sdk/anthropic": "^3.0.46",
@@ -40,6 +41,7 @@
         "@types/bun": "latest",
         "@types/node": "^22.0.0",
         "@types/node-cron": "^3.0.11",
+        "concurrently": "^9.2.1",
         "typescript": "^5.7.2"
     }
 }
