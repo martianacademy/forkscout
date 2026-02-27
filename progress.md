@@ -36,7 +36,7 @@
 
 ### ✅ Hardcoded Owner Chat ID Removed from Git History
 
-**Problem**: `OWNER_ID = 961713986` was hardcoded in 3 commits — visible on GitHub.
+**Problem**: `OWNER_ID` was hardcoded in 3 commits — visible on GitHub.
 
 **Fix**: `git filter-repo --replace-text` rewrote all 282 commits replacing ID with `OWNER_CHAT_ID`. Force pushed to `origin/rewrite` → then merged into `main`.
 
@@ -798,7 +798,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
 | Problem                | Symptom                                              | Fix                                                  |
 | ---------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
 | Too many facts/entity  | Slow retrieval, irrelevant facts injected            | Fact confidence decay + archival (already in MCP)    |
-| Activity log unbounded | `.agents/activity.log` grows forever              | Weekly rotation + compression, keep last 30 days hot |
+| Activity log unbounded | `.agents/activity.log` grows forever                 | Weekly rotation + compression, keep last 30 days hot |
 | System prompt too long | Context window overflow with goals + state + history | Summarise + compress periodically                    |
 | Stale contacts         | Thousands of one-off strangers clogging graph        | Auto-demote to `archived` after 180 days no contact  |
 

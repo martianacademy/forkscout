@@ -43,6 +43,22 @@ import { setSecret, listAliases, deleteSecret } from "@/secrets/vault.ts";
 const CHATS_DIR = resolve(LOG_DIR, "chats");
 const logger = log("telegram");
 
+/**
+ * Parse owner user IDs from vault-stored env var.
+ * populateEnvFromVault() at boot sets process.env.TELEGRAM_OWNER_IDS = JSON array string.
+ * Falls back to empty array if missing or unparseable.
+ */
+function getVaultOwnerIds(): number[] {
+    const raw = process.env.TELEGRAM_OWNER_IDS;
+    if (!raw) return [];
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter((n: any) => typeof n === "number") : [];
+    } catch {
+        return [];
+    }
+}
+
 // ─── Tool progress helpers ────────────────────────────────────────────────────
 
 /** Human-readable label for each tool name. Falls back to the tool name itself. */
@@ -82,7 +98,7 @@ const rateLimiter = new Map<number, { count: number; windowStart: number }>();
 let runtimeAllowedUsers = new Set<number>();
 
 /**
- * Runtime owner set — seeded from config.telegram.ownerUserIds at startup.
+ * Runtime owner set — seeded from vault (TELEGRAM_OWNER_IDS) at startup.
  */
 let runtimeOwnerUsers = new Set<number>();
 
@@ -92,7 +108,7 @@ let runtimeOwnerUsers = new Set<number>();
  */
 let runtimeAdminUsers = new Set<number>();
 
-/** True when both ownerUserIds and allowedUserIds are empty in config (dev mode = all owners). */
+/** True when both vault owner IDs and allowedUserIds are empty (dev mode = all owners). */
 let devMode = false;
 
 /** Returns true if user is within their rate limit window. Owners are never rate-limited. */
@@ -115,9 +131,9 @@ function checkRateLimit(userId: number, limitPerMin: number): boolean {
 // ─────────────────────────────────────────────
 
 /** Returns 'owner' | 'admin' | 'user' | 'denied'. devMode = everyone is owner. */
-function getRole(userId: number, config: AppConfig): "owner" | "admin" | "user" | "denied" {
+function getRole(userId: number, _config: AppConfig): "owner" | "admin" | "user" | "denied" {
     if (devMode) return 'owner';
-    if (config.telegram.ownerUserIds.includes(userId) || runtimeOwnerUsers.has(userId)) return "owner";
+    if (runtimeOwnerUsers.has(userId)) return "owner";
     if (runtimeAdminUsers.has(userId)) return "admin";
     if (runtimeAllowedUsers.has(userId)) return "user";
     return 'denied';
@@ -140,10 +156,11 @@ async function start(config: AppConfig): Promise<void> {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set in .env");
 
-    // Seed runtime auth state from config + persisted requests
-    devMode = config.telegram.ownerUserIds.length === 0 && config.telegram.allowedUserIds.length === 0;
+    // Seed runtime auth state from vault + config
+    const vaultOwnerIds = getVaultOwnerIds();
+    devMode = vaultOwnerIds.length === 0 && config.telegram.allowedUserIds.length === 0;
     runtimeAllowedUsers = new Set(config.telegram.allowedUserIds);
-    runtimeOwnerUsers = new Set(config.telegram.ownerUserIds);
+    runtimeOwnerUsers = new Set(vaultOwnerIds);
     // Seed admins from persisted approved requests
     const savedRequests = loadRequests();
     runtimeAdminUsers = new Set(
@@ -151,13 +168,13 @@ async function start(config: AppConfig): Promise<void> {
     );
 
     // Always notify owners on startup — reason varies based on how the agent was launched.
-    if (config.telegram.ownerUserIds.length > 0) {
+    if (vaultOwnerIds.length > 0) {
         const restartReason = process.env.FORKSCOUT_RESTART_REASON;
         const msg = restartReason
             ? `✅ <b>Agent restarted.</b>\n<i>Reason: ${restartReason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>\n\nAgent is live. All systems normal.`
             : `🟢 <b>Agent is live.</b> All systems normal.`;
-        logger.info(`Startup — notifying ${config.telegram.ownerUserIds.length} owner(s)`);
-        for (const chatId of config.telegram.ownerUserIds) {
+        logger.info(`Startup — notifying ${vaultOwnerIds.length} owner(s)`);
+        for (const chatId of vaultOwnerIds) {
             await sendMessage(token, chatId, msg, "HTML").catch(() => { });
         }
     }
@@ -176,7 +193,7 @@ async function start(config: AppConfig): Promise<void> {
         { command: "pending", description: "List pending access requests" },
         { command: "requests", description: "Show all access requests" },
     ];
-    for (const ownerId of config.telegram.ownerUserIds) {
+    for (const ownerId of vaultOwnerIds) {
         await setMyCommands(token, ownerCommands, { type: "chat", chat_id: ownerId });
     }
     logger.info("Bot commands registered in Telegram menu (owner-scoped).");
@@ -682,7 +699,7 @@ async function handleDeniedUser(
             { text: "❌ Deny", callback_data: `deny:${userId}` },
         ]];
 
-        for (const ownerId of config.telegram.ownerUserIds) {
+        for (const ownerId of getVaultOwnerIds()) {
             await sendMessageWithInlineKeyboard(token, ownerId, adminMsg, buttons, "HTML").catch(() => { });
         }
         await sendMessage(token, chatId, `⛔ You're not on the allowlist yet.\n\nYour request has been sent to the admin. You'll be notified when it's reviewed.`);

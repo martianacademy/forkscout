@@ -1,25 +1,4 @@
 {
-    "telegram": {
-        "pollingTimeout": 30,
-        "historyTokenBudget": 12000,
-        "ownerUserIds": [],
-        "allowedUserIds": [],
-        "rateLimitPerMinute": 20,
-        "maxInputLength": 2000,
-        "ownerOnlyTools": [
-            "run_shell_commands",
-            "write_file"
-        ],
-        "maxToolResultTokens": 3000,
-        "maxSentencesPerToolResult": 20
-    },
-    "terminal": {
-        "historyTokenBudget": 12000
-    },
-    "self": {
-        "historyTokenBudget": 12000,
-        "httpPort": 3200
-    },
     "agent": {
         "name": "ForkScout",
         "description": "An autonomous agent that can use tools and access the web to answer questions and perform tasks.",
@@ -144,5 +123,25 @@
     },
     "n8n": {
         "baseUrl": "http://localhost:5678"
+    },
+    "telegram": {
+        "pollingTimeout": 30,
+        "historyTokenBudget": 12000,
+        "allowedUserIds": [],
+        "rateLimitPerMinute": 20,
+        "maxInputLength": 2000,
+        "ownerOnlyTools": [
+            "run_shell_commands",
+            "write_file"
+        ],
+        "maxToolResultTokens": 3000,
+        "maxSentencesPerToolResult": 20
+    },
+    "terminal": {
+        "historyTokenBudget": 12000
+    },
+    "self": {
+        "historyTokenBudget": 12000,
+        "httpPort": 3200
     }
 }

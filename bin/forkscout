@@ -1,0 +1,103 @@
+#!/usr/bin/env bun
+// bin/forkscout — Global CLI entry point
+// Usage: forkscout <command> [options]
+//
+// Commands:
+//   start       Start the Telegram bot (default)
+//   setup       Run interactive setup wizard
+//   cli         Start terminal chat
+//   dev         Start with hot reload
+//   stop        Stop all running instances
+//   status      Show agent status
+//   logs        Tail live logs
+//   help        Show this help
+
+import { resolve, dirname } from "path";
+import { existsSync } from "fs";
+import { $ } from "bun";
+
+const ROOT = resolve(dirname(import.meta.dir));
+const command = process.argv[2] ?? "help";
+
+// Ensure we're running from the project directory
+process.chdir(ROOT);
+
+// Load .env from project root
+const envPath = resolve(ROOT, ".env");
+if (existsSync(envPath)) {
+    const { config } = await import("dotenv");
+    config({ path: envPath });
+}
+
+const COMMANDS: Record<string, () => Promise<void>> = {
+    async start() {
+        await $`bun run start`.cwd(ROOT);
+    },
+
+    async setup() {
+        // Import and run wizard directly (faster than spawning)
+        const { runSetupWizard } = await import("../src/setup/wizard.ts");
+        await runSetupWizard();
+    },
+
+    async cli() {
+        await $`bun run src/index.ts --cli`.cwd(ROOT);
+    },
+
+    async dev() {
+        await $`bun run dev`.cwd(ROOT);
+    },
+
+    async stop() {
+        await $`bun run stop`.cwd(ROOT);
+    },
+
+    async status() {
+        const result = await $`pgrep -af 'src/index.ts|forkscout-agent' 2>/dev/null || true`.cwd(ROOT).text();
+        const lines = result.trim().split("\n").filter(l => l.trim());
+        if (lines.length === 0) {
+            console.log("  ⏹  ForkScout is not running");
+        } else {
+            console.log("  🟢 ForkScout is running:");
+            for (const line of lines) {
+                console.log(`     PID ${line.split(/\s+/)[0]}`);
+            }
+        }
+    },
+
+    async logs() {
+        await $`tail -f /tmp/forkscout.log`.cwd(ROOT);
+    },
+
+    async help() {
+        console.log(`
+  ⑂  ForkScout v3.0.0 — Autonomous AI Agent
+
+  Usage: forkscout <command>
+
+  Commands:
+    start       Start Telegram bot (default channel)
+    setup       Run interactive setup wizard
+    cli         Start terminal chat
+    dev         Start with hot reload (development)
+    stop        Stop all running instances
+    status      Check if agent is running
+    logs        Tail live logs
+    help        Show this help
+
+  Examples:
+    forkscout start          Start the agent
+    forkscout setup          Configure provider, keys, Telegram
+    forkscout cli            Chat in terminal
+    forkscout stop           Stop everything
+`);
+    },
+};
+
+const handler = COMMANDS[command];
+if (!handler) {
+    console.error(`  Unknown command: ${command}\n  Run 'forkscout help' for available commands.`);
+    process.exit(1);
+}
+
+await handler();

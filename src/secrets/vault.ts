@@ -164,3 +164,19 @@ export function hasSecretPlaceholders(str: string): boolean {
     ALIAS_PATTERN.lastIndex = 0;
     return ALIAS_PATTERN.test(str);
 }
+
+/**
+ * Populate process.env from vault secrets.
+ * Called at boot so LLM providers and tools that read process.env still work,
+ * while the actual secrets live only in the encrypted vault (not .env on disk).
+ * Returns the number of env vars populated.
+ */
+export function populateEnvFromVault(): number {
+    const cache = getCache();
+    let count = 0;
+    for (const [alias, value] of cache.entries()) {
+        process.env[alias] = value;
+        count++;
+    }
+    return count;
+}

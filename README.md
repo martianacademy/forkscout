@@ -15,52 +15,65 @@ ForkScout is not a chatbot wrapper. It is a fully autonomous agent that runs as 
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 - At least one LLM API key (OpenRouter is recommended — one key, access to all models)
 
-### 1 — Clone and install dependencies
+### One-Line Install
+
+Installs Bun (if missing), clones the repo, installs dependencies, and launches the interactive setup wizard:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marsnext/forkscout/main/install.sh | bash
+```
+
+After installation, `forkscout` is available as a global command from anywhere.
+
+### Manual Install
 
 ```bash
 git clone https://github.com/marsnext/forkscout
 cd forkscout-agent
 bun install
+bun link           # registers 'forkscout' global command
+forkscout setup    # interactive setup wizard
 ```
 
-### 2 — Create `.env`
+### Setup Wizard
+
+The setup wizard (`forkscout setup`) guides you through:
+
+1. **VAULT_KEY generation** — 256-bit encryption key for the secret vault
+2. **LLM Provider** — choose from 9 providers (OpenRouter, Anthropic, Google, xAI, etc.)
+3. **API Key** — stored directly in the encrypted vault (never in plain text)
+4. **Model Tier** — fast (cheap), balanced (default), or powerful (best reasoning)
+5. **Telegram Bot** — bot token + owner user ID (both stored in vault)
+6. **Agent Name** — customize your agent's identity
+
+All secrets are encrypted with AES-256-GCM. The only plain text file is `.env` which contains just `VAULT_KEY`.
+
+Re-run anytime: `forkscout setup`
+
+### Global CLI Commands
+
+After setup, use `forkscout` from anywhere:
 
 ```bash
-# Minimum required
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-
-# LLM provider — set the key for whichever provider you use (OpenRouter recommended)
-OPENROUTER_API_KEY=your_openrouter_key
-
-# Optional — only needed if switching to that provider
-ANTHROPIC_API_KEY=
-GOOGLE_GENERATIVE_AI_API_KEY=
-XAI_API_KEY=
-REPLICATE_API_TOKEN=
-HUGGING_FACE_API_KEY=
-DEEPSEEK_API_KEY=
-PERPLEXITY_API_KEY=
-ELEVENLABS_API_KEY=
+forkscout start      # Start Telegram bot
+forkscout cli        # Terminal chat
+forkscout dev        # Start with hot reload
+forkscout stop       # Stop all instances
+forkscout status     # Check if running
+forkscout logs       # Tail live logs
+forkscout setup      # Re-run setup wizard
+forkscout help       # All commands
 ```
 
-### 3 — Set yourself as owner (optional, skip for dev mode)
-
-Create `.agents/auth.json`. Find your Telegram user ID by messaging [@userinfobot](https://t.me/userinfobot):
+Or use `bun run` scripts from the project directory:
 
 ```bash
-mkdir -p .agent
-cat > .agents/auth.json <<'EOF'
-{
-  "telegram": {
-    "ownerUserIds": [YOUR_TELEGRAM_USER_ID]
-  }
-}
-EOF
+bun start            # same as forkscout start
+bun run cli          # same as forkscout cli
+bun run dev          # same as forkscout dev
 ```
 
-Leave the file absent or both lists empty to run in **dev mode** — every user gets owner access. Safe for local development.
-
-### 4 — Start supporting services with Docker
+### Start supporting services (optional)
 
 ```bash
 docker-compose up -d
@@ -75,35 +88,7 @@ docker-compose up -d
 
 Both are optional. Without SearXNG, `web_search` will fail (configure an alternative search URL in the tool if needed). Without the memory MCP, the agent still works but has no long-term memory.
 
-**Verify services are up:**
-
-```bash
-# SearXNG
-curl -s http://localhost:8080/search?q=test&format=json | jq '.results | length'
-
-# Memory MCP
-curl -s http://localhost:3211/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}' | jq '.result.tools | length'
-```
-
-### 5 — Run
-
-```bash
-# Telegram bot (production)
-bun start
-
-# Telegram bot with hot reload (development)
-bun run dev
-
-# Terminal / CLI channel (interactive)
-bun run cli
-
-# Terminal with hot reload
-bun run cli:dev
-```
-
-### 6 — Verify the bot
+### Verify the bot
 
 Send your bot a message on Telegram:
 
@@ -125,14 +110,6 @@ Read src/config.ts and explain what it does.
 ```bash
 bun run typecheck
 # Expected: no output, exit code 0
-```
-
-### 8 — (Optional) AI SDK DevTools
-
-```bash
-bun run devtools
-# Opens DevTools UI at http://localhost:4983
-# Visualises LLM requests, tool calls, token usage in real time
 ```
 
 ### All Ports at a Glance
@@ -170,6 +147,7 @@ docker-compose down -v
 - [MCP Servers](#mcp-servers)
 - [LLM Providers](#llm-providers)
 - [Configuration](#configuration)
+- [Security](#security)
 - [Auth & Access Control](#auth--access-control)
 - [Telegram Commands](#telegram-commands)
 - [Chat History & Memory](#chat-history--memory)
@@ -489,10 +467,10 @@ Lists all batch directories in `.agents/tasks/`. Shows per-worker `[ ]`/`[x]` st
 
 Recover after a Bun restart. On startup, orphaned monitors are detected and owners are notified via Telegram with full details. User then explicitly calls:
 
-| Action   | Effect                                                          |
-| -------- | --------------------------------------------------------------- |
-| `resume` | Restart monitor from saved state, send fresh progress card      |
-| `cancel` | Stop monitor, delete state — task files kept                    |
+| Action   | Effect                                                       |
+| -------- | ------------------------------------------------------------ |
+| `resume` | Restart monitor from saved state, send fresh progress card   |
+| `cancel` | Stop monitor, delete state — task files kept                 |
 | `delete` | Stop monitor, delete state + entire `.agents/tasks/{batch}/` |
 
 ---
@@ -985,34 +963,42 @@ forkscout-agent/
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 - An LLM API key (OpenRouter recommended — one key, access to all providers)
 
-### 1. Clone and install
+### 1. Install
+
+**One-liner** (recommended):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marsnext/forkscout/main/install.sh | bash
+```
+
+**Manual:**
 
 ```bash
 git clone https://github.com/marsnext/forkscout
 cd forkscout-agent
 bun install
+bun link
 ```
 
-### 2. Create `.env`
+### 2. Run setup wizard
 
 ```bash
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-OPENROUTER_API_KEY=your_openrouter_key_here
+forkscout setup
 ```
+
+The wizard creates:
+
+- `.env` — contains only `VAULT_KEY` (auto-generated 256-bit encryption key)
+- `.agents/vault.enc.json` — AES-256-GCM encrypted secrets (API keys, bot token, owner IDs)
+- `src/forkscout.config.json` — full config (provider, tier, models, all defaults)
 
 ### 3. Set yourself as owner
 
-Create `.agents/auth.json` (find your Telegram userId by messaging [@userinfobot](https://t.me/userinfobot)):
+The setup wizard asks for your Telegram user ID. Find it by messaging [@userinfobot](https://t.me/userinfobot).
 
-```json
-{
-  "telegram": {
-    "ownerUserIds": [YOUR_TELEGRAM_USER_ID]
-  }
-}
-```
+Owner IDs are stored in the encrypted vault — not in config files.
 
-Or leave it empty to run in dev mode (everyone gets owner access — fine for local use).
+Leave empty to run in **dev mode** — every user gets owner access. Safe for local development.
 
 ### 4. Start supporting services (optional but recommended)
 
@@ -1028,8 +1014,9 @@ This starts:
 ### 5. Start the bot
 
 ```bash
-bun start         # production (Telegram)
-bun run cli       # terminal channel
+forkscout start     # production (Telegram)
+forkscout cli       # terminal channel
+forkscout dev       # development with hot reload
 ```
 
 ### 6. Test
@@ -1062,11 +1049,11 @@ docker run -d \
   ghcr.io/marsnext/forkscout:latest
 ```
 
-| Flag                                   | Purpose                                                       |
-| -------------------------------------- | ------------------------------------------------------------- |
-| `--env-file .env`                      | Injects `TELEGRAM_BOT_TOKEN`, LLM keys, etc.                  |
+| Flag                             | Purpose                                                       |
+| -------------------------------- | ------------------------------------------------------------- |
+| `--env-file .env`                | Injects `TELEGRAM_BOT_TOKEN`, LLM keys, etc.                  |
 | `-v $(pwd)/.agents:/app/.agents` | Persists auth, chat history, and activity log across restarts |
-| `--restart unless-stopped`             | Auto-restarts on crash or reboot                              |
+| `--restart unless-stopped`       | Auto-restarts on crash or reboot                              |
 
 ### With Docker Compose (recommended — includes SearXNG + memory MCP)
 
@@ -1113,22 +1100,48 @@ docker run -d --name forkscout --restart unless-stopped \
 
 ---
 
+## Security
+
+ForkScout uses a **vault-only** architecture for secrets:
+
+| What                           | Where                        | Format                  |
+| ------------------------------ | ---------------------------- | ----------------------- |
+| API keys, tokens, passwords    | `.agents/vault.enc.json`     | AES-256-GCM encrypted   |
+| Vault encryption key           | `.env` (`VAULT_KEY`)         | 256-bit hex string      |
+| Owner user IDs                 | Vault (`TELEGRAM_OWNER_IDS`) | Encrypted JSON array    |
+| Config (models, tiers, limits) | `src/forkscout.config.json`  | Plain JSON (no secrets) |
+
+**How it works:**
+
+1. Setup wizard generates a `VAULT_KEY` (256-bit, `crypto.randomBytes(32)`)
+2. All secrets are encrypted and stored in `.agents/vault.enc.json`
+3. At boot, `populateEnvFromVault()` decrypts secrets into `process.env`
+4. `.env` contains only `VAULT_KEY` — no API keys, no tokens
+5. `.agents/` is gitignored — vault never enters version control
+
+**Why vault-only?** The agent has shell access and file read tools. Plain text `.env` files are trivially exposed via prompt injection or tool calls. The vault eliminates this attack surface — even if the agent reads `.env`, it only sees the vault key, not individual secrets.
+
+---
+
 ## Environment Variables
 
-| Variable                       | Required for         | Notes                              |
-| ------------------------------ | -------------------- | ---------------------------------- |
-| `TELEGRAM_BOT_TOKEN`           | Telegram channel     | From @BotFather                    |
-| `OPENROUTER_API_KEY`           | OpenRouter provider  | Recommended — access to all models |
-| `ANTHROPIC_API_KEY`            | Anthropic provider   | Direct Anthropic API               |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Google provider      | Google AI Studio                   |
-| `XAI_API_KEY`                  | xAI provider         | Grok models                        |
-| `REPLICATE_API_TOKEN`          | Replicate provider   | Open-source models                 |
-| `HUGGING_FACE_API_KEY`         | HuggingFace provider | HF Inference API                   |
-| `DEEPSEEK_API_KEY`             | DeepSeek provider    | DeepSeek models                    |
-| `PERPLEXITY_API_KEY`           | Perplexity provider  | Sonar models with web search       |
-| `ELEVENLABS_API_KEY`           | Voice features       | TTS + STT                          |
+| Variable                       | Required for         | Notes                          |
+| ------------------------------ | -------------------- | ------------------------------ |
+| `VAULT_KEY`                    | Always               | Auto-generated by setup wizard |
+| `TELEGRAM_BOT_TOKEN`           | Telegram channel     | Stored in vault, not .env      |
+| `OPENROUTER_API_KEY`           | OpenRouter provider  | Stored in vault, not .env      |
+| `ANTHROPIC_API_KEY`            | Anthropic provider   | Stored in vault, not .env      |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Google provider      | Stored in vault, not .env      |
+| `XAI_API_KEY`                  | xAI provider         | Stored in vault, not .env      |
+| `REPLICATE_API_TOKEN`          | Replicate provider   | Stored in vault, not .env      |
+| `HUGGING_FACE_API_KEY`         | HuggingFace provider | Stored in vault, not .env      |
+| `DEEPSEEK_API_KEY`             | DeepSeek provider    | Stored in vault, not .env      |
+| `PERPLEXITY_API_KEY`           | Perplexity provider  | Stored in vault, not .env      |
+| `ELEVENLABS_API_KEY`           | Voice features       | Stored in vault, not .env      |
 
-Only one LLM key is required — whichever provider is set as `llm.provider` in config.
+All API keys are stored in the encrypted vault. Run `forkscout setup` to add or update keys.
+
+Only `VAULT_KEY` lives in `.env` — everything else is encrypted at rest.
 
 ---
 
@@ -1164,6 +1177,21 @@ git reset --hard <commit-hash>
 
 ## Scripts
 
+### Global CLI (from anywhere)
+
+```bash
+forkscout start      # Start Telegram bot
+forkscout cli        # Terminal chat
+forkscout dev        # Hot reload development
+forkscout stop       # Stop all instances
+forkscout status     # Check if running
+forkscout logs       # Tail live logs
+forkscout setup      # Setup wizard
+forkscout help       # All commands
+```
+
+### Project scripts (from repo directory)
+
 ```bash
 bun start          # kill existing instance, start production (Telegram)
 bun run dev        # kill existing instance, start with hot reload (Telegram)
@@ -1171,6 +1199,7 @@ bun run cli        # kill existing instance, start terminal channel
 bun run cli:dev    # kill existing instance, start terminal + hot reload
 bun run stop       # kill all running agent instances
 bun run typecheck  # tsc --noEmit (0 errors = clean)
+bun run setup      # run setup wizard
 bun run devtools   # AI SDK DevTools UI at http://localhost:4983
 ```
 

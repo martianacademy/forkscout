@@ -9,3 +9,5 @@ lg_tv_store.json
 bun.lockb
 .agents/
 .devtools
+base.config.json
+src/forkscout.config1.json

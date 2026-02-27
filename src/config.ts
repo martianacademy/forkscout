@@ -125,7 +125,7 @@ export interface AppConfig {
         pollingTimeout: number;
         /** Max tokens to keep in per-chat history before trimming oldest messages */
         historyTokenBudget: number;
-        /** Owner user IDs — full access including shell tools. */
+        /** @deprecated Owner IDs now stored in encrypted vault as TELEGRAM_OWNER_IDS. Kept for backward compat. */
         ownerUserIds: number[];
         /** Allowed user IDs — can use the agent but not owner-only tools. Empty = everyone allowed. */
         allowedUserIds: number[];
@@ -241,6 +241,9 @@ export function loadConfig(): AppConfig {
     const configPath = resolve(__dirname, "forkscout.config.json");
     const raw = readFileSync(configPath, "utf-8");
     let config = JSON.parse(raw) as AppConfig;
+
+    // Default ownerUserIds to [] (now stored in vault, not config)
+    if (!config.telegram.ownerUserIds) config.telegram.ownerUserIds = [];
 
     // Merge .agents/auth.json if it exists (gitignored — safe for secrets)
     if (existsSync(AUTH_FILE)) {

@@ -367,7 +367,9 @@ function json(data: unknown, status = 200): Response {
 
 export async function checkOrphanedMonitors(config: AppConfig): Promise<void> {
     const token = process.env.TELEGRAM_BOT_TOKEN;
-    const ownerIds: number[] = config.telegram?.ownerUserIds ?? [];
+    // Owner IDs stored in vault, populated into env at boot
+    let ownerIds: number[] = [];
+    try { ownerIds = JSON.parse(process.env.TELEGRAM_OWNER_IDS ?? "[]"); } catch { /* ignore */ }
 
     if (!token || ownerIds.length === 0) return;
 

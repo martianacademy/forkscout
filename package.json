@@ -4,6 +4,9 @@
     "description": "Forkscout AI agent — Telegram + LLM + MCP + Tools",
     "private": true,
     "type": "module",
+    "bin": {
+        "forkscout": "bin/forkscout"
+    },
     "scripts": {
         "stop": "pkill -9 -f 'src/index.ts' 2>/dev/null; pkill -9 -f 'forkscout-agent' 2>/dev/null; sleep 1; echo '[forkscout] stopped'",
         "start": "bun run stop; DEVTOOLS=1 bun run src/index.ts",
@@ -17,6 +20,7 @@
         "safe-restart": "bash scripts/safe-restart.sh",
         "typecheck": "bun run --bun tsc --noEmit",
         "devtools": "node node_modules/@ai-sdk/devtools/bin/cli.js",
+        "setup": "bun run src/setup/wizard.ts",
         "dev:tools": "bun run stop; concurrently -k -n AGENT,DEVTOOLS -c cyan,yellow \"DEVTOOLS=1 bun --hot src/index.ts\" \"node node_modules/@ai-sdk/devtools/bin/cli.js\""
     },
     "dependencies": {
@@ -31,6 +35,7 @@
         "@ai-sdk/vercel": "^2.0.32",
         "@ai-sdk/xai": "^3.0.57",
         "@grammyjs/types": "^3.24.0",
+        "@inquirer/prompts": "^8.3.0",
         "@modelcontextprotocol/sdk": "^1.26.0",
         "ai": "6.0.97",
         "diff": "^8.0.3",

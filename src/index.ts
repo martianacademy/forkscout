@@ -5,8 +5,22 @@ import telegramChannel from "@/channels/telegram/index.ts";
 import terminalChannel from "@/channels/terminal/index.ts";
 import selfChannel, { startCronJobs, startHttpServer, checkOrphanedMonitors } from "@/channels/self/index.ts";
 import { log } from "@/logs/logger.ts";
+import { populateEnvFromVault } from "@/secrets/vault.ts";
+
+// Setup wizard — runs and exits before anything else
+if (process.argv.includes("--setup")) {
+    const { runSetupWizard } = await import("@/setup/wizard.ts");
+    await runSetupWizard();
+    process.exit(0);
+}
+
+// Populate process.env from encrypted vault (secrets never stored in .env)
+const vaultCount = populateEnvFromVault();
 
 const logger = log("forkscout");
+if (vaultCount > 0) {
+    logger.info(`Loaded ${vaultCount} secret(s) from vault into process.env`);
+}
 
 const config = loadConfig();
 const channelName = process.argv.includes("--cli")
