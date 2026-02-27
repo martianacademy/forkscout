@@ -1,5 +1,5 @@
 // src/config.ts — Config loader
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, watch } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -214,6 +214,21 @@ let _config: AppConfig | null = null;
 
 /** Path to the gitignored auth override file */
 const AUTH_FILE = resolve(__dirname, "..", ".forkscout", "auth.json");
+
+// ── Hot-reload: watch forkscout.config.json and auth.json for changes ────────
+// Clears the in-memory cache so the next getConfig() call re-reads from disk.
+// Works in production (bun start) — no restart needed for config changes.
+const CONFIG_PATH = resolve(__dirname, "forkscout.config.json");
+function startConfigWatcher(): void {
+    const invalidate = (filename: string | null) => {
+        if (!_config) return; // already cleared
+        _config = null;
+        console.log(`[config] hot-reload: ${filename ?? "config"} changed — cache cleared`);
+    };
+    try { watch(CONFIG_PATH, { persistent: false }, (_, f) => invalidate(f)); } catch { /* ignore */ }
+    try { watch(AUTH_FILE, { persistent: false }, (_, f) => invalidate(f)); } catch { /* ignore if not exists */ }
+}
+startConfigWatcher();
 
 export function loadConfig(): AppConfig {
     if (_config) return _config;
