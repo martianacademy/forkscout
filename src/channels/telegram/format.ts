@@ -53,10 +53,12 @@ export function mdToHtml(md: string): string {
     out = out.replace(/^> (.+)$/gm, "<blockquote>$1</blockquote>");
 
     // ── Escape remaining & < > that are NOT part of our tags ─────────────────
-    // Split on tags we just produced, escape text segments only
+    // Only allow the Telegram HTML subset — anything else gets escaped.
+    // This prevents unknown tags like <minimax:tool_call> from breaking the parser.
+    const TELEGRAM_TAG_RE = /^<\/?(b|strong|i|em|u|ins|s|strike|del|code|pre|a|blockquote|tg-spoiler|span)(\s[^>]*)?>$/i;
     out = out
         .split(/(<[^>]+>)/g)
-        .map((seg) => (seg.startsWith("<") ? seg : escapeHtml(seg)))
+        .map((seg) => (seg.startsWith("<") && TELEGRAM_TAG_RE.test(seg) ? seg : escapeHtml(seg)))
         .join("");
 
     return out.trim();
