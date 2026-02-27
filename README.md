@@ -18,7 +18,7 @@ ForkScout is not a chatbot wrapper. It is a fully autonomous agent that runs as 
 ### 1 — Clone and install dependencies
 
 ```bash
-git clone https://github.com/martianacademy/forkscout
+git clone https://github.com/marsnext/forkscout
 cd forkscout-agent
 bun install
 ```
@@ -625,7 +625,7 @@ All configuration lives in `src/forkscout.config.json`. Secrets and per-deployme
   "agent": {
     "name": "ForkScout",
     "description": "...",
-    "github": "https://github.com/martianacademy/forkscout",
+    "github": "https://github.com/marsnext/forkscout",
     "systemPromptExtra": "Optional extra instructions appended to identity"
   },
   "llm": {
@@ -988,7 +988,7 @@ forkscout-agent/
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/martianacademy/forkscout
+git clone https://github.com/marsnext/forkscout
 cd forkscout-agent
 bun install
 ```
@@ -1048,7 +1048,7 @@ Send your bot a message on Telegram. Try:
 A pre-built image is published to GitHub Container Registry on every release. No Bun, no `bun install` required.
 
 ```bash
-docker pull ghcr.io/martianacademy/forkscout:latest
+docker pull ghcr.io/marsnext/forkscout:latest
 ```
 
 ### Run
@@ -1059,7 +1059,7 @@ docker run -d \
   --restart unless-stopped \
   --env-file .env \
   -v $(pwd)/.agents:/app/.agents \
-  ghcr.io/martianacademy/forkscout:latest
+  ghcr.io/marsnext/forkscout:latest
 ```
 
 | Flag                                   | Purpose                                                       |
@@ -1084,8 +1084,8 @@ This starts all three services together: the agent, SearXNG (port 8080), and for
 | `latest` | Latest stable release |
 | `v3.0.0` | Pinned version        |
 
-**Registry:** `ghcr.io/martianacademy/forkscout`
-**Package page:** https://github.com/martianacademy/forkscout/pkgs/container/forkscout
+**Registry:** `ghcr.io/marsnext/forkscout`
+**Package page:** https://github.com/marsnext/forkscout/pkgs/container/forkscout
 
 ### View logs
 
@@ -1103,12 +1103,12 @@ docker exec forkscout tail -50 /app/.agents/activity.log
 docker stop forkscout && docker rm forkscout
 
 # Update to latest
-docker pull ghcr.io/martianacademy/forkscout:latest
+docker pull ghcr.io/marsnext/forkscout:latest
 docker stop forkscout && docker rm forkscout
 docker run -d --name forkscout --restart unless-stopped \
   --env-file .env \
   -v $(pwd)/.agents:/app/.agents \
-  ghcr.io/martianacademy/forkscout:latest
+  ghcr.io/marsnext/forkscout:latest
 ```
 
 ---
@@ -1438,4 +1438,4 @@ MIT
 
 ## Author
 
-Built by [Martian Academy](https://github.com/martianacademy). ForkScout is an ongoing experiment in autonomous AI agents — built to understand what it means for a program to have genuine agency, memory, and presence.
+Built by [Martian Academy](https://github.com/marsnext). ForkScout is an ongoing experiment in autonomous AI agents — built to understand what it means for a program to have genuine agency, memory, and presence.

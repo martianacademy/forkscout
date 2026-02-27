@@ -23,7 +23,7 @@
     "agent": {
         "name": "ForkScout",
         "description": "An autonomous agent that can use tools and access the web to answer questions and perform tasks.",
-        "github": "https://github.com/martianacademy/forkscout"
+        "github": "https://github.com/marsnext/forkscout"
     },
     "browser": {
         "headless": false,

@@ -20,7 +20,7 @@ import { parse, type HTMLElement } from "node-html-parser";
 export const IS_BOOTSTRAP_TOOL = false;
 
 const DEFAULT_UA =
-    "Mozilla/5.0 (compatible; ForkScout/3.0; +https://github.com/martianacademy/forkscout)";
+    "Mozilla/5.0 (compatible; ForkScout/3.0; +https://github.com/marsnext/forkscout)";
 
 async function fetchHtml(url: string, timeoutMs: number): Promise<string> {
     const controller = new AbortController();

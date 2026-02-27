@@ -39,7 +39,7 @@ async function fetchFeedText(url: string, timeoutMs: number): Promise<string> {
             signal: controller.signal,
             headers: {
                 Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*;q=0.8",
-                "User-Agent": "ForkScout/3.0 (+https://github.com/martianacademy/forkscout)",
+                "User-Agent": "ForkScout/3.0 (+https://github.com/marsnext/forkscout)",
             },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
