@@ -18,8 +18,6 @@ import { appendFileSync } from "node:fs";
 const ROOT = process.cwd();
 const AGENT_LOG = `${ROOT}/.forkscout/agent.log`;
 const SMOKE_LOG = `${ROOT}/.forkscout/smoke.log`;
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const OWNER_ID = OWNER_CHAT_ID; // From .forkscout/auth.json
 
 export const IS_BOOTSTRAP_TOOL = false;
 
@@ -99,15 +97,9 @@ export const validate_and_restart = tool({
             "lsof -ti :3200 | xargs kill -9 2>/dev/null || true",
             "sleep 2",
             `echo "[validate_and_restart] Starting fresh agent -- $(date -u)" >> ${AGENT_LOG}`,
-            `cd ${ROOT} && DEVTOOLS=1 nohup bun run src/index.ts >> ${AGENT_LOG} 2>&1 &`,
+            `cd ${ROOT} && DEVTOOLS=1 FORKSCOUT_RESTART_REASON='${input.reason.replace(/'/g, "'\\''")}' nohup bun run src/index.ts >> ${AGENT_LOG} 2>&1 &`,
             `echo "[validate_and_restart] Fresh agent spawned (PID $!)" >> ${AGENT_LOG}`,
-            "",
-            "# Step 4: Wait for new agent to be ready, then notify owner",
-            "sleep 5",
-            `curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \\`,
-            `   -d "chat_id=${OWNER_ID}" \\`,
-            `   -d "text=✅ *ForkScout is back online!*\\n\\nReason: ${input.reason.replace(/"/g, '\\"')}\\n\\nSmoke test: ✓ passed" \\`,
-            `   --max-time 10 >> ${AGENT_LOG} 2>&1 || true`,
+            "# Startup notification is sent by the new agent itself via FORKSCOUT_RESTART_REASON",
         ].join("\n");
 
         const scriptPath = "/tmp/forkscout-restart.sh";
