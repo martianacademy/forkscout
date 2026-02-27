@@ -21,23 +21,21 @@ const SMOKE_LOG = `${ROOT}/.forkscout/smoke.log`;
 
 export const IS_BOOTSTRAP_TOOL = false;
 
-const inputSchema = z.object({
-    reason: z.string().describe("Why a restart is needed (shown in logs)"),
-    smoke_message: z
-        .string()
-        .default("reply with only the single word: ok")
-        .describe("Custom test message to send to the new process"),
-    timeout_seconds: z
-        .number()
-        .default(90)
-        .describe("Seconds to wait for smoke test response"),
-});
-
 export const validate_and_restart = tool({
     description:
         "Safely restart the agent after code changes. Runs typecheck then boots a SEPARATE test process (current agent stays alive). Only if the test passes does it kill the current agent and start fresh. After restart, automatically notifies the owner that the agent is back online.",
-    inputSchema: inputSchema as any,
-    execute: async (input: z.infer<typeof inputSchema>) => {
+    inputSchema: z.object({
+        reason: z.string().describe("Why a restart is needed (shown in logs)"),
+        smoke_message: z
+            .string()
+            .default("reply with only the single word: ok")
+            .describe("Custom test message to send to the new process"),
+        timeout_seconds: z
+            .number()
+            .default(90)
+            .describe("Seconds to wait for smoke test response"),
+    }),
+    execute: async (input) => {
         const smokeMsg = input.smoke_message;
         const timeoutSec = input.timeout_seconds;
 
