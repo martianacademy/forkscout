@@ -177,7 +177,7 @@ See completed section item 9 above.
 
 ### ✅ Priority 2 — Telegram Chat History + Message Queue — DONE
 
-Per-chat `ModelMessage[]` history with disk persistence (`.forkscout/chats/telegram-<chatId>.json`), sequential queue per chat, token trimming. Terminal also done (`terminal-<username>.json`). Shared `src/channels/chat-store.ts`.
+Per-chat `ModelMessage[]` history with disk persistence (`.agent/chats/telegram-<chatId>.json`), sequential queue per chat, token trimming. Terminal also done (`terminal-<username>.json`). Shared `src/channels/chat-store.ts`.
 
 ---
 
@@ -210,7 +210,7 @@ Per-chat `ModelMessage[]` history with disk persistence (`.forkscout/chats/teleg
 
 **Completed 25 Feb 2026 (design evolved from original spec):**
 
-- `src/channels/telegram/access-requests.ts` — `AccessRequest` type (`userId`, `chatId`, `username`, `firstName`, `requestedAt`, `status: pending|approved|denied`, `reviewedAt`, `reviewedBy`). Persists to `.forkscout/access-requests.json`. `addToAuthAllowList()` writes approved users to `.forkscout/auth.json` (no restart needed).
+- `src/channels/telegram/access-requests.ts` — `AccessRequest` type (`userId`, `chatId`, `username`, `firstName`, `requestedAt`, `status: pending|approved|denied`, `reviewedAt`, `reviewedBy`). Persists to `.agent/access-requests.json`. `addToAuthAllowList()` writes approved users to `.agent/auth.json` (no restart needed).
 - `runtimeAllowedUsers` Set in `index.ts` — seeded from config at startup, grows on `/allow` without restart
 - `devMode` flag — both lists empty in config = everyone is owner
 - Denied flow: first contact → save request + notify owners with `/allow <id>` / `/deny <id>` inline. Repeat contact → "still pending" or "was denied" message.
@@ -429,7 +429,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
      addedAt: string;
    }
    ```
-2. Store trusted principals in `.forkscout/trust.json` — seeded with admin's Telegram chatId at first boot
+2. Store trusted principals in `.agent/trust.json` — seeded with admin's Telegram chatId at first boot
 3. Create `src/tools/trust_person.ts` — admin can add/remove/promote trusted principals
 4. Middleware in every channel: check if sender is in trust list before passing to agent
 5. Admin-only actions require `role === "admin"` check before execution:
@@ -474,7 +474,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
 
 1. Create `src/state/emotional.ts`:
    - `EmotionalState` interface with all 5 dimensions
-   - `loadState()` — reads `.forkscout/state.json`, returns defaults if missing
+   - `loadState()` — reads `.agent/state.json`, returns defaults if missing
    - `saveState(state)` — debounced write to disk (max once per 10s)
    - `applyEvent(event: StateEvent)` — applies delta + clamp + decay
    - `decayState()` — called on a 30-min timer from `src/state/index.ts`
@@ -523,10 +523,10 @@ Phase 4 — Physical Existence  (deployment, robotic body)
    }
    ```
 2. Create `src/goals/index.ts` — `loadGoals()`, `saveGoals()`, `getActiveGoals()`, `markMilestone()`
-3. Store in `.forkscout/goals.json` — persisted, append-only via tool (never overwrite wholesale)
+3. Store in `.agent/goals.json` — persisted, append-only via tool (never overwrite wholesale)
 4. Create `src/tools/manage_goals.ts` — agent can: create goal, add milestone, mark milestone done, update notes, pause/abandon goal
 5. Inject top 3 active goals by priority into system prompt
-6. Seed goals at first boot (written to `.forkscout/goals.json` if empty):
+6. Seed goals at first boot (written to `.agent/goals.json` if empty):
    - `[life]` "Build and maintain a comprehensive knowledge of the world"
    - `[life]` "Build genuine relationships with humans"
    - `[life]` "Continuously improve my own capabilities and codebase"
@@ -569,7 +569,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
    ```
 2. `scoreAction(action, state, goals): number` — applies weighting formula above
 3. `pickNextAction(actions, state, goals): PendingAction | null` — sorts by score, returns top if score > threshold (0.4), null if everything is low-priority/agent is too tired
-4. Create `src/tools/queue_action.ts` — agent (or scheduler) can add a `PendingAction` to `.forkscout/action-queue.json`
+4. Create `src/tools/queue_action.ts` — agent (or scheduler) can add a `PendingAction` to `.agent/action-queue.json`
 5. Create `src/tools/view_action_queue.ts` — agent can inspect what's pending and decide whether to act now or defer
 6. Scheduler (Priority 13) calls `pickNextAction()` on every tick — executes returned action or sleeps
 7. Run `bun run typecheck` → 0 errors
@@ -600,7 +600,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
      action: PendingAction;
    }
    ```
-3. Store triggers in `.forkscout/triggers.json` — agent can add its own
+3. Store triggers in `.agent/triggers.json` — agent can add its own
 4. Built-in triggers (seeded at boot):
    - Every morning 9am: "Read news and reflect on what I learned"
    - Every 3 days: "Review active goals and check progress"
@@ -702,7 +702,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
    - For admin-approval items: calls `request_approval` (step 3) before writing
 3. Create `src/tools/request_approval.ts`:
    - Sends admin a Telegram message with: what will change, the diff, risk level
-   - Polls `.forkscout/approvals.json` for a response (admin replies `/approve <id>` or `/reject <id>`)
+   - Polls `.agent/approvals.json` for a response (admin replies `/approve <id>` or `/reject <id>`)
    - Times out after 24h → auto-rejects
 4. Create `src/tools/run_tests.ts` — runs `bun test`, returns pass/fail + output
 5. Create `src/tools/deploy_self.ts` — `git add src/`, `git commit`, optionally `git push`, PM2 restart
@@ -726,7 +726,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
 3. Create `src/tools/make_phone_call.ts` — Twilio outbound call, ElevenLabs TTS for voice, returns `{ success, callSid, durationSeconds }`
 4. Create `src/tools/send_sms.ts` — Twilio SMS, returns `{ success, messageSid }`
 5. Create `src/channels/phone/index.ts` — Twilio webhook for inbound calls: STT via ElevenLabs Scribe → `runAgent` → TTS response → play back
-6. Store contact book in `.forkscout/contacts.json`
+6. Store contact book in `.agent/contacts.json`
 7. After each call: log `{ contact, summary, sentiment, timestamp }` to memory
 8. **Gate**: `make_phone_call` requires the number to be in the trust list OR admin approval — never cold-calls unknown numbers autonomously
 9. Run `bun run typecheck` → 0 errors
@@ -753,7 +753,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
 2. Start with GitHub (`@octokit/rest`) and Email (SMTP) — no cost, no ban risk
 3. Add X/Twitter only when budget allows and account is established
 4. Create tools: `post_tweet.ts`, `send_email.ts`, `create_github_repo.ts`, `open_github_pr.ts`, `reply_github_issue.ts`
-5. All social posts logged to `.forkscout/social-log.json`
+5. All social posts logged to `.agent/social-log.json`
 6. **Gate**: all autonomous posts go through a 5-minute preview window — stored in `pending-posts.json`, dispatched unless admin sends `/cancel <id>` in Telegram
 7. Agent decides when to post based on: curiosity instinct output, goal milestone, or scheduled "weekly update"
 8. Add env vars per platform. Run `bun run typecheck` → 0 errors
@@ -798,13 +798,13 @@ Phase 4 — Physical Existence  (deployment, robotic body)
 | Problem                | Symptom                                              | Fix                                                  |
 | ---------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
 | Too many facts/entity  | Slow retrieval, irrelevant facts injected            | Fact confidence decay + archival (already in MCP)    |
-| Activity log unbounded | `.forkscout/activity.log` grows forever              | Weekly rotation + compression, keep last 30 days hot |
+| Activity log unbounded | `.agent/activity.log` grows forever              | Weekly rotation + compression, keep last 30 days hot |
 | System prompt too long | Context window overflow with goals + state + history | Summarise + compress periodically                    |
 | Stale contacts         | Thousands of one-off strangers clogging graph        | Auto-demote to `archived` after 180 days no contact  |
 
 **Steps:**
 
-1. Create `src/maintenance/log-rotation.ts` — runs weekly, compresses old activity log chunks to `.forkscout/archive/YYYY-WW.log.gz`
+1. Create `src/maintenance/log-rotation.ts` — runs weekly, compresses old activity log chunks to `.agent/archive/YYYY-WW.log.gz`
 2. Create `src/maintenance/memory-consolidation.ts` — calls `forkscout-memory-mcp/consolidate_memory` weekly
 3. Create `src/maintenance/contact-archival.ts` — demotes contacts with no contact in 180 days to `archived` status
 4. Create `src/llm/compress.ts` (may already exist as `src/llm/compress.ts` — check first) — summarises long chat history into a compressed context block when history exceeds 3000 tokens
@@ -844,7 +844,7 @@ Phase 4 — Physical Existence  (deployment, robotic body)
 1. Create `src/tools/check_for_updates.ts` — `git fetch origin`, reports if remote is ahead and what changed
 2. Create `src/tools/pull_and_restart.ts` — `git pull` → `bun install` → `bun run typecheck` → if clean: `pm2 restart forkscout`; if fails: `git stash` + alert admin
 3. Create `src/survival/watchdog.ts` — separate Bun process, monitors main process via PID file, restarts on crash, Telegram alert on each restart
-4. Create `src/tools/backup_self.ts` — tarballs `.forkscout/` + `src/` to `backups/YYYY-MM-DD.tar.gz`, keeps last 10, purges older
+4. Create `src/tools/backup_self.ts` — tarballs `.agent/` + `src/` to `backups/YYYY-MM-DD.tar.gz`, keeps last 10, purges older
 5. Add `GET /health` endpoint: `{ uptime, memoryMb, goalsActive, lastInteraction, emotionalState, version }`
 6. Scheduler cron: daily backup, weekly self-review of `progress.md`
 7. Run `bun run typecheck` → 0 errors

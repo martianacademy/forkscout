@@ -119,11 +119,17 @@ export async function discoverMcpTools(): Promise<Record<string, Tool>> {
                             v.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? ""),
                         ])
                     )
-                    : undefined;
+                    : {};
+
+                // Always include Accept: text/event-stream for SSE support
+                const headers = {
+                    ...resolvedHeaders,
+                    Accept: "text/event-stream,application/json",
+                };
 
                 const transport = new StreamableHTTPClientTransport(
                     new URL(mcpConfig.url),
-                    resolvedHeaders ? { requestInit: { headers: resolvedHeaders } } : undefined
+                    { requestInit: { headers } }
                 );
                 await client.connect(transport);
             } else if (mcpConfig.command) {

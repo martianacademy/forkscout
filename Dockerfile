@@ -21,8 +21,8 @@ COPY . .
 # Install Chromium and its OS-level deps via Playwright CLI
 RUN bunx playwright install chromium --with-deps
 
-# .forkscout/ is mounted as a volume at runtime (auth.json + chat history)
-RUN mkdir -p /app/.forkscout/chats && chown -R bun:bun /app/.forkscout
+# .agent/ is mounted as a volume at runtime (auth.json + chat history)
+RUN mkdir -p /app/.agent/chats && chown -R bun:bun /app/.agent
 
 # Drop privileges
 USER bun

@@ -1,10 +1,10 @@
 // src/channels/telegram/access-requests.ts — Persists Telegram access requests and owner approval flow.
-// Stores to .forkscout/access-requests.json
+// Stores to .agent/access-requests.json
 // Owners use /allow <userId> or /deny <userId> to action them.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
 
-const DATA_DIR = resolve(process.cwd(), ".forkscout");
+const DATA_DIR = resolve(process.cwd(), ".agent");
 const REQUESTS_FILE = resolve(DATA_DIR, "access-requests.json");
 const AUTH_FILE = resolve(DATA_DIR, "auth.json");
 
@@ -89,7 +89,7 @@ export function updateRequestStatus(
 }
 
 /**
- * Add userId to the persistent .forkscout/auth.json allowlist.
+ * Add userId to the persistent .agent/auth.json allowlist.
  * role="admin" → ownerUserIds, role="user" → allowedUserIds.
  * Safe to call multiple times — deduplicates automatically.
  */

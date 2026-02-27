@@ -45,11 +45,11 @@ ELEVENLABS_API_KEY=
 
 ### 3 — Set yourself as owner (optional, skip for dev mode)
 
-Create `.forkscout/auth.json`. Find your Telegram user ID by messaging [@userinfobot](https://t.me/userinfobot):
+Create `.agent/auth.json`. Find your Telegram user ID by messaging [@userinfobot](https://t.me/userinfobot):
 
 ```bash
-mkdir -p .forkscout
-cat > .forkscout/auth.json <<'EOF'
+mkdir -p .agent
+cat > .agent/auth.json <<'EOF'
 {
   "telegram": {
     "ownerUserIds": [YOUR_TELEGRAM_USER_ID]
@@ -204,7 +204,7 @@ It is designed around several core principles:
 
 1. **Tool-native** — the agent uses real tools (shell, filesystem, web, search, memory) rather than generating text answers. Every capability is a callable function.
 2. **Provider-agnostic** — swap the LLM (OpenRouter, Anthropic, Google, xAI, DeepSeek, Perplexity, Replicate, HuggingFace, Vercel) by changing one JSON field. No code changes.
-3. **Config-driven** — identity, model selection, rate limits, auth, token budgets — everything lives in `src/forkscout.config.json` and an optional gitignored `.forkscout/auth.json`.
+3. **Config-driven** — identity, model selection, rate limits, auth, token budgets — everything lives in `src/forkscout.config.json` and an optional gitignored `.agent/auth.json`.
 4. **MCP-first** — external capabilities (memory, GitHub, documentation search, sequential thinking) are connected via MCP servers. Drop a JSON file → tool is live.
 5. **Persistent memory** — the agent remembers conversations and facts across restarts via a dedicated memory MCP server.
 6. **Self-modifying** — the agent can edit its own source code, verify it compiles, and restart itself from Telegram.
@@ -216,7 +216,7 @@ It is designed around several core principles:
 
 ```
 src/index.ts                   ← entry point, picks channel by argv
-src/config.ts                  ← loads forkscout.config.json + .forkscout/auth.json
+src/config.ts                  ← loads forkscout.config.json + .agent/auth.json
 src/forkscout.config.json      ← all runtime config
 
 src/channels/                  ← user-facing interfaces
@@ -270,7 +270,7 @@ src/mcp-servers/               ← auto-discovered MCP server configs
 
 src/logs/
   logger.ts                    ← tagged per-module logger (info/warn/error)
-  activity-log.ts              ← NDJSON event log at .forkscout/activity.log
+  activity-log.ts              ← NDJSON event log at .agent/activity.log
 
 src/llm/
   summarize.ts                 ← llmSummarize() — fast-tier LLM synthesis with extractive fallback
@@ -296,12 +296,12 @@ src/utils/
 
 - **Self HTTP server** — embedded HTTP server on configurable port (default `3200`) accepts trigger requests to spawn new agent self-sessions
 - **`chain_of_workers`** — sequential self-session chain where each step's output feeds the next. Agent writes a todo file, fires the next session, current session ends cleanly. Each step can optionally post a `🔄 Step started` notification to Telegram
-- **`parallel_workers`** — dispatches N independent worker self-sessions concurrently. Each worker writes results to `.forkscout/tasks/{batch}/` and flips its plan.md checkbox when done
+- **`parallel_workers`** — dispatches N independent worker self-sessions concurrently. Each worker writes results to `.agent/tasks/{batch}/` and flips its plan.md checkbox when done
 - **Live progress card** — pure-JS monitor (zero LLM cost while waiting) updates a single Telegram message every 3 seconds showing `[ ]`/`[x]` status per worker. Auto-fires the aggregator session when all tasks complete
 - **Aggregator session** — when all workers finish, a final self-session compiles results, sends summary to user via Telegram, and cleans up task files
 - **Confirmation gate** — on human channels (Telegram/terminal), agent always presents the full execution plan (workers, tasks, aggregator action) and waits for explicit user confirmation before firing. Self-sessions skip this gate
 - **`list_active_workers`** — inspect all active batches: per-worker status, progress fraction (e.g. `3/5`), which batches have a live monitor
-- **Monitor state persistence** — monitor state is saved to `.forkscout/monitors/{batch}.json`. Survives Bun restarts
+- **Monitor state persistence** — monitor state is saved to `.agent/monitors/{batch}.json`. Survives Bun restarts
 - **Orphan recovery on restart** — on startup, agent detects orphaned monitors from previous run, sends a detailed Telegram notification (progress, per-task status, started timestamp) to all owners. Does NOT auto-resume — user must explicitly confirm
 - **`manage_workers`** — resume, cancel, or delete an orphaned batch after restart. `resume` restarts the progress card; `cancel` stops monitor keeping files; `delete` removes everything including task files
 
@@ -317,12 +317,12 @@ src/utils/
 - Role-based: `owner` (full access) | `user` (agent only) | `denied`
 - Dev mode: both lists empty → everyone gets owner (safe for local dev)
 - Allowlist managed via Telegram commands — no restart required
-- Requests persisted to `.forkscout/access-requests.json` with status tracking
+- Requests persisted to `.agent/access-requests.json` with status tracking
 - Role-aware approvals: `/allow <id> admin` or `/allow <id>` (default: user)
 
 ### Memory
 
-- Per-chat conversation history persisted to `.forkscout/chats/<channel>-<id>.json`
+- Per-chat conversation history persisted to `.agent/chats/<channel>-<id>.json`
 - Token budget trimming (oldest messages dropped first when budget exceeded)
 - Per-tool-result token cap with extractive summarisation (not blind truncation)
 - Long-term memory via forkscout-memory MCP — facts, entities, relationships, exchanges
@@ -335,7 +335,7 @@ src/utils/
 
 ### Logging
 
-- All events (messages, tool calls, tool results, errors, tokens) logged to `.forkscout/activity.log` as NDJSON
+- All events (messages, tool calls, tool results, errors, tokens) logged to `.agent/activity.log` as NDJSON
 - Tagged per-module console output (`[telegram]`, `[agent]`, `[tools]`, etc.)
 - Queryable with `jq` for debugging
 
@@ -447,7 +447,7 @@ ForkScout can spawn independent self-sessions to run work in parallel or sequent
 Fire a sequential self-session chain. The next session receives full shared history. Pattern:
 
 ```
-1. Write .forkscout/tasks/{name}/todo.md with all steps
+1. Write .agent/tasks/{name}/todo.md with all steps
 2. chain_of_workers({ prompt: "Read todo.md, do step 1, mark done, call chain_of_workers for step 2", chat_id: <id> })
 3. Current session ends
 4. Next session reads todo.md, does one step, marks done, calls chain again
@@ -467,14 +467,14 @@ parallel_workers({
     { session_key: "task-auth", label: "Analyse auth", prompt: "...fully self-contained..." },
     { session_key: "task-db",   label: "Analyse DB",   prompt: "...fully self-contained..." },
   ],
-  aggregator_prompt: "Read results, compile summary, send via telegram_message_tools, delete .forkscout/tasks/analyse-codebase/",
+  aggregator_prompt: "Read results, compile summary, send via telegram_message_tools, delete .agent/tasks/analyse-codebase/",
   chat_id: <user_chat_id>,
 })
 ```
 
 Each worker:
 
-- Writes results to `.forkscout/tasks/{batch}/{session_key}-result.md`
+- Writes results to `.agent/tasks/{batch}/{session_key}-result.md`
 - Flips `- [ ] \`{session_key}\``→`- [x]`in`plan.md` when done
 
 **Progress monitor** — pure JS, no LLM calls, updates a single Telegram message every 3s. Aggregator fires automatically when all tasks are `[x]`.
@@ -483,7 +483,7 @@ Each worker:
 
 ### `list_active_workers`
 
-Lists all batch directories in `.forkscout/tasks/`. Shows per-worker `[ ]`/`[x]` status, progress fraction, and which batches have a live monitor.
+Lists all batch directories in `.agent/tasks/`. Shows per-worker `[ ]`/`[x]` status, progress fraction, and which batches have a live monitor.
 
 ### `manage_workers`
 
@@ -493,7 +493,7 @@ Recover after a Bun restart. On startup, orphaned monitors are detected and owne
 | -------- | --------------------------------------------------------------- |
 | `resume` | Restart monitor from saved state, send fresh progress card      |
 | `cancel` | Stop monitor, delete state — task files kept                    |
-| `delete` | Stop monitor, delete state + entire `.forkscout/tasks/{batch}/` |
+| `delete` | Stop monitor, delete state + entire `.agent/tasks/{batch}/` |
 
 ---
 
@@ -604,7 +604,7 @@ No code changes. No restart of code — just restart the process.
 
 ## Configuration
 
-All configuration lives in `src/forkscout.config.json`. Secrets and per-deployment overrides live in `.forkscout/auth.json` (gitignored). The two files are deep-merged at startup — `auth.json` wins on conflicts.
+All configuration lives in `src/forkscout.config.json`. Secrets and per-deployment overrides live in `.agent/auth.json` (gitignored). The two files are deep-merged at startup — `auth.json` wins on conflicts.
 
 ```json
 {
@@ -683,7 +683,7 @@ All configuration lives in `src/forkscout.config.json`. Secrets and per-deployme
 1. Unknown user sends any message
 2. Bot responds: "⛔ You're not on the allowlist. Your request has been sent to the admin."
 3. All owners receive a notification with name, userId, chatId, username
-4. Request saved to `.forkscout/access-requests.json` with `status: "pending"`
+4. Request saved to `.agent/access-requests.json` with `status: "pending"`
 5. Owner uses `/allow <userId>` or `/allow <userId> admin` or `/deny <userId>`
 6. On approval: user added to `runtimeAllowedUsers` (immediate) + `auth.json` (persists restart)
 7. User notified of approval/denial
@@ -749,7 +749,7 @@ All commands work for **owners only** (except `/start` which is open to all). Co
 | `/secret sync`                   | Import all variables from the server's `.env` file into the vault at once.                          |
 | `/secret help`                   | Show all `/secret` subcommands and usage.                                                           |
 
-Secrets are stored AES-256-GCM encrypted in `.forkscout/vault.enc.json` (gitignored). The agent uses `{{secret:alias}}` placeholders in tool calls — raw values are never passed through Telegram or visible in logs.
+Secrets are stored AES-256-GCM encrypted in `.agent/vault.enc.json` (gitignored). The agent uses `{{secret:alias}}` placeholders in tool calls — raw values are never passed through Telegram or visible in logs.
 
 ---
 
@@ -759,8 +759,8 @@ Secrets are stored AES-256-GCM encrypted in `.forkscout/vault.enc.json` (gitigno
 
 Every conversation is persisted to disk:
 
-- Telegram: `.forkscout/chats/telegram-<chatId>.json`
-- Terminal: `.forkscout/chats/terminal-<username>.json`
+- Telegram: `.agent/chats/telegram-<chatId>.json`
+- Terminal: `.agent/chats/terminal-<username>.json`
 
 Format: `ModelMessage[]` (Vercel AI SDK v6 format). Loaded on first message per session, cached in memory, saved after every turn.
 
@@ -841,7 +841,7 @@ Every module creates its own tagged logger. Output is human-readable in terminal
 
 ### Activity Log (`src/logs/activity-log.ts`)
 
-All events written to `.forkscout/activity.log` as NDJSON (one JSON object per line).
+All events written to `.agent/activity.log` as NDJSON (one JSON object per line).
 
 Event types:
 
@@ -858,16 +858,16 @@ Each event includes `timestamp`, `channel`, `chatId`, `type`, and relevant paylo
 
 ```bash
 # Last 50 events
-tail -50 .forkscout/activity.log | jq .
+tail -50 .agent/activity.log | jq .
 
 # All errors
-grep '"type":"error"' .forkscout/activity.log | tail -20
+grep '"type":"error"' .agent/activity.log | tail -20
 
 # Tool calls and results
-grep '"type":"tool_call"\|"type":"tool_result"' .forkscout/activity.log | tail -30
+grep '"type":"tool_call"\|"type":"tool_result"' .agent/activity.log | tail -30
 
 # Messages from a specific chat
-grep '"chatId":123456789' .forkscout/activity.log | tail -20
+grep '"chatId":123456789' .agent/activity.log | tail -20
 ```
 
 ---
@@ -917,7 +917,7 @@ When `/restart` fails because the new instance crashed:
    The current process is still running.
 
    Your job:
-   1. Check recent logs: tail -50 .forkscout/activity.log
+   1. Check recent logs: tail -50 .agent/activity.log
    2. Check for startup errors: bun run src/index.ts 2>&1 | head -40
    3. Identify the root cause
    4. Fix it
@@ -963,7 +963,7 @@ forkscout-agent/
 │   │   └── activity-log.ts        ← NDJSON event log
 │   └── utils/
 │       └── extractive-summary.ts  ← extractiveSummary(), compressIfLong()
-├── .forkscout/                    ← runtime data (gitignored)
+├── .agent/                    ← runtime data (gitignored)
 │   ├── auth.json                  ← owner/allowed user IDs (secrets)
 │   ├── access-requests.json       ← Telegram access request history
 │   ├── activity.log               ← NDJSON event log
@@ -1002,7 +1002,7 @@ OPENROUTER_API_KEY=your_openrouter_key_here
 
 ### 3. Set yourself as owner
 
-Create `.forkscout/auth.json` (find your Telegram userId by messaging [@userinfobot](https://t.me/userinfobot)):
+Create `.agent/auth.json` (find your Telegram userId by messaging [@userinfobot](https://t.me/userinfobot)):
 
 ```json
 {
@@ -1058,14 +1058,14 @@ docker run -d \
   --name forkscout \
   --restart unless-stopped \
   --env-file .env \
-  -v $(pwd)/.forkscout:/app/.forkscout \
+  -v $(pwd)/.agent:/app/.agent \
   ghcr.io/martianacademy/forkscout:latest
 ```
 
 | Flag                                   | Purpose                                                       |
 | -------------------------------------- | ------------------------------------------------------------- |
 | `--env-file .env`                      | Injects `TELEGRAM_BOT_TOKEN`, LLM keys, etc.                  |
-| `-v $(pwd)/.forkscout:/app/.forkscout` | Persists auth, chat history, and activity log across restarts |
+| `-v $(pwd)/.agent:/app/.agent` | Persists auth, chat history, and activity log across restarts |
 | `--restart unless-stopped`             | Auto-restarts on crash or reboot                              |
 
 ### With Docker Compose (recommended — includes SearXNG + memory MCP)
@@ -1093,7 +1093,7 @@ This starts all three services together: the agent, SearXNG (port 8080), and for
 docker logs -f forkscout
 
 # Or read the structured activity log
-docker exec forkscout tail -50 /app/.forkscout/activity.log
+docker exec forkscout tail -50 /app/.agent/activity.log
 ```
 
 ### Stop / update
@@ -1107,7 +1107,7 @@ docker pull ghcr.io/martianacademy/forkscout:latest
 docker stop forkscout && docker rm forkscout
 docker run -d --name forkscout --restart unless-stopped \
   --env-file .env \
-  -v $(pwd)/.forkscout:/app/.forkscout \
+  -v $(pwd)/.agent:/app/.agent \
   ghcr.io/martianacademy/forkscout:latest
 ```
 

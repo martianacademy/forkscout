@@ -5,7 +5,7 @@
 | File              | Purpose                                                                   |
 | ----------------- | ------------------------------------------------------------------------- |
 | `logger.ts`       | Module-tagged console logger — use this everywhere instead of `console.*` |
-| `activity-log.ts` | NDJSON file writer — records every event to `.forkscout/activity.log`     |
+| `activity-log.ts` | NDJSON file writer — records every event to `.agent/activity.log`     |
 
 ---
 
@@ -31,7 +31,7 @@ logger.error("Failed", err.message);
 
 ## Activity Log Events
 
-Every `logger.*` call automatically writes to `.forkscout/activity.log`.  
+Every `logger.*` call automatically writes to `.agent/activity.log`.  
 You can also write typed events directly via `logActivity()` or the `activity` helper:
 
 ```ts
@@ -65,11 +65,11 @@ logActivity({ type: "info", module: "agent", text: "custom event" });
 
 ## Output File
 
-- **Location**: `.forkscout/activity.log` (project root, gitignored)
+- **Location**: `.agent/activity.log` (project root, gitignored)
 - **Format**: NDJSON — one JSON object per line
-- **Watch live**: `tail -f .forkscout/activity.log`
-- **Filter by type**: `grep '"type":"tool_call"' .forkscout/activity.log | jq .`
-- **Filter by channel**: `grep '"channel":"telegram"' .forkscout/activity.log | jq .`
+- **Watch live**: `tail -f .agent/activity.log`
+- **Filter by type**: `grep '"type":"tool_call"' .agent/activity.log | jq .`
+- **Filter by channel**: `grep '"channel":"telegram"' .agent/activity.log | jq .`
 
 ---
 

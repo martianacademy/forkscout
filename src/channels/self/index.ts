@@ -2,13 +2,13 @@
 //
 // Two sub-systems:
 //   1. Cron jobs — scheduled autonomous tasks from forkscout.config.json or
-//      .forkscout/self-jobs.json (gitignored).
+//      .agent/self-jobs.json (gitignored).
 //   2. HTTP trigger — POST /trigger { prompt, role? }
 //      For tool-calling the agent on-demand (Task Offload Pattern, message_self tool).
 //      GET /health → { ok: true } (used by scripts/safe-restart.sh smoke test)
 //
 // ALL self-channel activity shares ONE session key: "self"
-// History lives at: .forkscout/chats/self/ (user.json, assistant.json, tool.json)
+// History lives at: .agent/chats/self/ (user.json, assistant.json, tool.json)
 // This gives the agent full memory of everything it has ever done autonomously.
 //
 // Also exported: startCronJobs() so telegram can run cron in background.
@@ -27,17 +27,31 @@ import { log } from "@/logs/logger.ts";
 import { encode } from "gpt-tokenizer";
 import type { ModelMessage } from "ai";
 import cron from "node-cron";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
+import { setupRegistry, registerJob, unregisterJob } from "@/channels/self/cron-registry.ts";
 import { loadOrphanedMonitors, resumeMonitor } from "@/channels/self/progress-monitor.ts";
 import { sendMessage } from "@/channels/telegram/api.ts";
 
 const logger = log("self");
 
 /** Path to the gitignored jobs file (next to auth.json) */
-const JOBS_FILE = resolve(process.cwd(), ".forkscout", "self-jobs.json");
+const JOBS_FILE = resolve(process.cwd(), ".agent", "self-jobs.json");
 
-/** Load jobs from .forkscout/self-jobs.json + config.self.jobs, deduplicated by name. */
+/** Remove a single job from self-jobs.json (used by run_once cleanup). */
+function removeJobFromFile(name: string): void {
+    if (!existsSync(JOBS_FILE)) return;
+    try {
+        const parsed = JSON.parse(readFileSync(JOBS_FILE, "utf-8"));
+        const updated = Array.isArray(parsed) ? parsed.filter((j: any) => j.name !== name) : [];
+        mkdirSync(resolve(process.cwd(), ".agent"), { recursive: true });
+        writeFileSync(JOBS_FILE, JSON.stringify(updated, null, 4), "utf-8");
+    } catch (err: any) {
+        logger.error(`Failed to remove job "${name}" from file:`, err.message);
+    }
+}
+
+/** Load jobs from .agent/self-jobs.json + config.self.jobs, deduplicated by name. */
 function loadJobs(config: AppConfig): SelfJobConfig[] {
     const configJobs: SelfJobConfig[] = config.self?.jobs ?? [];
     let fileJobs: SelfJobConfig[] = [];
@@ -48,12 +62,12 @@ function loadJobs(config: AppConfig): SelfJobConfig[] {
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
                 fileJobs = parsed as SelfJobConfig[];
-                logger.info(`Loaded ${fileJobs.length} job(s) from .forkscout/self-jobs.json`);
+                logger.info(`Loaded ${fileJobs.length} job(s) from .agent/self-jobs.json`);
             } else {
-                logger.error(".forkscout/self-jobs.json must be a JSON array — ignoring");
+                logger.error(".agent/self-jobs.json must be a JSON array — ignoring");
             }
         } catch (err: any) {
-            logger.error("Failed to parse .forkscout/self-jobs.json:", err.message);
+            logger.error("Failed to parse .agent/self-jobs.json:", err.message);
         }
     }
 
@@ -138,18 +152,33 @@ async function runJob(config: AppConfig, job: SelfJobConfig): Promise<void> {
                 }
             }
         }
+
+        // run_once: unschedule and remove from file after firing
+        if (job.run_once) {
+            logger.info(`Job "${job.name}" is run_once — removing after fire`);
+            unregisterJob(job.name);
+            removeJobFromFile(job.name);
+        }
     } catch (err: any) {
         logger.error(`Job "${job.name}" failed:`, err.message ?? err);
+        // Still clean up run_once jobs even if they error — prevent infinite retry loops
+        if (job.run_once) {
+            unregisterJob(job.name);
+            removeJobFromFile(job.name);
+        }
     }
 }
 
 // ── Exported: start cron jobs (called from telegram channel or standalone) ───
 
 export function startCronJobs(config: AppConfig): void {
+    // Wire up the registry so hot-registration from the tool works in this process.
+    setupRegistry(config, runJob);
+
     const jobs = loadJobs(config);
 
     if (jobs.length === 0) {
-        logger.info("No self jobs configured — add jobs to .forkscout/self-jobs.json");
+        logger.info("No self jobs configured — add jobs to .agent/self-jobs.json");
         return;
     }
 
@@ -158,8 +187,7 @@ export function startCronJobs(config: AppConfig): void {
             logger.error(`Invalid cron expression for job "${job.name}": "${job.schedule}" — skipping`);
             continue;
         }
-        cron.schedule(job.schedule, () => void runJob(config, job));
-        logger.info(`Scheduled: "${job.name}" → ${job.schedule}`);
+        registerJob(job);
     }
 }
 
@@ -191,9 +219,9 @@ const httpQueues = new Map<string, Promise<void>>();
  * Response: { ok: true, text: string, steps: number }
  *
  * session_key behaviour:
- *   - omitted / "self": main chain — history loaded + passed to LLM. .forkscout/chats/self/
+ *   - omitted / "self": main chain — history loaded + passed to LLM. .agent/chats/self/
  *   - any other value: worker session — runs with empty history (prompt is self-contained).
- *     History is still SAVED after the run for audit. .forkscout/chats/self-{key}/
+ *     History is still SAVED after the run for audit. .agent/chats/self-{key}/
  *
  * Requests with the same session_key are serialised — never two concurrent runs on the same history.
  * Different session_keys run in parallel — each has its own queue.
@@ -274,7 +302,7 @@ export function startHttpServer(config: AppConfig): void {
  *   - SELF_SESSION_KEY ("self"): main chain — history is loaded and passed to the LLM.
  *   - any other key: worker session — chatHistory is empty (prompt is fully self-contained).
  *     History is still SAVED after the run so you have a full audit trail.
- *     Worker folders: .forkscout/chats/self-{key}/
+ *     Worker folders: .agent/chats/self-{key}/
  */
 async function handleHttpMessage(
     config: AppConfig,

@@ -34,7 +34,7 @@ services:
 
     volumes:
       # Persist auth.json + chat history across container restarts
-      - forkscout-data:/app/.forkscout
+      - forkscout-data:/app/.agent
 
     # Optional: expose the HTTP server port if src/server is active
     # ports:

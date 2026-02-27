@@ -5,10 +5,10 @@
 //   terminal-<username> → Terminal (OS user)
 //
 // Storage layout (per session):
-//   .forkscout/chats/<sessionKey>/user.json      ← user messages
-//   .forkscout/chats/<sessionKey>/assistant.json ← assistant messages
-//   .forkscout/chats/<sessionKey>/tool.json      ← tool messages
-//   .forkscout/chats/<sessionKey>/system.json    ← system messages (rare)
+//   .agent/chats/<sessionKey>/user.json      ← user messages
+//   .agent/chats/<sessionKey>/assistant.json ← assistant messages
+//   .agent/chats/<sessionKey>/tool.json      ← tool messages
+//   .agent/chats/<sessionKey>/system.json    ← system messages (rare)
 //
 // Every stored entry has an extra `seq` field (0-based position in the
 // original interleaved array) so loadHistory can reconstruct the correct order.

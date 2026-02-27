@@ -20,7 +20,7 @@ as the agent responds. Maintains persistent conversation history across restarts
 
 - Uses **`streamAgent()`** (not `runAgent`) — tokens print to stdout as they arrive
 - Persistent history via `chat-store.ts` — survives restarts
-- Session key: `terminal-{os.username}` → `.forkscout/chats/terminal-{username}.json`
+- Session key: `terminal-{os.username}` → `.agent/chats/terminal-{username}.json`
 - History trimmed to `config.llm.historyTokenBudget` tokens before each call
 - After trimming, leading non-`user` messages are dropped (AI SDK v6 requirement)
 - `clear` command wipes history and resets the in-memory history array
@@ -30,7 +30,7 @@ as the agent responds. Maintains persistent conversation history across restarts
 
 ## History Storage
 
-- Session key: `terminal-{username}` → `.forkscout/chats/terminal-{username}.json`
+- Session key: `terminal-{username}` → `.agent/chats/terminal-{username}.json`
 - Token-counted with `gpt-tokenizer`
 - `trimHistory(history, tokenBudget)` — trims oldest first, then strips leading non-user messages
 

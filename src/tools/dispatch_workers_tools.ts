@@ -6,9 +6,9 @@
 //   list_active_workers — inspect all running/pending task batches
 //
 // Self-channel history layout:
-//   chain sessions   → .forkscout/chats/self/               (full history, shared across chain)
-//   parallel workers → .forkscout/chats/self-{key}/         (isolated, no prior history passed)
-//   aggregator       → .forkscout/chats/self-agg-{batch}/   (isolated)
+//   chain sessions   → .agent/chats/self/               (full history, shared across chain)
+//   parallel workers → .agent/chats/self-{key}/         (isolated, no prior history passed)
+//   aggregator       → .agent/chats/self-agg-{batch}/   (isolated)
 
 import { tool } from "ai";
 import { z } from "zod";
@@ -81,7 +81,7 @@ export const chain_of_workers = tool({
             return {
                 success: true,
                 queued: true,
-                note: "Next session triggered in background. History at: .forkscout/chats/self/",
+                note: "Next session triggered in background. History at: .agent/chats/self/",
             };
         }
 
@@ -123,12 +123,12 @@ export const parallel_workers = tool({
     inputSchema: z.object({
         batch_name: z.string().describe(
             "Unique name for this batch (e.g. 'analyze-codebase', 'research-2026'). " +
-            "Folder: .forkscout/tasks/{batch_name}/"
+            "Folder: .agent/tasks/{batch_name}/"
         ),
         tasks: z.array(z.object({
             session_key: z.string().describe(
                 "Unique key for this worker (e.g. 'task-auth', 'task-db'). " +
-                "Audit history at: .forkscout/chats/self-{session_key}/"
+                "Audit history at: .agent/chats/self-{session_key}/"
             ),
             label: z.string().describe(
                 "Short label shown in the Telegram progress card (e.g. 'Analyse auth module')."
@@ -136,16 +136,16 @@ export const parallel_workers = tool({
             prompt: z.string().describe(
                 "Full self-contained prompt for this worker. Must include: " +
                 "1) The actual task. " +
-                "2) Where to write results: .forkscout/tasks/{batch_name}/{session_key}-result.md. " +
+                "2) Where to write results: .agent/tasks/{batch_name}/{session_key}-result.md. " +
                 "3) When finished, mark done by flipping '- [ ] `{session_key}`' to '- [x] `{session_key}`' " +
-                "in .forkscout/tasks/{batch_name}/plan.md."
+                "in .agent/tasks/{batch_name}/plan.md."
             ),
         })).min(1).describe("List of independent parallel tasks to run."),
         aggregator_prompt: z.string().describe(
             "Prompt for the aggregator self-session fired when ALL tasks are [x]. " +
-            "Should: read all result files from .forkscout/tasks/{batch_name}/, " +
+            "Should: read all result files from .agent/tasks/{batch_name}/, " +
             "compile a final summary, send it via telegram_message_tools to notify the user, " +
-            "then delete .forkscout/tasks/{batch_name}/ to clean up."
+            "then delete .agent/tasks/{batch_name}/ to clean up."
         ),
         chat_id: z.number().optional().describe(
             "Telegram chat ID for live progress updates. If omitted, workers still run silently."
@@ -234,8 +234,8 @@ export const manage_workers = tool({
         "Resume, cancel, or delete a task batch after the agent restarted. " +
         "Use after receiving a restart notification that lists orphaned batches. " +
         "resume: restarts the progress monitor from saved state, sends a fresh Telegram progress card — workers continue. " +
-        "cancel: stops the monitor, deletes saved state — task files in .forkscout/tasks/{batch}/ are kept. " +
-        "delete: full cleanup — stops monitor, deletes saved state AND the .forkscout/tasks/{batch}/ directory entirely.",
+        "cancel: stops the monitor, deletes saved state — task files in .agent/tasks/{batch}/ are kept. " +
+        "delete: full cleanup — stops monitor, deletes saved state AND the .agent/tasks/{batch}/ directory entirely.",
     inputSchema: z.object({
         action: z.enum(["resume", "cancel", "delete"]).describe(
             "resume = restart the monitor | cancel = stop + delete state, keep task files | delete = stop + delete state + delete all task files"
@@ -255,7 +255,7 @@ export const manage_workers = tool({
             cancelMonitor(input.batch_name);
             return {
                 success: true,
-                note: `Batch "${input.batch_name}" cancelled. Monitor state deleted. Task files in .forkscout/tasks/${input.batch_name}/ are kept.`,
+                note: `Batch "${input.batch_name}" cancelled. Monitor state deleted. Task files in .agent/tasks/${input.batch_name}/ are kept.`,
             };
         }
 
@@ -298,14 +298,14 @@ export const manage_workers = tool({
 
 export const list_active_workers = tool({
     description:
-        "List all active task batches in .forkscout/tasks/. " +
+        "List all active task batches in .agent/tasks/. " +
         "Shows per-worker status (pending [ ] / done [x]), progress fraction (e.g. 3/5), " +
         "and which batches have a live progress monitor running. " +
         "Use this to check on running parallel work, debug a stuck batch, or confirm all tasks are done.",
     inputSchema: z.object({}),
     execute: async (_input) => {
         if (!existsSync(TASKS_DIR)) {
-            return { success: true, batches: [], note: "No task batches found — .forkscout/tasks/ does not exist yet." };
+            return { success: true, batches: [], note: "No task batches found — .agent/tasks/ does not exist yet." };
         }
 
         let batchNames: string[];

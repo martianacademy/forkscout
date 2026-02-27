@@ -4,7 +4,7 @@
 // reads plan.md every N seconds, deletes the previous Telegram message,
 // sends a fresh snapshot, and fires the aggregator session once all tasks are ✅.
 //
-// Plan file format (.forkscout/tasks/{batchName}/plan.md):
+// Plan file format (.agent/tasks/{batchName}/plan.md):
 //   ## Batch: batch-name
 //
 //   - [ ] `task-auth` — Analyse auth module

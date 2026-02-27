@@ -15,7 +15,7 @@ rate limiting, and typing indicators.
 | `index.ts`           | Main channel — exports `default satisfies Channel`. Long-poll loop, message routing, history management, access control commands |
 | `api.ts`             | Thin wrapper around the Telegram Bot API (HTTP calls only, no business logic)                                                    |
 | `format.ts`          | Text transformations: Markdown→HTML, HTML stripping, long-message splitting                                                      |
-| `access-requests.ts` | Persists access requests in `.forkscout/access-requests.json` and `.forkscout/auth.json`                                         |
+| `access-requests.ts` | Persists access requests in `.agent/access-requests.json` and `.agent/auth.json`                                         |
 
 ---
 
@@ -76,13 +76,13 @@ Owner commands: `/allow <userId> [admin]`, `/deny <userId>`, `/requests` (list p
 | `saveRequests(reqs)`                                      | fn        | Writes requests to disk                                                                         |
 | `upsertRequest(req)`                                      | fn        | Add or update a request (skips if already non-pending)                                          |
 | `updateRequestStatus(userId, status, role?, reviewedBy?)` | fn        | Approve or deny a request                                                                       |
-| `addToAuthAllowList(userId, role)`                        | fn        | Adds userId to `.forkscout/auth.json`                                                           |
+| `addToAuthAllowList(userId, role)`                        | fn        | Adds userId to `.agent/auth.json`                                                           |
 
 ---
 
 ## History Storage
 
-- Session key: `telegram-{chatId}` → `.forkscout/chats/telegram-{chatId}.json`
+- Session key: `telegram-{chatId}` → `.agent/chats/telegram-{chatId}.json`
 - Trimmed when total token count exceeds `config.llm.historyTokenBudget`
 - After trimming, leading non-`user` messages are dropped (AI SDK v6 requirement)
 

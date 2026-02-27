@@ -24,8 +24,8 @@ The **self** channel lets the agent talk to itself in two ways:
 
 | Source       | Storage key              | Path                                       |
 | ------------ | ------------------------ | ------------------------------------------ |
-| Cron job     | `self-{jobName}`         | `.forkscout/chats/self-{jobName}/`         |
-| HTTP trigger | `self-http-{sessionKey}` | `.forkscout/chats/self-http-{sessionKey}/` |
+| Cron job     | `self-{jobName}`         | `.agent/chats/self-{jobName}/`         |
+| HTTP trigger | `self-http-{sessionKey}` | `.agent/chats/self-http-{sessionKey}/` |
 
 ## HTTP API
 
@@ -80,7 +80,7 @@ Returns `{ "ok": true }` — used by `scripts/safe-restart.sh` smoke test.
 }
 ```
 
-Jobs can also live in `.forkscout/self-jobs.json` (gitignored). File jobs override config jobs (deduplicated by name).
+Jobs can also live in `.agent/self-jobs.json` (gitignored). File jobs override config jobs (deduplicated by name).
 
 | Field            | Type    | Required | Description                                          |
 | ---------------- | ------- | -------- | ---------------------------------------------------- |

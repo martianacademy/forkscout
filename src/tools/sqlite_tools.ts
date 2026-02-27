@@ -2,14 +2,14 @@
 //
 // Persistent structured storage via SQLite (bun:sqlite — zero extra deps).
 //
-// Each named database is a separate .sqlite file under .forkscout/db/.
+// Each named database is a separate .sqlite file under .agent/db/.
 // Databases are auto-created on first use.
 //
 // Actions:
 //   query         — SELECT and any read-only SQL, returns rows as JSON objects
 //   exec          — CREATE, INSERT, UPDATE, DELETE; returns affected row count
 //   list_tables   — list all tables in a database
-//   list_databases — list all .sqlite files in .forkscout/db/
+//   list_databases — list all .sqlite files in .agent/db/
 //   delete_database — permanently delete a database file
 //
 // Use for:
@@ -25,7 +25,7 @@ import { join } from "node:path";
 
 export const IS_BOOTSTRAP_TOOL = false;
 
-const DB_DIR = join(process.cwd(), ".forkscout", "db");
+const DB_DIR = join(process.cwd(), ".agent", "db");
 
 function dbPath(name: string): string {
     // Sanitise: only allow alphanumeric, hyphens, underscores
@@ -40,7 +40,7 @@ function openDb(name: string): Database {
 
 export const sqlite_tools = tool({
     description:
-        "Persistent structured storage using SQLite. Databases live in .forkscout/db/<name>.sqlite and survive agent restarts. " +
+        "Persistent structured storage using SQLite. Databases live in .agent/db/<name>.sqlite and survive agent restarts. " +
         "Actions: 'query' (SELECT/read SQL → rows), 'exec' (write SQL → affected rows), " +
         "'list_tables' (tables in a db), 'list_databases' (all dbs), 'delete_database' (remove a db file). " +
         "Use for user preferences, task histories, structured logs, cached data — anything relational that the knowledge graph can't handle.",
