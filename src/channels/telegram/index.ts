@@ -33,6 +33,7 @@ import {
     addToAuthAllowList,
     type ApprovedRole,
 } from "@/channels/telegram/access-requests.ts";
+import { setSecret, listAliases, deleteSecret } from "@/secrets/vault.ts";
 
 // ─────────────────────────────────────────────
 // Constants & module-level state
@@ -226,6 +227,20 @@ async function start(config: AppConfig): Promise<void> {
                     await handleOwnerCommand(token, chatId, userId, text).catch(async (err) => {
                         logger.error("Owner command error:", err);
                         await sendMessage(token, chatId, `⚠️ Command error: <code>${String(err?.message ?? err).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`, "HTML").catch(() => { });
+                    });
+                    continue;
+                }
+
+                // /secret — intercept BEFORE LLM, available to all authorized users
+                // Usage: /secret store <alias> <value>
+                //        /secret list
+                //        /secret delete <alias>
+                if (text.startsWith("/secret")) {
+                    // Delete the user's message immediately — value should not stay in chat
+                    await deleteMessage(token, chatId, msg.message_id).catch(() => { });
+                    await handleSecretCommand(token, chatId, text).catch(async (err) => {
+                        logger.error("Secret command error:", err);
+                        await sendMessage(token, chatId, "⚠️ Secret command failed. Check usage: <code>/secret store &lt;alias&gt; &lt;value&gt;</code>", "HTML").catch(() => { });
                     });
                     continue;
                 }
@@ -666,6 +681,91 @@ async function handleDeniedUser(
 // ─────────────────────────────────────────────
 // Owner commands & restart
 // ─────────────────────────────────────────────
+
+/** Handles /secret commands — runs at channel level, NEVER reaches the LLM.
+ *  Usage:
+ *    /secret store <alias> <value>   — store a secret under an alias
+ *    /secret list                    — list stored alias names (no values)
+ *    /secret delete <alias>          — remove an alias
+ */
+async function handleSecretCommand(token: string, chatId: number, text: string): Promise<void> {
+    const parts = text.trim().split(/\s+/);
+    // parts[0] = "/secret", parts[1] = subcommand, parts[2] = alias, parts[3..] = value
+    const sub = parts[1]?.toLowerCase();
+
+    if (!sub || sub === "help") {
+        await sendMessage(token, chatId,
+            `🔐 <b>Secret Vault</b>\n\n` +
+            `<code>/secret store &lt;alias&gt; &lt;value&gt;</code>\n` +
+            `  Save a secret. Use <code>{{secret:alias}}</code> in any message.\n\n` +
+            `<code>/secret list</code>\n` +
+            `  Show stored alias names (values never shown).\n\n` +
+            `<code>/secret delete &lt;alias&gt;</code>\n` +
+            `  Remove an alias from the vault.\n\n` +
+            `⚠️ This message and your /secret messages are deleted immediately — the value never stays in chat.`,
+            "HTML"
+        );
+        return;
+    }
+
+    if (sub === "store") {
+        const alias = parts[2];
+        // Value = everything after alias (supports values with spaces)
+        const value = parts.slice(3).join(" ");
+        if (!alias || !value) {
+            await sendMessage(token, chatId,
+                `⚠️ Usage: <code>/secret store &lt;alias&gt; &lt;value&gt;</code>\n` +
+                `Example: <code>/secret store db_pass mypassword123</code>`,
+                "HTML"
+            );
+            return;
+        }
+        const cleanAlias = alias.trim().toLowerCase().replace(/\s+/g, "_");
+        setSecret(cleanAlias, value);
+        logger.info(`[vault] secret stored: ${cleanAlias} (value redacted)`);
+        await sendMessage(token, chatId,
+            `✅ <b>Secret stored.</b>\n\n` +
+            `Alias: <code>${cleanAlias}</code>\n` +
+            `Use as: <code>{{secret:${cleanAlias}}}</code>\n\n` +
+            `<i>The actual value was never sent to the AI.</i>`,
+            "HTML"
+        );
+        return;
+    }
+
+    if (sub === "list") {
+        const aliases = listAliases();
+        if (aliases.length === 0) {
+            await sendMessage(token, chatId, "🔐 Vault is empty.");
+            return;
+        }
+        const lines = aliases.map(a => `• <code>{{secret:${a}}}</code>`).join("\n");
+        await sendMessage(token, chatId,
+            `🔐 <b>Stored secrets (${aliases.length})</b>\n\n${lines}\n\n<i>Values are never shown — only alias names.</i>`,
+            "HTML"
+        );
+        return;
+    }
+
+    if (sub === "delete") {
+        const alias = parts[2];
+        if (!alias) {
+            await sendMessage(token, chatId, "⚠️ Usage: <code>/secret delete &lt;alias&gt;</code>", "HTML");
+            return;
+        }
+        const deleted = deleteSecret(alias.trim());
+        await sendMessage(token, chatId,
+            deleted ? `🗑️ Secret <code>${alias}</code> deleted.` : `⚠️ Alias <code>${alias}</code> not found.`,
+            "HTML"
+        );
+        return;
+    }
+
+    await sendMessage(token, chatId,
+        `⚠️ Unknown subcommand. Use <code>/secret help</code> for usage.`,
+        "HTML"
+    );
+}
 
 /** Handles privileged slash commands for owners: /restart, /whoami, /allow, /deny, /pending, /requests. */
 async function handleOwnerCommand(token: string, chatId: number, ownerUserId: number, text: string): Promise<void> {
