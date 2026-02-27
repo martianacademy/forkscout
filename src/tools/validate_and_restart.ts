@@ -153,45 +153,58 @@ function runSmokeTest(message: string, timeoutSec: number): Promise<SmokeResult>
         const finish = (passed: boolean, reason: string) => {
             if (settled) return;
             settled = true;
+            clearTimeout(hardTimer);
+            clearTimeout(earlyTimer);
             try { child.kill("SIGKILL"); } catch { /* ignore */ }
             resolve({ passed, reason, output });
         };
 
-        child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-        child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+        // Early-finish: once output arrives, wait 3s for more data then resolve.
+        // Prevents waiting the full timeout when LLM already responded.
+        let earlyTimer: ReturnType<typeof setTimeout> | undefined;
+        const scheduleEarlyFinish = () => {
+            if (earlyTimer || settled) return;
+            earlyTimer = setTimeout(() => {
+                if (output.trim().length > 0) {
+                    finish(true, "responded — early finish after output settled");
+                }
+            }, 3_000);
+        };
+
+        child.stdout.on("data", (chunk: Buffer) => {
+            output += chunk.toString();
+            try { appendFileSync(SMOKE_LOG, chunk); } catch { /* ignore */ }
+            scheduleEarlyFinish();
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+            output += chunk.toString();
+            scheduleEarlyFinish();
+        });
 
         // Send the test message then close stdin so CLI knows input is done
         child.stdin.write(message + "\n");
         child.stdin.end();
 
-        // Give the process time to start + respond
-        const timer = setTimeout(() => {
-            // Timeout is acceptable — what matters is that output is non-empty
+        // Hard timeout — last resort if process never responds or closes
+        const hardTimer = setTimeout(() => {
             if (output.trim().length > 0) {
-                finish(true, "responded within timeout (process then killed)");
+                finish(true, `responded within ${timeoutSec}s timeout`);
             } else {
                 finish(false, `No output after ${timeoutSec}s — process may have crashed`);
             }
         }, timeoutSec * 1000);
 
         child.on("error", (err) => {
-            clearTimeout(timer);
             finish(false, `Spawn error: ${err.message}`);
         });
 
         child.on("close", (code) => {
-            clearTimeout(timer);
             if (settled) return;
             if (output.trim().length > 0) {
                 finish(true, `process exited (code ${code}) with output`);
             } else {
                 finish(false, `process exited (code ${code}) with no output`);
             }
-        });
-
-        // Write smoke log for debugging
-        child.stdout.on("data", (c: Buffer) => {
-            try { appendFileSync(SMOKE_LOG, c); } catch { /* ignore */ }
         });
     });
 }
