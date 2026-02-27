@@ -206,8 +206,10 @@ async function buildAgentParams(config: AppConfig, options: AgentRunOptions) {
     const devtoolsEnabled = process.env.DEVTOOLS === "1";
     if (devtoolsEnabled) {
         const { devToolsMiddleware } = await import("@ai-sdk/devtools");
+        // Wrap on top of the already-wrapped model (e.g. extractReasoningMiddleware),
+        // not baseModel — otherwise the reasoning middleware chain is discarded.
         model = wrapLanguageModel({
-            model: baseModel as import("@ai-sdk/provider").LanguageModelV3,
+            model: model as import("@ai-sdk/provider").LanguageModelV3,
             middleware: devToolsMiddleware(),
         }) as typeof baseModel;
     }
