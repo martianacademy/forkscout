@@ -154,7 +154,7 @@ export interface AppConfig {
          * 0 = disabled. Default: 3200.
          */
         httpPort: number;
-        /** Cron jobs — can also be defined in .agent/self-jobs.json (gitignored). */
+        /** Cron jobs — can also be defined in .agents/self-jobs.json (gitignored). */
         jobs?: SelfJobConfig[];
     };
     llm: LLMConfig;
@@ -171,7 +171,7 @@ export interface AppConfig {
          * Path to the persistent browser profile directory.
          * Cookies, passwords, localStorage and other state are saved here.
          * Relative paths are resolved from the workspace root.
-         * Default: ".agent/browser-profile"
+         * Default: ".agents/browser-profile"
          */
         profileDir: string;
         /**
@@ -218,7 +218,7 @@ export interface AppConfig {
 let _config: AppConfig | null = null;
 
 /** Path to the gitignored auth override file */
-const AUTH_FILE = resolve(__dirname, "..", ".agent", "auth.json");
+const AUTH_FILE = resolve(__dirname, "..", ".agents", "auth.json");
 
 // ── Hot-reload: watch forkscout.config.json and auth.json for changes ────────
 // Clears the in-memory cache so the next getConfig() call re-reads from disk.
@@ -242,7 +242,7 @@ export function loadConfig(): AppConfig {
     const raw = readFileSync(configPath, "utf-8");
     let config = JSON.parse(raw) as AppConfig;
 
-    // Merge .agent/auth.json if it exists (gitignored — safe for secrets)
+    // Merge .agents/auth.json if it exists (gitignored — safe for secrets)
     if (existsSync(AUTH_FILE)) {
         const authRaw = readFileSync(AUTH_FILE, "utf-8");
         config = deepMerge(config, JSON.parse(authRaw) as Partial<AppConfig>);

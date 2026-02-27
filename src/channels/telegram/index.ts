@@ -1010,7 +1010,7 @@ async function handleRestart(token: string, chatId: number): Promise<void> {
             `SYSTEM: Self-restart just failed. The new instance crashed at startup with exit code ${child.exitCode}.\n` +
             `The current process is still running.\n\n` +
             `Your job:\n` +
-            `1. Check recent logs: tail -50 .agent/activity.log\n` +
+            `1. Check recent logs: tail -50 .agents/activity.log\n` +
             `2. Check for startup errors: bun run src/index.ts 2>&1 | head -40 (kill after 5s)\n` +
             `3. Identify the root cause (broken code, missing env var, bad config, MCP failure, etc.)\n` +
             `4. Fix it\n` +

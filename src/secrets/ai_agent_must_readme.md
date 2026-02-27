@@ -3,7 +3,7 @@
 ## Purpose
 
 Encrypted named secret storage. Secrets are stored as `{{secret:alias}}` placeholders everywhere
-in the LLM context — actual values only exist in `.agent/vault.enc.json` (AES-256-GCM) and
+in the LLM context — actual values only exist in `.agents/vault.enc.json` (AES-256-GCM) and
 briefly in tool `execute()` scope during substitution.
 
 ## Rules
@@ -12,7 +12,7 @@ briefly in tool `execute()` scope during substitution.
 - NEVER log secret values — only alias names
 - `resolveSecrets()` is ONLY called inside tool execute() at runtime
 - `censorSecrets()` is called on ALL tool outputs before returning to LLM
-- Vault file (`.agent/vault.enc.json`) is gitignored — never commit it
+- Vault file (`.agents/vault.enc.json`) is gitignored — never commit it
 - Key = `VAULT_KEY` env var (or `TELEGRAM_BOT_TOKEN` as fallback)
 
 ## Files

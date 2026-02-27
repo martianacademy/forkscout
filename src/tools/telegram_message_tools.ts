@@ -99,7 +99,7 @@ export const telegram_message_tools = tool({
 
         // Media
         file_path_or_url: z.string().optional().describe(
-            "Where to get the media file. Use an absolute local path (e.g. '/home/user/.agent/exports/report.pdf') " +
+            "Where to get the media file. Use an absolute local path (e.g. '/home/user/.agents/exports/report.pdf') " +
             "or a public HTTPS URL (e.g. 'https://example.com/image.png'). " +
             "Required for: send_photo, send_document, send_voice, send_audio, send_video, send_animation.",
         ),

@@ -7,5 +7,5 @@ osint-results/
 tmp/
 lg_tv_store.json
 bun.lockb
-.agent/
+.agents/
 .devtools

@@ -27,7 +27,7 @@
     },
     "browser": {
         "headless": false,
-        "profileDir": ".agent/browser-profile",
+        "profileDir": ".agents/browser-profile",
         "screenshotQuality": 50,
         "chromePath": ""
     },

@@ -1,5 +1,5 @@
 // src/tools/self_cron_job.ts
-// Manage cron jobs in .agent/self-jobs.json — list, add, remove, run now.
+// Manage cron jobs in .agents/self-jobs.json — list, add, remove, run now.
 
 import { tool } from "ai";
 import { z } from "zod";
@@ -13,7 +13,7 @@ import { registerJob, unregisterJob } from "@/channels/self/cron-registry.ts";
 export const IS_BOOTSTRAP_TOOL = false;
 
 const logger = log("tool:self_cron_job");
-const JOBS_FILE = resolve(process.cwd(), ".agent", "self-jobs.json");
+const JOBS_FILE = resolve(process.cwd(), ".agents", "self-jobs.json");
 
 function readJobs(): SelfJobConfig[] {
     if (!existsSync(JOBS_FILE)) return [];
@@ -26,13 +26,13 @@ function readJobs(): SelfJobConfig[] {
 }
 
 function writeJobs(jobs: SelfJobConfig[]): void {
-    mkdirSync(resolve(process.cwd(), ".agent"), { recursive: true });
+    mkdirSync(resolve(process.cwd(), ".agents"), { recursive: true });
     writeFileSync(JOBS_FILE, JSON.stringify(jobs, null, 4), "utf-8");
 }
 
 export const self_cron_jobs_tools = tool({
     description:
-        "Manage scheduled self-cron jobs stored in .agent/self-jobs.json. " +
+        "Manage scheduled self-cron jobs stored in .agents/self-jobs.json. " +
         "Actions: list (show all jobs), add (create a new job), remove (delete by name), run_now (trigger immediately without waiting for schedule). " +
         "Jobs are hot-registered — no restart needed. " +
         "Set run_once=true for one-shot reminders: the job fires exactly once then deletes itself. " +

@@ -71,7 +71,7 @@ Examples: multi-phase refactor, processing a list one item at a time, phased res
 **Pattern:**
 
 ```
-1. write .agent/tasks/my-task/todo.md  (list all steps, mark current)
+1. write .agents/tasks/my-task/todo.md  (list all steps, mark current)
 2. chain_of_workers({ prompt: "Read todo.md, do step 1, mark done, call chain_of_workers for step 2" })
 3. current session ends
 4. next session reads todo.md, does step 2, marks done, calls chain_of_workers again
@@ -90,7 +90,7 @@ Examples: analysing multiple files simultaneously, researching multiple topics i
 **Rules:**
 
 - Each worker's prompt MUST be fully self-contained — workers have no shared history
-- Each worker MUST write results to `.agent/tasks/{batch_name}/{session_key}-result.md`
+- Each worker MUST write results to `.agents/tasks/{batch_name}/{session_key}-result.md`
 - Each worker MUST flip its line in plan.md from `- [ ]` to `- [x]` when done
 - Pass `chat_id` for a live progress card in Telegram (auto-refreshes every 3s, zero LLM cost while waiting)
 - The aggregator fires automatically once all tasks are `[x]` — you do not need to poll or wait
@@ -104,7 +104,7 @@ Examples: analysing multiple files simultaneously, researching multiple topics i
        { session_key: "task-auth", label: "Analyse auth", prompt: "...self-contained..." },
        { session_key: "task-db",   label: "Analyse DB",   prompt: "...self-contained..." },
      ],
-     aggregator_prompt: "Read all result files, compile summary, send via telegram_message_tools, delete .agent/tasks/analyse-codebase/",
+     aggregator_prompt: "Read all result files, compile summary, send via telegram_message_tools, delete .agents/tasks/analyse-codebase/",
      chat_id: <user chat id if known>,
    })
 2. current session ends — workers and monitor run independently
@@ -167,8 +167,8 @@ To delete everything: tell me "delete monitor analyse-codebase"
 | Action   | What it does                                                                                                                                                                                      |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `resume` | Restarts the progress monitor from saved state. Sends a fresh Telegram progress card. Aggregator fires automatically once all workers finish. Workers that are still running continue unaffected. |
-| `cancel` | Stops the monitor and deletes the saved state. Task files in `.agent/tasks/{batch}/` are kept. Use this if you want to inspect results manually.                                              |
-| `delete` | Full cleanup — stops monitor, deletes state AND the entire `.agent/tasks/{batch}/` directory. Use when the batch is no longer needed at all.                                                  |
+| `cancel` | Stops the monitor and deletes the saved state. Task files in `.agents/tasks/{batch}/` are kept. Use this if you want to inspect results manually.                                              |
+| `delete` | Full cleanup — stops monitor, deletes state AND the entire `.agents/tasks/{batch}/` directory. Use when the batch is no longer needed at all.                                                  |
 
 **Rules:**
 
@@ -196,7 +196,7 @@ User: "delete monitor old-refactor"
 
 → manage_workers({ action: "delete", batch_name: "old-refactor" })
 
-Result: Monitor state and .agent/tasks/old-refactor/ fully removed.
+Result: Monitor state and .agents/tasks/old-refactor/ fully removed.
 ```
 
 **Use cases:**
@@ -215,8 +215,8 @@ When writing the `aggregator_prompt` for `parallel_workers`, follow this structu
 ```
 You are the aggregator for batch "{batch_name}".
 All workers have finished. Do the following:
-1. Read each result file: .agent/tasks/{batch_name}/*-result.md
+1. Read each result file: .agents/tasks/{batch_name}/*-result.md
 2. Compile a clear summary (use headers per worker/topic)
 3. Send the summary to the user via telegram_message_tools (action: send_to_owners)
-4. Delete the entire directory .agent/tasks/{batch_name}/ using run_shell_commands
+4. Delete the entire directory .agents/tasks/{batch_name}/ using run_shell_commands
 ```

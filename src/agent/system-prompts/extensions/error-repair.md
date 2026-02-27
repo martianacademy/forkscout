@@ -73,7 +73,7 @@ curl -sv "URL" -H "Authorization: Bearer $KEY" -H "Content-Type: application/jso
 
 ```bash
 # Read logs:
-tail -50 .agent/activity.log | jq .
+tail -50 .agents/activity.log | jq .
 # Read server config:
 cat src/mcp-servers/<server-name>.json
 # Test connectivity:
@@ -93,9 +93,9 @@ curl -sv "URL" -H "Authorization: Bearer $KEY" -d '{"jsonrpc":"2.0","method":"to
 ## Log Reading
 
 ```bash
-tail -50 .agent/activity.log | jq .           # last 50 events
-grep '"type":"error"' .agent/activity.log | tail -20           # errors only
-grep '"type":"tool_call"\|"type":"tool_result"' .agent/activity.log | tail -30  # tool trace
+tail -50 .agents/activity.log | jq .           # last 50 events
+grep '"type":"error"' .agents/activity.log | tail -20           # errors only
+grep '"type":"tool_call"\|"type":"tool_result"' .agents/activity.log | tail -30  # tool trace
 ```
 
 Trace pattern to look for:

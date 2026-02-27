@@ -7,7 +7,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const VAULT_FILE = resolve(ROOT, ".agent", "vault.enc.json");
+const VAULT_FILE = resolve(ROOT, ".agents", "vault.enc.json");
 const ALIAS_PATTERN = /\{\{secret:([a-zA-Z0-9_\-]+)\}\}/g;
 const CENSOR_PLACEHOLDER = (alias: string) => `[SECRET:${alias}]`;
 

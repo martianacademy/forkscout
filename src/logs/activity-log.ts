@@ -1,17 +1,17 @@
 // src/logs/activity-log.ts — Persistent activity recorder
 // Every message in, agent token, tool call, tool result, error gets written here.
 // Format: NDJSON — one JSON object per line, easy to tail/grep/parse.
-// File: .agent/activity.log (project root)
+// File: .agents/activity.log (project root)
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOG_DIR = resolve(__dirname, "..", "..", ".agent");
+const LOG_DIR = resolve(__dirname, "..", "..", ".agents");
 const LOG_FILE = resolve(LOG_DIR, "activity.log");
 
-// Ensure .agent/ dir always exists
+// Ensure .agents/ dir always exists
 try { mkdirSync(LOG_DIR, { recursive: true }); } catch { /* already exists */ }
 
 // ── Event types ───────────────────────────────────────────────────────────────
@@ -53,7 +53,7 @@ export interface ActivityEvent {
 // ── Core writer ───────────────────────────────────────────────────────────────
 
 /**
- * Append a single activity event to .agent/activity.log.
+ * Append a single activity event to .agents/activity.log.
  * Never throws — logging must never crash the agent.
  */
 export function logActivity(event: ActivityEvent): void {

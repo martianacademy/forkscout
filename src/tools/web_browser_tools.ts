@@ -45,7 +45,7 @@ const browseSchema = z.object({
     ]).describe("Browser action to perform"),
 
     profile: z.string().optional()
-        .describe("Browser profile name to use (creates .agent/browser-profile-{name} if not exists)"),
+        .describe("Browser profile name to use (creates .agents/browser-profile-{name} if not exists)"),
 
     url: z.string().optional()
         .describe("URL to navigate to (required for: navigate)"),
@@ -127,7 +127,7 @@ const logger = log("browser");
 let _context: BrowserContext | null = null;
 let _page: Page | null = null;
 let _currentProfile: string = "default";
-const PROFILES_DIR = ".agent";
+const PROFILES_DIR = ".agents";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 

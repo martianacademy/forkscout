@@ -16,8 +16,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
 const ROOT = process.cwd();
-const AGENT_LOG = `${ROOT}/.agent/agent.log`;
-const SMOKE_LOG = `${ROOT}/.agent/smoke.log`;
+const AGENT_LOG = `${ROOT}/.agents/agent.log`;
+const SMOKE_LOG = `${ROOT}/.agents/smoke.log`;
 
 export const IS_BOOTSTRAP_TOOL = false;
 

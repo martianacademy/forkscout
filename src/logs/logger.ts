@@ -1,5 +1,5 @@
 // src/logs/logger.ts — Module-tagged logger
-// All log output is tagged with the calling module name AND written to .agent/activity.log.
+// All log output is tagged with the calling module name AND written to .agents/activity.log.
 // Usage:
 //   import { log } from "@/logs/logger.ts";
 //   const logger = log("telegram");
