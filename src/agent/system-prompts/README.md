@@ -39,9 +39,9 @@ Your instructions here.
 
 ## Subfolders
 
-| Folder        | Purpose                                                                                                                              |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `extensions/` | On-demand instruction modules loaded by the agent via `read_file` when needed. See `extensions/ai_agent_must_readme.md` for details. |
+| Folder        | Purpose                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `extensions/` | On-demand instruction modules loaded by the agent via `read_file` when needed. See `extensions/README.md` for details. |
 
 ---
 

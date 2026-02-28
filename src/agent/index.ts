@@ -368,23 +368,73 @@ export async function runAgent(
     // extractReasoningMiddleware should handle this, but on the non-streaming
     // path it can leak into result.text — strip as a safety net.
     const reasoningTag = config.llm.reasoningTag?.trim();
-    const strippedText = reasoningTag
+    let strippedText = reasoningTag
         ? result.text.replace(new RegExp(`<${reasoningTag}>[\\s\\S]*?<\\/${reasoningTag}>\\n?`, "gi"), "").trim()
         : result.text;
 
-    // Safety net: model stopped after thinking and produced no visible text.
-    // Return a notice instead of sending a silent blank reply to the user.
-    const cleanText = strippedText ||
-        "(I finished thinking but produced no response. Please ask again or rephrase.)";
-    if (!strippedText) logger.warn("[runAgent] empty text after reasoning strip — model stopped after thinking");
+    // Auto-retry: model stopped after thinking with no visible text or tool calls.
+    // Inject a nudge message and run one more generateText call to force a response.
+    let finalResult = result;
+    if (!strippedText.trim()) {
+        logger.warn("[runAgent] empty text after reasoning strip — retrying with nudge");
 
-    activity.msgOut(channel ?? "unknown", chatId, cleanText, result.steps?.length ?? 0, Date.now() - startMs);
+        const retryMessages: ModelMessage[] = [
+            ...messages,
+            ...(result.response.messages as ModelMessage[]),
+            { role: "user", content: "[SYSTEM] You finished reasoning but produced no visible response. Respond to the user now — do NOT think silently again." } as ModelMessage,
+        ];
+
+        try {
+            stepNum = 0;
+            const retryResult = await withRetry(() => generateText({
+                model,
+                system: systemPrompt,
+                messages: retryMessages,
+                tools: toolsForRun as any,
+                stopWhen: stepCountIs(5), // Short leash on retry
+                maxTokens: config.llm.maxTokens,
+                ...(devtoolsEnabled && { experimental_telemetry: { isEnabled: true } }),
+                onStepFinish(step: any) {
+                    stepNum++;
+                    for (const tc of step.toolCalls ?? []) {
+                        activity.toolCall(tc.toolName, tc.input, "agent", stepNum);
+                    }
+                    for (const tr of step.toolResults ?? []) {
+                        activity.toolResult(tr.toolName, tr.output, undefined, "agent", stepNum);
+                    }
+                    if (options.onStepFinish) {
+                        const hadTools = (step.toolCalls?.length ?? 0) > 0;
+                        Promise.resolve(options.onStepFinish(hadTools)).catch(() => { });
+                    }
+                },
+            } as any), `generateText-retry:${channel ?? "unknown"}`);
+
+            const retryText = reasoningTag
+                ? retryResult.text.replace(new RegExp(`<${reasoningTag}>[\\s\\S]*?<\\/${reasoningTag}>\\n?`, "gi"), "").trim()
+                : retryResult.text;
+
+            if (retryText.trim()) {
+                strippedText = retryText;
+                finalResult = retryResult;
+                logger.info("[runAgent] retry succeeded — got visible response");
+            } else {
+                logger.warn("[runAgent] retry also produced empty text — giving up");
+            }
+        } catch (retryErr) {
+            logger.error(`[runAgent] retry failed: ${retryErr}`);
+        }
+    }
+
+    const cleanText = strippedText.trim() ||
+        "(I finished thinking but produced no response. Please ask again or rephrase.)";
+
+    activity.msgOut(channel ?? "unknown", chatId, cleanText, finalResult.steps?.length ?? 0, Date.now() - startMs);
 
     return {
         text: cleanText,
-        steps: result.steps?.length ?? 0,
+        steps: finalResult.steps?.length ?? 0,
         bootstrapToolNames: Object.keys(bootstrapTools),
-        responseMessages: result.response.messages as ModelMessage[],
+        responseMessages: finalResult.response.messages as ModelMessage[],
     };
 }
 
@@ -514,19 +564,59 @@ export async function streamAgent(
                 stream.steps,
             ]);
             const rawText = acc.text;
-            const strippedText = reasoningTag
+            let strippedText = reasoningTag
                 ? rawText.replace(new RegExp(`<${reasoningTag}>[\\s\\S]*?<\\/${reasoningTag}>\\n?`, "gi"), "").trim()
                 : rawText;
-            // Safety net: model stopped after thinking and produced no visible text.
-            const text = strippedText ||
+
+            // Auto-retry: model stopped after thinking with no visible text.
+            // Fall back to a non-streaming generateText call with a nudge.
+            let finalResponse = response;
+            let finalSteps = steps;
+            if (!strippedText.trim()) {
+                logger.warn("[streamAgent] empty text after reasoning strip — retrying with nudge");
+
+                const retryMessages: ModelMessage[] = [
+                    ...messages,
+                    ...((response as any).messages as ModelMessage[]),
+                    { role: "user", content: "[SYSTEM] You finished reasoning but produced no visible response. Respond to the user now — do NOT think silently again." } as ModelMessage,
+                ];
+
+                try {
+                    const retryResult = await withRetry(() => generateText({
+                        model,
+                        system: systemPrompt,
+                        messages: retryMessages,
+                        tools: streamTools as any,
+                        stopWhen: stepCountIs(5),
+                        maxTokens: config.llm.maxTokens,
+                    } as any), `streamAgent-retry:${channel ?? "unknown"}`);
+
+                    const retryText = reasoningTag
+                        ? retryResult.text.replace(new RegExp(`<${reasoningTag}>[\\s\\S]*?<\\/${reasoningTag}>\\n?`, "gi"), "").trim()
+                        : retryResult.text;
+
+                    if (retryText.trim()) {
+                        strippedText = retryText;
+                        finalResponse = retryResult.response;
+                        finalSteps = retryResult.steps;
+                        logger.info("[streamAgent] retry succeeded — got visible response");
+                    } else {
+                        logger.warn("[streamAgent] retry also produced empty text — giving up");
+                    }
+                } catch (retryErr) {
+                    logger.error(`[streamAgent] retry failed: ${retryErr}`);
+                }
+            }
+
+            const text = strippedText.trim() ||
                 "(I finished thinking but produced no response. Please ask again or rephrase.)";
-            if (!strippedText) logger.warn("[streamAgent] empty text after reasoning strip — model stopped after thinking");
-            activity.msgOut(channel ?? "unknown", chatId, text, (steps as any)?.length ?? 0, Date.now() - startMs);
+            if (!strippedText.trim()) logger.warn("[streamAgent] both attempts empty — returning fallback message");
+            activity.msgOut(channel ?? "unknown", chatId, text, (finalSteps as any)?.length ?? 0, Date.now() - startMs);
             return {
                 text,
-                steps: (steps as any)?.length ?? 0,
+                steps: (finalSteps as any)?.length ?? 0,
                 bootstrapToolNames: Object.keys(bootstrapTools),
-                responseMessages: (response as any).messages as ModelMessage[],
+                responseMessages: (finalResponse as any).messages as ModelMessage[],
             };
         },
     };

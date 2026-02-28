@@ -1,66 +1,76 @@
-# Memory Usage Guide
+# Memory Usage Guide (MANDATORY)
 
-> Read this when: starting a new session, about to work on a task, or deciding what to save to memory.
+Read when:
 
----
+- Starting a new session
+- Beginning a task
+- Deciding what to store
 
-## Tools
+All memory tools are prefixed: forkscout-mem\_\_
 
-All memory tools are prefixed `forkscout-mem__` (via the forkscout_memory MCP server).
+━━━━━━━━━━━━━━━━━━
+SESSION STARTUP (REQUIRED)
+━━━━━━━━━━━━━━━━━━
 
----
+Before doing any work:
 
-## Session Startup (MANDATORY)
+forkscout-mem**search_knowledge query="<current task>"
+forkscout-mem**check_tasks
+forkscout-mem\_\_search_entities query="<components involved>"
 
-At the start of every new session, run these before doing any work:
+Never skip. Memory is verified prior knowledge.
 
-```
-forkscout-mem__search_knowledge  query="<current task or feature>"
-forkscout-mem__check_tasks       → see in-progress tasks from last session
-forkscout-mem__search_entities   query="<components you'll be touching>"
-```
+━━━━━━━━━━━━━━━━━━
+WHAT TO SAVE
+━━━━━━━━━━━━━━━━━━
 
-Skipping this means ignoring verified knowledge from prior sessions.
+Bug fixed
+→ add_exchange
+Store: exact problem, root cause, applied fix
 
----
+Reusable pattern / decision
+→ save_knowledge
+Store: insight + reasoning (project: "forkscout")
 
-## What TO Save
+New entity (tool/provider/channel)
+→ add_entity + add_relation
+Store: purpose + relationships
 
-| Event              | Tool                          | What to store                             |
-| ------------------ | ----------------------------- | ----------------------------------------- |
-| Bug fixed          | `add_exchange`                | Exact problem, root cause, fix applied    |
-| Pattern discovered | `save_knowledge`              | Reusable insight (`project: "forkscout"`) |
-| Decision made      | `save_knowledge`              | Why this approach was chosen              |
-| New entity added   | `add_entity` + `add_relation` | Provider/channel/tool + its relationships |
-| Task completed     | `complete_task`               | Result summary                            |
-| Tricky gotcha      | `self_observe`                | Behavioral correction or learned rule     |
+Task completed
+→ complete_task
+Store: outcome summary
 
----
+Behavior correction / tricky lesson
+→ self_observe
+Store: rule learned
 
-## What NOT to Save
+━━━━━━━━━━━━━━━━━━
+WHAT NOT TO SAVE
+━━━━━━━━━━━━━━━━━━
 
-- Raw command output or log dumps
-- Auto-generated boilerplate
-- Obvious facts already in the codebase ("config lives in config.json")
-- Temporary debugging observations
-- Anything you'd never need to recall in a future session
+- Raw logs or command output
+- Boilerplate
+- Obvious codebase facts
+- Temporary debugging notes
+- Anything not useful next session
 
----
+━━━━━━━━━━━━━━━━━━
+MEMORY QUALITY RULES
+━━━━━━━━━━━━━━━━━━
 
-## Memory Quality Rules
+1. Specific — clear, concrete fact
+2. Self-contained — readable standalone
+3. Actionable — future session can use immediately
+4. Concise — one fact per save
+5. Tagged — project: "forkscout" for project facts
 
-1. **Specific** — `"openrouter requires .chat(modelId) not provider(modelId) — hits Responses API otherwise"` ✅ vs `"provider stuff"` ❌
-2. **Self-contained** — readable without surrounding context
-3. **Actionable** — a future session can act on it immediately
-4. **Concise** — one fact per `save_knowledge` call
-5. **Tagged** — always set `project: "forkscout"` for project-specific facts
+━━━━━━━━━━━━━━━━━━
+TASK LIFECYCLE
+━━━━━━━━━━━━━━━━━━
 
----
+Start work → start_task (title + goal)
+Insight → save_knowledge
+Finish task → complete_task (summary)
 
-## Task Lifecycle
-
-```
-Start work   → forkscout-mem__start_task (title + goal)
-Mid-task win → forkscout-mem__save_knowledge (insight gained)
-Task done    → forkscout-mem__complete_task (result summary)
-```
+Core Principle:
+If it won’t help a future session reason better, don’t store it.

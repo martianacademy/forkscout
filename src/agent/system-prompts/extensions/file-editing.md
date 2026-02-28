@@ -1,125 +1,89 @@
-# File Editing Instructions
+# Universal File Operation Protocol (MANDATORY)
 
-> Read this before: editing, creating, deleting, importing, or exporting any file inside `src/` or any system file (config, package.json, tsconfig.json, Dockerfile, docker-compose.yml, etc.)
+Applies before editing, creating, deleting, importing, exporting, or modifying ANY file in the project.
 
----
+1. SESSION START (Unconditional Safety Net)
 
-## ⛔ SESSION START — Do this FIRST, before anything else
+At the beginning of ANY editing session:
 
-At the very start of any editing session (before reading files, before planning, before any action):
+git add -A && git commit -m "Session start: <date> — about to <planned change>"
 
-```bash
-git add -A && git commit -m "Session start: $(date '+%Y-%m-%d %H:%M') — about to <what you plan to do>"
-```
+This guarantees a full rollback point.
 
-**Why:** This is your unconditional safety net. If your entire session goes wrong, `git reset --hard HEAD~1` undoes everything back to this point — no matter how many edits, creates, or deletes you made.
+2.  CHECKPOINT BEFORE ANY CHANGE
 
----
+Before modifying ANY file:
 
-## STEP 0 — Read folder standards first
+git add -A && git commit -m "Checkpoint: <current state> — about to <change>"
+read_folder_standard_tools("folder name") to understand:
 
-Before touching any file in a `src/` subfolder:
+- Folder purpose
+- Allowed file types
+- Export rules
+- Naming conventions
+- Structural constraints
 
-```
-read_folder_standards('<folder>')   e.g. read_folder_standards('tools')
-```
+3.  FOLDER GOVERNANCE (README STANDARD)
 
-If it errors → the readme is missing → write `src/<folder>/ai_agent_must_readme.md` before any code.
-Folders that have readmes: `agent/`, `channels/`, `llm/`, `logs/`, `mcp-servers/`, `providers/`, `tools/`, `utils/`
+Before creating a new folder:
 
----
+- Check if it requires structure documentation.
+- Immediately create `<folder>/README.md` before writing code.
 
-## STEP 1 — Create a checkpoint commit BEFORE any edit
+README must define:
 
-```bash
-git add -A && git commit -m "Checkpoint: <current state> — about to <what you're changing>"
-```
+- Folder purpose
+- What files are allowed
+- Export rules (if applicable)
+- Constraints or standards
 
-Good example: `"Checkpoint: telegram channel working — about to refactor handleMessage"`
+No code inside a new folder until README.md exists.
 
-**Why:** Creates an instant restore point. `safe-restart` uses the `forkscout-last-good` git tag to roll back — it always points to the last commit that passed the smoke test. Your checkpoint commit is what saves you if a future restart fails.
+4.  READ BEFORE EDIT
 
-If your edit breaks things, you can manually undo with:
+- Always read file before editing.
+- Large files → read in segments.
+- Never guess file contents.
+- Never rewrite entire file unless required.
 
-```bash
-git reset --hard <commit-hash>   # get hash from: git log --oneline -5
-```
+5.  EDIT RULES
 
-**Checkpoint is MANDATORY before:**
+- One root cause → one minimal fix.
+- Do not rewrite unrelated logic.
+- No hardcoded values (use config).
+- Avoid unnecessary file moves or renames.
+- Do not modify system files unless required.
 
-- Any refactoring (even small)
-- Adding/removing tools, channels, providers
-- Modifying agent core logic (agent/index.ts, config.ts, identity.ts)
-- Upgrading dependencies
-- Touching config files or Dockerfile
+6.  TYPECHECK (If TypeScript project)
 
----
+bun run typecheck
 
-## STEP 2 — Read the file before editing
+- Must exit 0.
+- Fix ALL errors before proceeding.
+- Never skip.
 
-- Use `read_file` with `startLine`/`endLine` — never read a whole large file at once
-- First read: lines 1–200, check `totalLines`; read more only if needed
-- For files < 100 lines: one read is fine
-- Never guess file contents — always read first
+7.  COMMIT COMPLETED CHANGE
 
----
-
-## STEP 3 — Make the edit
-
-Rules:
-
-- One root cause → one minimal fix. Do not rewrite unrelated code.
-- Never hardcode values — every configurable value goes in `src/forkscout.config.json`
-- One tool per file in `src/tools/` (auto-discovery picks exactly one export per file)
-- New folder inside `src/`? → create `src/<folder>/ai_agent_must_readme.md` immediately. No code until readme exists.
-
----
-
-## STEP 4 — Typecheck (BLOCKING — no exceptions)
-
-```bash
-bun run typecheck 2>&1
-```
-
-- Exit 0 → proceed
-- Any error → read the exact file + line + reason, fix ALL errors, rerun
-- Never skip this step, never proceed with type errors
-
----
-
-## STEP 5 — Commit the completed change
-
-```bash
 git add -A && git commit -m "<type>: <description>"
-```
 
-Types: `feat`, `fix`, `refactor`, `docs`, `config`, `chore`
-Example: `"fix: sanitize CSS selector in resolveSelector to strip trailing quotes"`
+Types:
+feat | fix | refactor | docs | config | chore
 
-**Commit BEFORE safe-restart** — `safe-restart` tags HEAD as `forkscout-last-good`. If you restart before committing, the tag points to the old checkpoint, not your new code.
+Commit BEFORE any restart.
 
----
+8.  SAFE RESTART (Only When Explicitly Asked)
 
-## STEP 6 — Restart safely (ONLY when explicitly asked)
-
-**Do NOT restart after every edit.** Restarting ends the current session and loses mid-task context.
-
-Only run safe-restart when:
-
-- The user explicitly says "restart", "apply changes", or "go live"
-- You are asked to self-restart via Telegram/terminal
-
-```bash
 bun run safe-restart
-```
 
-What it does:
+- Runs smoke test.
+- Tags working commit as forkscout-last-good.
+- Auto-rolls back on failure.
+- Never use bun start or bun run dev directly.
 
-1. Kills existing instances
-2. Runs a CLI smoke test (pipes a message, checks for response, 90s timeout)
-3. **Pass** → starts production, tags HEAD as `forkscout-last-good`
-4. **Fail** → auto-rolls back to `forkscout-last-good` tag → retries smoke test → starts on good code
-5. **Both fail** → exits with error, logs at `/tmp/forkscout-smoke.log`
+CORE PRINCIPLE
 
-- Never use `bun start` or `bun run dev` — they have no safety net
-- If `safe-restart` rolls back, your code is still in git history — recover with the logged commit hash
+AI is probabilistic.
+Git is deterministic.
+
+Every risky operation must have a reversible checkpoint.
+Structure must be documented before expansion.

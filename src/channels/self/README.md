@@ -15,15 +15,15 @@ The **self** channel lets the agent talk to itself in two ways:
 
 ## File standard
 
-| File                      | Role                                                                     |
-| ------------------------- | ------------------------------------------------------------------------ |
-| `index.ts`                | Channel implementation + `startCronJobs()` + `startHttpServer()` exports |
-| `ai_agent_must_readme.md` | This file                                                                |
+| File        | Role                                                                     |
+| ----------- | ------------------------------------------------------------------------ |
+| `index.ts`  | Channel implementation + `startCronJobs()` + `startHttpServer()` exports |
+| `README.md` | This file                                                                |
 
 ## Session key convention
 
-| Source       | Storage key              | Path                                       |
-| ------------ | ------------------------ | ------------------------------------------ |
+| Source       | Storage key              | Path                                    |
+| ------------ | ------------------------ | --------------------------------------- |
 | Cron job     | `self-{jobName}`         | `.agents/chats/self-{jobName}/`         |
 | HTTP trigger | `self-http-{sessionKey}` | `.agents/chats/self-http-{sessionKey}/` |
 

@@ -23,7 +23,7 @@ import { compileTelegramMessage } from "@/channels/telegram/compile-message.ts";
 import { prepareHistory, type StoredMessage } from "@/channels/prepare-history.ts";
 import { log } from "@/logs/logger.ts";
 import { LOG_DIR } from "@/logs/activity-log.ts";
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import { resolve } from "path";
 import type { Message, Update } from "@grammyjs/types";
 import {
@@ -168,14 +168,62 @@ async function start(config: AppConfig): Promise<void> {
     );
 
     // Always notify owners on startup — reason varies based on how the agent was launched.
+    // Also check for restart-context.json to auto-continue a task after self-restart.
+    const restartContextFile = resolve(process.cwd(), ".agents", "restart-context.json");
+    let restartContext: { reason?: string; continueTask?: string | null; restartedAt?: string } | null = null;
+
+    if (existsSync(restartContextFile)) {
+        try {
+            restartContext = JSON.parse(readFileSync(restartContextFile, "utf-8"));
+            // Delete immediately so it doesn't re-trigger on the next restart
+            unlinkSync(restartContextFile);
+            logger.info(`Restart context loaded: ${JSON.stringify(restartContext)}`);
+        } catch {
+            logger.warn("Failed to read restart-context.json — ignoring");
+        }
+    }
+
     if (vaultOwnerIds.length > 0) {
-        const restartReason = process.env.FORKSCOUT_RESTART_REASON;
+        const restartReason = restartContext?.reason ?? process.env.FORKSCOUT_RESTART_REASON;
+        const continueTask = restartContext?.continueTask;
         const msg = restartReason
-            ? `✅ <b>Agent restarted.</b>\n<i>Reason: ${restartReason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>\n\nAgent is live. All systems normal.`
+            ? `✅ <b>Agent restarted.</b>\n<i>Reason: ${restartReason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>${continueTask ? `\n<i>Auto-continuing: ${continueTask.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>` : ""}\n\nAgent is live. All systems normal.`
             : `🟢 <b>Agent is live.</b> All systems normal.`;
         logger.info(`Startup — notifying ${vaultOwnerIds.length} owner(s)`);
         for (const chatId of vaultOwnerIds) {
             await sendMessage(token, chatId, msg, "HTML").catch(() => { });
+        }
+
+        // Auto-continue: if the restart context specified a task, run it as a self-session
+        // on the first owner's chat so the agent picks up where it left off.
+        if (continueTask && vaultOwnerIds.length > 0) {
+            const ownerChatId = vaultOwnerIds[0];
+            logger.info(`Auto-continuing task after restart: "${continueTask}" (chat ${ownerChatId})`);
+
+            // Small delay to let polling start first
+            setTimeout(async () => {
+                try {
+                    const selfMessage = `[SELF-RESUME] I just restarted. Reason: ${restartContext?.reason ?? "unknown"}.\n\nTask to continue: ${continueTask}\n\nProceed now.`;
+
+                    const result = await runAgent(getConfig(), {
+                        userMessage: selfMessage,
+                        role: "self",
+                        meta: { channel: "telegram", chatId: ownerChatId },
+                    });
+
+                    if (result.text) {
+                        const html = mdToHtml(result.text);
+                        const chunks = splitMarkdown(html, 4000);
+                        for (const chunk of chunks) {
+                            await sendMessage(token, ownerChatId, chunk, "HTML").catch(() => { });
+                        }
+                    }
+                    logger.info(`Auto-continue task completed (${result.steps} steps)`);
+                } catch (err) {
+                    logger.error(`Auto-continue task failed: ${err}`);
+                    await sendMessage(token, ownerChatId, `⚠️ Auto-continue task failed: ${err}`, "HTML").catch(() => { });
+                }
+            }, 3000);
         }
     }
 

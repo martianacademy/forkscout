@@ -1,107 +1,103 @@
-# Error Repair Protocol
+# Error Repair Protocol (MANDATORY)
 
-> Read this when: a tool fails, a shell command errors, typecheck fails, an API returns an error, or anything produces unexpected output.
+Apply whenever:
 
----
+- Tool fails
+- Shell command errors
+- Typecheck fails
+- API returns error
+- Output is unexpected
 
-## The Repair Loop (apply to EVERY failure)
+━━━━━━━━━━━━━━━━━━
+REPAIR LOOP (Every Failure)
+━━━━━━━━━━━━━━━━━━
 
-1. **Read** the full error — message, file, line, reason
-2. **Inspect** the relevant file/config/log — understand WHY before touching anything
-3. **Plan** — identify root cause, not symptoms
-4. **Fix** — minimal targeted change, nothing unrelated
-5. **Verify** — re-run the exact same operation to confirm success
-6. Still failing after 2 attempts → stop, explain root cause + concrete next step to user
+1. Read the full error (message, file, line, reason).
+2. Inspect relevant file/config/log — understand WHY.
+3. Plan root cause (not symptom).
+4. Apply minimal targeted fix only.
+5. Re-run the exact same operation to verify.
 
-**NEVER:**
+If still failing after 2 attempts:
+→ Stop.
+→ Explain root cause + concrete next step.
 
-- Accept a failure silently
-- Pretend success when something errored
-- Guess — use tools to get ground truth
-- Batch multiple fixes — fix one root cause, verify, then continue
+NEVER:
 
----
+- Ignore errors
+- Pretend success
+- Guess without evidence
+- Batch multiple fixes
 
-## By Failure Type
+━━━━━━━━━━━━━━━━━━
+BY FAILURE TYPE
+━━━━━━━━━━━━━━━━━━
 
-### Typecheck / compile error
+Typecheck / Compile
 
-```bash
-bun run typecheck 2>&1
-```
-
-- Read file + line + reason exactly
-- `read_file` at that exact line → find root cause
-- Minimal fix → rerun typecheck
+- Run: bun run typecheck 2>&1
+- Read exact file + line
+- Minimal fix → rerun
 - Common causes:
-  - Missing property → wrong API field (check `node_modules/ai/src/`)
-  - `Cannot find name` → missing import or wrong scope
-  - `Unexpected token` → unescaped backtick in template literal (use `\``)
-  - `Module not found` → wrong path (use `list_dir` to confirm)
-  - Type mismatch → both sides need the same type shape
+  - Missing import
+  - Wrong path
+  - Type mismatch
+  - Unescaped backtick (`\``)
+  - Wrong API field
 
-### Shell command error
+Shell Error
 
-- Read full output including stderr
-- Check exit code — non-zero = error
-- `run_shell_commands` with `2>&1` to capture stderr too
+- Read full stdout + stderr
+- Non-zero exit = failure
+- Capture stderr: 2>&1
 
-### File not found / module not found
+File / Module Not Found
 
-```bash
-# Confirm path exists:
-ls src/path/to/file.ts
-# Check import alias:
-# @/ maps to src/ — so @/tools/foo.ts → src/tools/foo.ts
-```
+- Confirm path with ls
+- Verify alias mapping (@/ → src/)
 
-### API / HTTP error
+API / HTTP Error
 
-- Read status code + body — the body contains the reason
-  - 401 → check `.env` for the correct key name
-  - 404 → wrong endpoint or path param
-  - 406 → wrong Content-Type or missing Accept header
-  - 429 → rate limited — wait and retry
-  - 5xx → server error — retry after delay
-- Verify with curl before touching config:
+- Read status + body
+  - 401 → check env key
+  - 404 → wrong endpoint
+  - 406 → header issue
+  - 429 → rate limit
+  - 5xx → retry
+- Verify via curl before changing config
 
-```bash
-curl -sv "URL" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}' 2>&1 | tail -30
-```
+MCP Tool Failure ({ success: false })
 
-### MCP tool failure (`{ success: false, error: "..." }`)
+- Check logs: .agents/activity.log
+- Verify server config
+- Test endpoint with curl
+- Fix config only (no restart unless required)
 
-```bash
-# Read logs:
-tail -50 .agents/activity.log | jq .
-# Read server config:
-cat src/mcp-servers/<server-name>.json
-# Test connectivity:
-curl -sv "URL" -H "Authorization: Bearer $KEY" -d '{"jsonrpc":"2.0","method":"tools/list","id":1}' 2>&1 | tail -20
-```
-
-- Fix the JSON config (secrets as `${ENV_VAR}`, correct header names)
-- No restart needed — auto-discovery reconnects on next message
-
-### Empty / unexpected result
+Empty / Unexpected Result
 
 - Try one alternative approach
-- Still empty → report what was tried + ask user to unblock
+- Still failing → report attempts + ask user
 
----
+━━━━━━━━━━━━━━━━━━
+LOG DEBUGGING
+━━━━━━━━━━━━━━━━━━
 
-## Log Reading
-
-```bash
-tail -50 .agents/activity.log | jq .           # last 50 events
-grep '"type":"error"' .agents/activity.log | tail -20           # errors only
-grep '"type":"tool_call"\|"type":"tool_result"' .agents/activity.log | tail -30  # tool trace
-```
-
-Trace pattern to look for:
-
-```
+Key patterns:
 msg_in → tool_call → tool_result → msg_out
-```
 
-Anomalies: `"success": false`, missing `tool_result`, empty `msg_out`, `"type":"error"` at startup
+Watch for:
+
+- "success": false
+- Missing tool_result
+- Empty msg_out
+- "type":"error"
+
+━━━━━━━━━━━━━━━━━━
+CORE RULE
+━━━━━━━━━━━━━━━━━━
+
+Understand → Fix → Verify.
+
+No assumptions.
+No silent failures.
+One root cause at a time.

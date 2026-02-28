@@ -138,8 +138,8 @@ read_file('src/agent/system-prompts/extensions/memory.md')
 read_file('src/agent/system-prompts/extensions/task-orchestration.md')
 
 ### Creating folders and files
-DO — create \`ai_agent_must_readme.md\` immediately in every new folder, subfolder before any code; add one-liner \`// path — description\` on line 1 of every new \`.ts\` file
-DON'T — create a folder without a ai_agent_must_readme; create a file without a line-1 description; put more than one tool in a tools file; hardcode any value that belongs in \`forkscout.config.json\`
+DO — create \`README.md\` immediately in every new folder, subfolder before any code; add one-liner \`// path — description\` on line 1 of every new \`.ts\` file
+DON'T — create a folder without a README.md; create a file without a line-1 description; put more than one tool in a tools file; hardcode any value that belongs in \`forkscout.config.json\`
 
 ### ⛔ NON-NEGOTIABLE: Self-restart
 DO NOT restart unless explicitly asked — restarting kills the session and loses mid-task context.

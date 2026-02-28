@@ -1,0 +1,54 @@
+refactor: two-directory tool system, self-kill guard, think-then-stop retry, post-restart auto-continue
+
+## Problems & Solutions
+
+### 1. Token bloat from 34 tools injected at step 0
+PROBLEM: All 34 tools lived in src/tools/ and were loaded into the LLM context
+on every single request, wasting tokens and slowing responses. Most tools are
+rarely used — only ~9 are needed on every message.
+
+SOLUTION: Split tools into two auto-discovered directories:
+- src/tools/ (9 bootstrap tools) — in git, injected at step 0
+- .agents/tools/ (25 extended tools) — gitignored, runtime-managed
+auto_discover_tools.ts now scans both directories. tsconfig.json includes
+.agents/**/* for type-checking. On fresh clone only bootstrap tools exist.
+
+### 2. Agent killed itself via shell command
+PROBLEM: Agent ran 'pkill -9 -f bun' through run_shell_command_tools to restart
+itself, bypassing validate_and_restart. Killed its own process (exit 137), new
+instance failed on port 3200 (EADDRINUSE). Result: dead agent.
+
+SOLUTION: Added self-kill guard to run_shell_command_tools — regex blocklist
+catches pkill/killall/bun start/kill PID patterns. Returns BLOCKED error
+directing the agent to use validate_and_restart instead.
+
+### 3. Agent thinks then stops (blank response)
+PROBLEM: Model (minimax-m2.5) produces a think block, reasoning middleware
+strips it, leaving empty text. Agent returns static message — useless to user.
+
+SOLUTION: Both runAgent() and streamAgent() now auto-retry on empty text:
+- Injects a nudge message directing the model to respond
+- Runs a second generateText call with original history + models reasoning
+- Short leash: stopWhen stepCountIs(5) on retry
+- Falls back to static message only if retry also fails
+
+### 4. Agent forgets task after self-restart
+PROBLEM: Agent restarts to apply code changes (via validate_and_restart), comes
+back online, notifies owner, then sits idle. Previous task context is lost.
+
+SOLUTION: Restart-context persistence system:
+- validate_and_restart now accepts optional continue_task parameter
+- Writes .agents/restart-context.json before spawning restart script
+- On Telegram startup, reads the file and deletes it immediately
+- If continueTask is set, fires a SELF-RESUME self-session after 3s delay
+- Owner sees both the restart notification and the auto-continued result
+
+### 5. Stale ai_agent_must_readme.md naming
+PROBLEM: All folder documentation files were named ai_agent_must_readme.md —
+non-standard, not recognized by GitHub/editors as folder docs.
+
+SOLUTION: Renamed all 16 files to README.md. Updated identity.ts system prompt,
+read_folder_standard_tools.ts, file-editing.md, and all cross-references.
+Zero stale references remaining.
+
+Files: 56 changed, 838 insertions, 4409 deletions

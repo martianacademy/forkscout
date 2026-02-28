@@ -60,7 +60,7 @@ elevenlabs_provider.ts   → TTS + STT only (getElevenLabsSpeechModel, getEleven
 src/providers/
   index.ts                            — registry + getProvider() + getModel()
   open_ai_compatible_provider.ts      — base factory + OpenAICompatibleProvider interface
-  ai_agent_must_readme.md             — this file
+  README.md                        — this file
   <name>_provider.ts                  — one file per provider
 ```
 

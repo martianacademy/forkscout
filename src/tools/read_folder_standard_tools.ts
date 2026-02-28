@@ -1,5 +1,5 @@
 // src/tools/read_folder_standards.ts
-// Reads the ai_agent_must_readme.md for a src/ subfolder.
+// Reads the README.md for a src/ subfolder.
 // Call this before modifying ANY file in that folder.
 import { tool } from "ai";
 import { z } from "zod";
@@ -15,7 +15,7 @@ export const read_folder_standard_tools = tool({
     description:
         "Read the coding standards and contracts for a src/ subfolder before modifying it. " +
         "ALWAYS call this before editing or creating files in any src/ subfolder. " +
-        "Returns the folder's ai_agent_must_readme.md which documents: purpose, file format, rules, and current contents.",
+        "Returns the folder's README.md which documents: purpose, file format, rules, and current contents.",
     inputSchema: z.object({
         folder: z
             .string()
@@ -24,7 +24,7 @@ export const read_folder_standard_tools = tool({
             ),
     }),
     execute: async (input) => {
-        const readmePath = resolve(srcDir, input.folder, "ai_agent_must_readme.md");
+        const readmePath = resolve(srcDir, input.folder, "README.md");
         try {
             const content = readFileSync(readmePath, "utf-8");
             return { success: true, folder: input.folder, content };
@@ -36,13 +36,13 @@ export const read_folder_standard_tools = tool({
                 if (e.code === "ENOENT") {
                     return {
                         success: false,
-                        error: `Folder src/${input.folder}/ does not exist. Create it and write ai_agent_must_readme.md before adding any code.`,
+                        error: `Folder src/${input.folder}/ does not exist. Create it and write README.md before adding any code.`,
                     };
                 }
             }
             return {
                 success: false,
-                error: `No ai_agent_must_readme.md found in src/${input.folder}/. Create it before editing this folder.`,
+                error: `No README.md found in src/${input.folder}/. Create it before editing this folder.`,
             };
         }
     },
