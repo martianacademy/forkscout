@@ -1,14 +1,11 @@
 // src/llm/retry.ts — Exponential backoff retry wrapper for LLM calls.
-// Retries on 429 and 5xx only; fails fast on 401/400.
+// Uses error-classifier.ts to decide retryability — no inline heuristics.
 //
-// Handles transient errors from LLM providers via OpenRouter or direct APIs:
-//   - APICallError with isRetryable (408 timeout, 409 conflict, 429 rate-limit, 5xx server errors)
-//   - InvalidResponseDataError — provider returned non-JSON (e.g. HTML gateway error page)
-//   - JSONParseError — response body couldn't be parsed
-//
-// NOT retried: 400 bad request, 401 auth, 403 forbidden — these are permanent failures.
+// Retryable: 429 rate-limit, 5xx server-error, 408 timeout, invalid-response
+// NOT retried: 401/403 auth, 400 bad-request, 404 model-not-found — permanent.
 
-import { APICallError, InvalidResponseDataError, JSONParseError } from "@ai-sdk/provider";
+import { APICallError } from "@ai-sdk/provider";
+import { classifyError, type ClassifiedError } from "@/llm/error-classifier.ts";
 import { log } from "@/logs/logger.ts";
 
 const logger = log("llm:retry");
@@ -23,25 +20,17 @@ const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 30_000;
 
 /**
- * Returns true if the error is a transient failure worth retrying.
- * Covers:
- *  - APICallError with .isRetryable (408/409/429/5xx)
- *  - InvalidResponseDataError (provider returned non-JSON — often a temporary gateway error)
- *  - JSONParseError (response body couldn't be parsed)
+ * Error thrown when all retries are exhausted, wrapping the classified result.
+ * Channels can read `.classified` for clean user-facing messages.
  */
-function isRetryable(error: unknown): boolean {
-    if (APICallError.isInstance(error)) {
-        return (error as APICallError).isRetryable;
+export class LLMError extends Error {
+    readonly classified: ClassifiedError;
+    constructor(classified: ClassifiedError) {
+        super(classified.userMessage);
+        this.name = "LLMError";
+        this.classified = classified;
+        this.cause = classified.original;
     }
-    if (error instanceof InvalidResponseDataError) return true;
-    if (error instanceof JSONParseError) return true;
-    // Wrapped errors — look one level deeper
-    const cause = (error as any)?.cause;
-    if (cause) return isRetryable(cause);
-    // "Invalid JSON response" string match — fallback for unwrapped errors
-    const msg = (error as any)?.message ?? "";
-    if (msg.includes("Invalid JSON response")) return true;
-    return false;
 }
 
 /**
@@ -50,33 +39,34 @@ function isRetryable(error: unknown): boolean {
  * @param fn     — async function to invoke (the generateText / streamText call)
  * @param label  — short description used in logs (e.g. "generateText:telegram")
  * @returns      — resolved value of `fn`
- * @throws       — rethrows after MAX_RETRIES exhausted, or on non-retryable errors
+ * @throws       — LLMError after MAX_RETRIES exhausted, or on non-retryable errors
  */
 export async function withRetry<T>(fn: () => Promise<T>, label = "llm"): Promise<T> {
-    let lastError: unknown;
+    let lastClassified: ClassifiedError | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
             return await fn();
         } catch (err) {
-            lastError = err;
+            const classified = classifyError(err);
+            lastClassified = classified;
 
-            if (!isRetryable(err)) {
-                // Permanent failure — fail fast
-                logger.error(`[${label}] non-retryable error: ${(err as any)?.message ?? err}`);
-                throw err;
+            if (!classified.retryable) {
+                // Permanent failure — fail fast with clean message
+                logger.error(`[${label}] fatal ${classified.category}: ${(err as any)?.message ?? err}`);
+                throw new LLMError(classified);
             }
 
             if (attempt === MAX_RETRIES) break;
 
             const delayMs = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
             const status = APICallError.isInstance(err) ? ` (status ${(err as APICallError).statusCode})` : "";
-            logger.warn(`[${label}] attempt ${attempt + 1}/${MAX_RETRIES + 1} failed${status} — retrying in ${delayMs}ms: ${(err as any)?.message?.slice(0, 120)}`);
+            logger.warn(`[${label}] attempt ${attempt + 1}/${MAX_RETRIES + 1} ${classified.category}${status} — retrying in ${delayMs}ms`);
 
             await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
     }
 
-    logger.error(`[${label}] all ${MAX_RETRIES + 1} attempts failed`);
-    throw lastError;
+    logger.error(`[${label}] all ${MAX_RETRIES + 1} attempts failed (${lastClassified!.category})`);
+    throw new LLMError(lastClassified!);
 }

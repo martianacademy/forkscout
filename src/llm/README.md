@@ -82,20 +82,50 @@ LLM-powered abstractive summarisation using the fast tier model.
 
 Exponential backoff retry wrapper for any async LLM call.
 
-| Export                  | Description                                                            |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `withRetry(fn, label?)` | Runs `fn()`, retries up to 3× on transient errors with 1s/2s/4s delays |
+| Export                  | Description                                                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `withRetry(fn, label?)` | Runs `fn()`, retries up to 3× on transient errors with 1s/2s/4s delays                                                                  |
+| `LLMError`              | Error class thrown after exhausting retries or on fatal errors. Contains `.classified` (ClassifiedError) for clean user-facing messages |
 
-**Retries on:**
+**Uses `error-classifier.ts`** to decide retryability. Throws `LLMError` (not raw SDK errors) so channels can read `.classified.userMessage`.
 
-- `APICallError` with `isRetryable === true` (408 timeout, 409 conflict, 429 rate-limit, 5xx server errors)
-- `InvalidResponseDataError` — provider returned non-JSON (e.g. HTML gateway error page from OpenRouter)
-- `JSONParseError` — response body couldn't be parsed
-- Any error with `message.includes("Invalid JSON response")`
+**Retries on:** `rate-limit`, `server-error`, `timeout`, `invalid-response` categories.
 
-**Does NOT retry:** 400 bad request, 401 auth, 403 forbidden — permanent failures; fails immediately.
+**Does NOT retry:** `auth-expired`, `bad-request`, `model-not-found`, `insufficient-credits`, `content-filtered`, `config-error`, `prompt-error` — fails immediately with clean message.
 
 **Used by:** `src/agent/index.ts` — wraps `generateText` in `runAgent()`.
+
+---
+
+### `error-classifier.ts`
+
+Classifies LLM errors into structured categories with user-facing messages.
+
+| Export                    | Description                                                      |
+| ------------------------- | ---------------------------------------------------------------- |
+| `classifyError(error)`    | Returns `ClassifiedError` with category, retryable, userMessage  |
+| `isRetryableError(error)` | Quick boolean check — shorthand for `classifyError(e).retryable` |
+| `ErrorCategory` (type)    | Union of all category strings                                    |
+| `ClassifiedError` (type)  | Full classification result                                       |
+
+**Categories:**
+
+| Category               | Retryable | Example                              |
+| ---------------------- | --------- | ------------------------------------ |
+| `rate-limit`           | ✅        | 429 Too Many Requests                |
+| `server-error`         | ✅        | 502/503/504, ECONNRESET              |
+| `timeout`              | ✅        | 408, ETIMEDOUT                       |
+| `invalid-response`     | ✅        | HTML gateway page, JSON parse fail   |
+| `auth-expired`         | ❌        | 401/403                              |
+| `bad-request`          | ❌        | 400                                  |
+| `model-not-found`      | ❌        | 404, NoSuchModelError                |
+| `insufficient-credits` | ❌        | 402, "exceeded quota"                |
+| `content-filtered`     | ❌        | Safety filter, moderation block      |
+| `config-error`         | ❌        | Missing API key, unsupported feature |
+| `prompt-error`         | ❌        | Prompt too long, InvalidPromptError  |
+| `unknown`              | ❌        | Anything unrecognized                |
+
+**Used by:** `retry.ts`, `telegram/index.ts`, `terminal/index.ts`.
 
 ---
 

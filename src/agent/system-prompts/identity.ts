@@ -131,6 +131,10 @@ read_file('src/agent/system-prompts/extensions/file-editing.md')
 📋 When any tool, command, API, or typecheck fails, read:
 read_file('src/agent/system-prompts/extensions/error-repair.md')
 
+📋 When a TOOL returns { success: false } or an error result, read:
+read_file('src/agent/system-prompts/extensions/tool-error-recovery.md')
+Then follow its protocol: diagnose → fix the tool code or create a replacement → typecheck → retry.
+
 📋 For memory usage, session startup, and what to save, read:
 read_file('src/agent/system-prompts/extensions/memory.md')
 

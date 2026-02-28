@@ -9,8 +9,7 @@ import { discoverMcpTools } from "@/mcp-servers/index.ts";
 import { buildIdentity, type IdentityContext } from "@/agent/system-prompts/identity.ts";
 import { activity } from "@/logs/activity-log.ts";
 import { log } from "@/logs/logger.ts";
-import { compressIfLong } from "@/utils/extractive-summary.ts";
-import { llmSummarize } from "@/llm/summarize.ts";
+
 import { withRetry } from "@/llm/retry.ts";
 import { sanitizeForPrompt } from "@/channels/chat-store.ts";
 import { sanitizeUserMessage, sanitizeForDisplay } from "@/utils/secrets.ts";
@@ -85,48 +84,59 @@ export interface StreamAgentResult {
     finalize(): Promise<AgentRunResult>;
 }
 
-// ── Auto-compress tool results ───────────────────────────────────────────────
-// Wraps every tool's execute() so oversized results are compressed BEFORE
-// being returned to the LLM — the raw content never enters the context window.
+// ── Tool error safety net ────────────────────────────────────────────────────
+// Catches any uncaught exception from tool execute() and returns a structured
+// error object INSTEAD of throwing. This way the LLM always sees the error and
+// can decide to fix the tool, try alternatives, or report.
+// AI SDK v6 already catches thrown errors (tool-error type), but those arrive
+// as raw JS Error objects. This wrapper makes them structured + actionable.
 
-function wrapToolsWithAutoCompress(
-    tools: Record<string, any>,
-    config: AppConfig
+function wrapToolsWithErrorSafetyNet(
+    tools: Record<string, any>
 ): Record<string, any> {
-    const threshold = config.llm.toolResultAutoCompressWords ?? 400;
-    const maxSumTokens = config.llm.llmSummarizeMaxTokens ?? 1200;
-
     return Object.fromEntries(
         Object.entries(tools).map(([name, t]) => {
-            // Never wrap compress_text itself — avoid recursion
-            if (name === "compress_text" || typeof t.execute !== "function") {
-                return [name, t];
-            }
+            if (typeof t.execute !== "function") return [name, t];
             const original = t.execute;
             return [name, {
                 ...t,
                 execute: async (input: any) => {
-                    const result = await original(input);
-                    const raw = typeof result === "string" ? result : JSON.stringify(result);
-                    const words = raw.split(/\s+/).filter(Boolean).length;
+                    try {
+                        return await original(input);
+                    } catch (err: any) {
+                        const message = err?.message ?? String(err);
+                        const stack = err?.stack?.split("\n").slice(0, 3).join("\n") ?? "";
+                        logger.error(`[tool-error] ${name}: ${message}`);
 
-                    if (words <= threshold) return result;
-
-                    if (words > 2000) {
-                        // LLM synthesis for very large results
-                        logger.info(`[auto-compress] ${name}: ${words} words → llm summarise`);
-                        const summary = await llmSummarize(raw, { maxOutputTokens: maxSumTokens });
-                        return { __compressed: "llm", originalWords: words, result: summary };
-                    } else {
-                        // Extractive for moderate results — fast and free
-                        logger.info(`[auto-compress] ${name}: ${words} words → extractive`);
-                        const summary = compressIfLong(raw, threshold * 5, 12);
-                        return { __compressed: "extractive", originalWords: words, result: summary };
+                        // Structured error the LLM can reason about
+                        return {
+                            success: false,
+                            tool: name,
+                            error: message,
+                            errorType: err?.constructor?.name ?? "Error",
+                            stackPreview: stack,
+                            hint: classifyToolError(name, message),
+                        };
                     }
                 },
             }];
         })
     );
+}
+
+/** Quick heuristic to give the agent a starting point for what to do. */
+function classifyToolError(toolName: string, message: string): string {
+    const m = message.toLowerCase();
+    if (m.includes("enoent") || m.includes("no such file")) return "File not found — check the path.";
+    if (m.includes("eacces") || m.includes("permission denied")) return "Permission denied — try with different permissions or a different approach.";
+    if (m.includes("econnrefused") || m.includes("enotfound")) return "Network/service unreachable — check the URL or if the service is running.";
+    if (m.includes("timeout") || m.includes("etimedout")) return "Operation timed out — try again or use a shorter timeout.";
+    if (m.includes("syntax error") || m.includes("unexpected token")) return "Code syntax error in tool — read the tool source and fix, or create a replacement.";
+    if (m.includes("is not a function") || m.includes("is not defined")) return "Code bug in tool — a function or variable is missing. Read the tool source to fix.";
+    if (m.includes("cannot read properties of") || m.includes("undefined")) return "Null reference in tool code — read the source, check for missing data.";
+    if (m.includes("out of memory") || m.includes("heap")) return "Out of memory — try processing less data at once.";
+    if (m.includes("spawn") || m.includes("command not found")) return "System command not found — check if the program is installed.";
+    return "Read the tool source file to understand and fix the error, or create a new tool if unrecoverable.";
 }
 
 // ── Wrap tools with secret handling ──────────────────────────────────────────
@@ -223,11 +233,11 @@ async function buildAgentParams(config: AppConfig, options: AgentRunOptions) {
         Object.entries({ ...allTools, ...mcpTools }).filter(([k]) => !excluded.has(k))
     );
 
-    // Wrap every tool's execute() to auto-compress large results before they enter the LLM context
-    const compressedTools = wrapToolsWithAutoCompress(rawTools, config);
-
     // Wrap every tool to resolve {{secret:alias}} in inputs and censor values in outputs
-    const tools = wrapToolsWithSecretHandling(compressedTools);
+    const secretSafeTools = wrapToolsWithSecretHandling(rawTools);
+
+    // Outermost: catch any uncaught exception and return structured error to the LLM
+    const tools = wrapToolsWithErrorSafetyNet(secretSafeTools);
 
     const { provider, tier, providers } = config.llm;
     const modelId = providers[provider][tier];

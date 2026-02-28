@@ -1,7 +1,10 @@
-// src/mcp/auto_discover_mcp.ts
-// Scans src/mcp/ for .json files and connects enabled MCP servers.
+// src/mcp-servers/auto_discover_mcp.ts
+// Scans src/mcp-servers/ AND .agents/mcp-servers/ for .json files and connects enabled MCP servers.
+// 
+// Core (versioned) MCP configs: src/mcp-servers/*.json
+// Extended (runtime) configs: .agents/mcp-servers/*.json
 
-import { readdirSync, readFileSync } from "fs";
+import { readdirSync, readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -33,19 +36,34 @@ let _cache: Record<string, Tool> | null = null;
 let _configSnapshot = "";
 let _activeClients: Client[] = [];
 
-/** Hash all JSON file contents — changes trigger re-discovery */
+/** Scan a directory for .json MCP config files */
+function scanMcpDir(dir: string): string[] {
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir).filter((f) => f.endsWith(".json"));
+}
+
+/** Hash all JSON file contents from both dirs — changes trigger re-discovery */
 function getConfigSnapshot(): string {
-    const mcpDir = import.meta.dir;
+    const coreDir = import.meta.dir;
+    const extendedDir = resolve(process.cwd(), ".agents", "mcp-servers");
+    
+    const allFiles = [...scanMcpDir(coreDir), ...scanMcpDir(extendedDir)].sort();
+    
     try {
-        const files = readdirSync(mcpDir)
-            .filter((f) => f.endsWith(".json"))
-            .sort();
-        return files
+        return allFiles
             .map((f) => {
+                const fullPath = f === scanMcpDir(coreDir)[0] // simple heuristic
+                    ? resolve(coreDir, f)
+                    : resolve(extendedDir, f);
                 try {
-                    return readFileSync(resolve(mcpDir, f), "utf-8");
+                    return readFileSync(fullPath, "utf-8");
                 } catch {
-                    return "";
+                    // try other dir
+                    try {
+                        return readFileSync(resolve(coreDir, f), "utf-8");
+                    } catch {
+                        return "";
+                    }
                 }
             })
             .join("|");
@@ -71,6 +89,100 @@ export function forceReDiscover(): void {
     _configSnapshot = "";
 }
 
+/** Load and connect a single MCP server from a config file */
+async function loadMcpServer(
+    filePath: string,
+    allTools: Record<string, Tool>
+): Promise<void> {
+    const config = getConfig();
+    let mcpConfig: McpServerConfig;
+    
+    try {
+        mcpConfig = JSON.parse(readFileSync(filePath, "utf-8")) as McpServerConfig;
+    } catch (err) {
+        logger.error(`Failed to parse ${filePath}:`, err);
+        return;
+    }
+
+    if (!mcpConfig.enabled) return;
+    if (!mcpConfig.name) {
+        logger.warn(`${filePath}: missing 'name', skipping`);
+        return;
+    }
+
+    try {
+        const client = new Client({ 
+            name: getConfig().agent.name.toLowerCase(), 
+            version: "3.0.0" 
+        }, {});
+
+        if (mcpConfig.url) {
+            // Resolve ${ENV_VAR} placeholders in header values
+            const resolvedHeaders = mcpConfig.headers
+                ? Object.fromEntries(
+                    Object.entries(mcpConfig.headers).map(([k, v]) => [
+                        k,
+                        v.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? ""),
+                    ])
+                )
+                : {};
+
+            // Always include Accept: text/event-stream for SSE support
+            const headers = {
+                ...resolvedHeaders,
+                Accept: "text/event-stream,application/json",
+            };
+
+            const transport = new StreamableHTTPClientTransport(
+                new URL(mcpConfig.url),
+                { requestInit: { headers } }
+            );
+            await client.connect(transport);
+        } else if (mcpConfig.command) {
+            const transport = new StdioClientTransport({
+                command: mcpConfig.command,
+                args: mcpConfig.args ?? [],
+                env: mcpConfig.env
+            });
+            await client.connect(transport);
+        } else {
+            logger.warn(`"${mcpConfig.name}": no command or url, skipping`);
+            return;
+        }
+
+        const { tools } = await client.listTools();
+
+        for (const t of tools) {
+            const toolName = `${mcpConfig.name}__${t.name}`;
+            allTools[toolName] = tool({
+                description: t.description ?? toolName,
+                inputSchema: z.object({}).passthrough(),
+                execute: async (input) => {
+                    try {
+                        // Merge default tool arguments from config
+                        const defaultArgs = config.toolDefaults?.[toolName] ?? {};
+                        const mergedInput = { ...defaultArgs, ...(input ?? {}) };
+
+                        const result = await client.callTool({
+                            name: t.name,
+                            arguments: (mergedInput as Record<string, unknown>) ?? {}
+                        });
+                        return result;
+                    } catch (err: any) {
+                        logger.error(`Tool "${toolName}" failed:`, err?.message ?? err);
+                        return { success: false, error: err?.message ?? "MCP tool call failed" };
+                    }
+                }
+            });
+        }
+
+        logger.info(`"${mcpConfig.name}" connected — ${tools.length} tools loaded`);
+        _activeClients.push(client);
+    } catch (err) {
+        logger.error(`Failed to connect "${mcpConfig.name}":`, err);
+    }
+}
+
 export async function discoverMcpTools(): Promise<Record<string, Tool>> {
     const snapshot = getConfigSnapshot();
     if (_cache && snapshot === _configSnapshot) return _cache;
@@ -83,98 +195,24 @@ export async function discoverMcpTools(): Promise<Record<string, Tool>> {
     _cache = null;
     _configSnapshot = snapshot;
 
-    const mcpDir = import.meta.dir;
-    const files = readdirSync(mcpDir).filter((f) => f.endsWith(".json"));
+    // Core MCP configs (versioned): src/mcp-servers/
+    const coreDir = import.meta.dir;
+    const coreFiles = scanMcpDir(coreDir);
+    
+    // Extended MCP configs (runtime): .agents/mcp-servers/
+    const extendedDir = resolve(process.cwd(), ".agents", "mcp-servers");
+    const extendedFiles = scanMcpDir(extendedDir);
 
     const allTools: Record<string, Tool> = {};
 
-    const config = getConfig();
+    // Load core configs first
+    for (const file of coreFiles) {
+        await loadMcpServer(resolve(coreDir, file), allTools);
+    }
 
-    for (const file of files) {
-        let mcpConfig: McpServerConfig;
-        try {
-            mcpConfig = JSON.parse(
-                readFileSync(resolve(mcpDir, file), "utf-8")
-            ) as McpServerConfig;
-        } catch (err) {
-            logger.error(`Failed to parse ${file}:`, err);
-            continue;
-        }
-
-        if (!mcpConfig.enabled) continue;
-        if (!mcpConfig.name) {
-            logger.warn(`${file}: missing 'name', skipping`);
-            continue;
-        }
-
-        try {
-            const client = new Client({ name: getConfig().agent.name.toLowerCase(), version: "3.0.0" }, {});
-
-            if (mcpConfig.url) {
-                // Resolve ${ENV_VAR} placeholders in header values
-                const resolvedHeaders = mcpConfig.headers
-                    ? Object.fromEntries(
-                        Object.entries(mcpConfig.headers).map(([k, v]) => [
-                            k,
-                            v.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? ""),
-                        ])
-                    )
-                    : {};
-
-                // Always include Accept: text/event-stream for SSE support
-                const headers = {
-                    ...resolvedHeaders,
-                    Accept: "text/event-stream,application/json",
-                };
-
-                const transport = new StreamableHTTPClientTransport(
-                    new URL(mcpConfig.url),
-                    { requestInit: { headers } }
-                );
-                await client.connect(transport);
-            } else if (mcpConfig.command) {
-                const transport = new StdioClientTransport({
-                    command: mcpConfig.command,
-                    args: mcpConfig.args ?? [],
-                    env: mcpConfig.env
-                });
-                await client.connect(transport);
-            } else {
-                logger.warn(`"${mcpConfig.name}": no command or url, skipping`);
-                continue;
-            }
-
-            const { tools } = await client.listTools();
-
-            for (const t of tools) {
-                const toolName = `${mcpConfig.name}__${t.name}`;
-                allTools[toolName] = tool({
-                    description: t.description ?? toolName,
-                    inputSchema: z.object({}).passthrough(),
-                    execute: async (input) => {
-                        try {
-                            // Merge default tool arguments from config
-                            const defaultArgs = config.toolDefaults?.[toolName] ?? {};
-                            const mergedInput = { ...defaultArgs, ...(input ?? {}) };
-
-                            const result = await client.callTool({
-                                name: t.name,
-                                arguments: (mergedInput as Record<string, unknown>) ?? {}
-                            });
-                            return result;
-                        } catch (err: any) {
-                            logger.error(`Tool "${toolName}" failed:`, err?.message ?? err);
-                            return { success: false, error: err?.message ?? "MCP tool call failed" };
-                        }
-                    }
-                });
-            }
-
-            logger.info(`"${mcpConfig.name}" connected — ${tools.length} tools loaded`);
-            _activeClients.push(client);
-        } catch (err) {
-            logger.error(`Failed to connect "${mcpConfig.name}":`, err);
-        }
+    // Then load extended configs (can override core with same name)
+    for (const file of extendedFiles) {
+        await loadMcpServer(resolve(extendedDir, file), allTools);
     }
 
     _cache = allTools;

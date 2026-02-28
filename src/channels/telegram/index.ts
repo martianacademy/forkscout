@@ -35,6 +35,7 @@ import {
     type ApprovedRole,
 } from "@/channels/telegram/access-requests.ts";
 import { setSecret, listAliases, deleteSecret } from "@/secrets/vault.ts";
+import { LLMError } from "@/llm/retry.ts";
 
 // ─────────────────────────────────────────────
 // Constants & module-level state
@@ -350,9 +351,14 @@ async function start(config: AppConfig): Promise<void> {
                 // Queue per chat — serialises concurrent messages, never races
                 const prev = chatQueues.get(chatId) ?? Promise.resolve();
                 const next = prev.then(() =>
-                    handleMessage(config, token, chatId, msg, role as "owner" | "admin" | "user").catch((err) =>
-                        logger.error("Handler error:", err)
-                    )
+                    handleMessage(config, token, chatId, msg, role as "owner" | "admin" | "user").catch(async (err) => {
+                        logger.error("Handler error:", err);
+                        // Send clean user-facing message for LLM errors
+                        const userMsg = (err instanceof LLMError)
+                            ? `⚠️ ${err.classified.userMessage}`
+                            : "⚠️ Something went wrong processing your message. Please try again.";
+                        await sendMessage(token, chatId, userMsg).catch(() => { });
+                    })
                 );
                 chatQueues.set(chatId, next);
             }

@@ -43,7 +43,7 @@ export const web_search_tools = tool({
         "Search the web and return top results. Uses SearXNG when available (SEARXNG_URL env), falls back to DuckDuckGo.",
     inputSchema: z.object({
         query: z.string().describe("Search query"),
-        maxResults: z.number().optional().default(5).describe("Max results to return"),
+        maxResults: z.number().max(10).optional().default(5).describe("Max results to return (capped at 10)"),
     }),
     execute: async (input) => {
         const { query, maxResults = 5 } = input;

@@ -6,6 +6,7 @@ import type { ModelMessage } from "ai";
 import type { AppConfig } from "@/config.ts";
 import type { Channel } from "@/channels/types.ts";
 import { streamAgent } from "@/agent/index.ts";
+import { LLMError } from "@/llm/retry.ts";
 import { log } from "@/logs/logger.ts";
 import { loadHistory, saveHistory, clearHistory } from "@/channels/chat-store.ts";
 
@@ -101,7 +102,13 @@ async function start(config: AppConfig) {
                 );
                 saveHistory(sessionKey, history);
             } catch (err: any) {
-                logger.error(err.message);
+                if (err instanceof LLMError) {
+                    console.error(`\n\x1b[31m${err.classified.userMessage}\x1b[0m`);
+                    logger.error(`[${err.classified.category}] ${(err.classified.original as any)?.message ?? err.message}`);
+                } else {
+                    console.error(`\n\x1b[31mError: ${err.message}\x1b[0m`);
+                    logger.error(err.message);
+                }
             }
 
             ask();

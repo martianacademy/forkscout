@@ -257,6 +257,50 @@ async function pageState(page: Page): Promise<{ url: string; title: string }> {
     };
 }
 
+// ─── LLM Content Summariser ─────────────────────────────────────────────
+
+const SUMMARIZE_THRESHOLD = 1500; // chars — below this, return raw text
+
+/**
+ * Summarise long page text using the fast/summariser-tier LLM.
+ * Short text (< SUMMARIZE_THRESHOLD) passes through untouched.
+ */
+async function summarizePageContent(
+    rawText: string,
+    context: { url?: string; title?: string },
+): Promise<string> {
+    if (rawText.length <= SUMMARIZE_THRESHOLD) return rawText;
+
+    try {
+        const cfg = getConfig();
+        const model = getModelForRole("summarizer", cfg.llm);
+        const maxTokens = cfg.llm.llmSummarizeMaxTokens ?? 1200;
+
+        const contextHeader = [
+            context.title && `Title: ${context.title}`,
+            context.url && `URL: ${context.url}`,
+        ].filter(Boolean).join("\n");
+
+        const { text } = await generateText({
+            model,
+            messages: [
+                {
+                    role: "user",
+                    content: `Summarise the following web page content concisely. Preserve key facts, data points, names, URLs, and actionable details. Omit boilerplate, navigation, ads, and repetitive filler.\n\n${contextHeader}\n\n---\n${rawText}`,
+                },
+            ],
+            maxOutputTokens: maxTokens,
+        });
+
+        logger.info(`summarised ${rawText.length} chars → ${text.length} chars`);
+        return text;
+    } catch (err) {
+        // If summarisation fails, return truncated raw text rather than failing the whole action
+        logger.warn(`summarisation failed, returning raw text: ${(err as Error).message}`);
+        return rawText;
+    }
+}
+
 // ─── Vision Overlay ─────────────────────────────────────────────────────
 
 const INTERACTIVE_TAGS = new Set(["a", "button", "input", "textarea", "select", "details", "summary"]);
@@ -560,14 +604,14 @@ Profile support: Use 'profile' param to isolate browser state (cookies, localSto
 
                 // ── get_text ───────────────────────────────────────────────
                 case "get_text": {
-                    let text: string;
+                    let rawText: string;
                     const getTextSel = resolveSelector(input.selector, input.elementId);
                     if (getTextSel) {
                         // Specific selector — return as-is, no noise removal
-                        text = (await page.innerText(getTextSel, { timeout: 10_000 })).trim().slice(0, 8000);
+                        rawText = (await page.innerText(getTextSel, { timeout: 10_000 })).trim().slice(0, 8000);
                     } else {
                         // Full page — remove noise elements first, runs inside real browser DOM
-                        text = await page.evaluate(`(() => {
+                        rawText = await page.evaluate(`(() => {
                             const clone = document.body.cloneNode(true);
                             clone.querySelectorAll(
                                 "nav,footer,header,aside,script,style,noscript,iframe," +
@@ -577,9 +621,11 @@ Profile support: Use 'profile' param to isolate browser state (cookies, localSto
                             ).forEach(el => el.remove());
                             return (clone.innerText || "").replace(/\\s{2,}/g, " ").trim();
                         })()`) as string;
-                        text = text.slice(0, 8000);
+                        rawText = rawText.slice(0, 8000);
                     }
-                    return { success: true, action, ...(await pageState(page)), text };
+                    const state = await pageState(page);
+                    const text = await summarizePageContent(rawText, state);
+                    return { success: true, action, ...state, text };
                 }
 
                 // ── hover ──────────────────────────────────────────────────
