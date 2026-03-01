@@ -1,24 +1,25 @@
-// src/channels/chat-store.ts — Persists per-session ModelMessage[] split by role into separate files.
-// Used by all channels.
-// Used by all channels. Each channel prefixes its own session key:
-//   telegram-<chatId>   → Telegram users
-//   terminal-<username> → Terminal (OS user)
+// src/channels/chat-store.ts — Persists per-session chat history as a single sequential file.
 //
-// Storage layout (per session):
-//   .agents/chats/<sessionKey>/user.json      ← user messages
-//   .agents/chats/<sessionKey>/assistant.json ← assistant messages
-//   .agents/chats/<sessionKey>/tool.json      ← tool messages
-//   .agents/chats/<sessionKey>/system.json    ← system messages (rare)
+// Storage layout:
+//   .agents/chats/<sessionKey>/history.json  ← single file, all roles interleaved
 //
-// Every stored entry has an extra `seq` field (0-based position in the
-// original interleaved array) so loadHistory can reconstruct the correct order.
+// Each entry is a raw ModelMessage stored in exact chronological order.
+// No split-by-role, no seq numbers — just a flat ordered array.
+//
+// Channels call:
+//   loadHistory(key)                → read full ModelMessage[]
+//   appendHistory(key, messages)    → append new messages to the array
+//   saveHistory(key, messages)      → overwrite entire array (used after trim)
+//   clearHistory(key)              → delete session
+//
+// Sanitisation (tool-call pairing, schema validation) is NOT done here —
+// it happens at prompt-build time in prepare-history.ts, never on save/load.
 
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { resolve } from "path";
 import type { ModelMessage } from "ai";
 import { LOG_DIR } from "@/logs/activity-log.ts";
 import { log } from "@/logs/logger.ts";
-import { sanitizeUserMessage } from "@/utils/secrets.ts";
 
 const logger = log("chat-store");
 
@@ -34,115 +35,128 @@ function sessionDir(sessionKey: string): string {
     return resolve(CHATS_DIR, sessionKey);
 }
 
-function rolePath(sessionKey: string, role: string): string {
-    return resolve(sessionDir(sessionKey), `${role}.json`);
-}
-
-/** Legacy flat file path — used only for migration. */
-function legacyPath(sessionKey: string): string {
-    return resolve(CHATS_DIR, `${sessionKey}.json`);
+function historyPath(sessionKey: string): string {
+    return resolve(sessionDir(sessionKey), "history.json");
 }
 
 // ── Load ─────────────────────────────────────────────────────────────────────
 
 /**
  * Load persisted history for a session.
+ * Returns a flat ModelMessage[] in chronological order.
  *
- * Reads the split role files, merges by `seq`, sanitizes, and returns
- * the interleaved ModelMessage[].
- *
- * Falls back to the legacy single-file format and migrates it automatically.
+ * Handles migration from:
+ *   1. Legacy split-by-role files (user.json, assistant.json, tool.json)
+ *   2. Legacy single flat file (.agents/chats/<key>.json)
  */
 export function loadHistory(sessionKey: string): ModelMessage[] {
     const dir = sessionDir(sessionKey);
+    const hPath = historyPath(sessionKey);
 
-    // ── Legacy flat file migration ───────────────────────────────────────────
-    const legacy = legacyPath(sessionKey);
-    if (!existsSync(dir) && existsSync(legacy)) {
+    // ── New format: history.json ────────────────────────────────────────────
+    if (existsSync(hPath)) {
         try {
-            const raw = readFileSync(legacy, "utf-8");
+            const raw = readFileSync(hPath, "utf-8");
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-                logger.warn(`chat-store: migrating legacy flat file → split format for ${sessionKey}`);
-                saveHistory(sessionKey, parsed as ModelMessage[]);
-                try { rmSync(legacy, { force: true }); } catch { /* ignore */ }
-                return loadHistory(sessionKey);
-            }
+            if (Array.isArray(parsed)) return parsed as ModelMessage[];
         } catch (err) {
-            logger.warn(`chat-store: failed to migrate legacy file for ${sessionKey}: ${(err as Error).message}`);
+            logger.warn(`chat-store: failed to read history.json for ${sessionKey}: ${(err as Error).message}`);
         }
     }
 
-    // ── New split format ─────────────────────────────────────────────────────
-    if (!existsSync(dir)) return [];
+    // ── Migration: split-by-role files → history.json ───────────────────────
+    const splitRoles = ["user", "assistant", "tool", "system"] as const;
+    const splitFiles = splitRoles.map(r => resolve(dir, `${r}.json`));
+    const hasSplitFiles = splitFiles.some(f => existsSync(f));
 
-    const roles = ["user", "assistant", "tool", "system"] as const;
-    const all: Array<{ seq: number } & ModelMessage> = [];
+    if (hasSplitFiles) {
+        logger.info(`chat-store: migrating split-by-role files → history.json for ${sessionKey}`);
+        const all: Array<{ seq: number } & Record<string, any>> = [];
 
-    for (const role of roles) {
-        const path = rolePath(sessionKey, role);
-        if (!existsSync(path)) continue;
-        try {
-            const raw = readFileSync(path, "utf-8");
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-                for (const entry of parsed) {
-                    if (typeof entry?.seq === "number") {
-                        const { seq, ...msg } = entry;
-                        all.push({ seq, ...(msg as ModelMessage) });
+        for (const role of splitRoles) {
+            const path = resolve(dir, `${role}.json`);
+            if (!existsSync(path)) continue;
+            try {
+                const raw = readFileSync(path, "utf-8");
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    for (const entry of parsed) {
+                        if (entry && typeof entry === "object" && typeof entry.seq === "number") {
+                            all.push(entry);
+                        }
                     }
                 }
+            } catch { /* skip corrupted */ }
+        }
+
+        if (all.length > 0) {
+            all.sort((a, b) => a.seq - b.seq);
+            const messages: ModelMessage[] = all.map(({ seq: _seq, ...msg }) => msg as ModelMessage);
+            saveHistory(sessionKey, messages);
+
+            // Remove old split files
+            for (const path of splitFiles) {
+                try { if (existsSync(path)) rmSync(path, { force: true }); } catch { /* ignore */ }
             }
-        } catch (err) {
-            logger.warn(`chat-store: failed to read ${role}.json for ${sessionKey}: ${(err as Error).message}`);
+
+            return messages;
         }
     }
 
-    if (all.length === 0) return [];
+    // ── Migration: legacy flat file (.agents/chats/<key>.json) ──────────────
+    const legacyFlat = resolve(CHATS_DIR, `${sessionKey}.json`);
+    if (existsSync(legacyFlat)) {
+        try {
+            const raw = readFileSync(legacyFlat, "utf-8");
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                logger.info(`chat-store: migrating legacy flat file → history.json for ${sessionKey}`);
+                saveHistory(sessionKey, parsed as ModelMessage[]);
+                try { rmSync(legacyFlat, { force: true }); } catch { /* ignore */ }
+                return parsed as ModelMessage[];
+            }
+        } catch { /* skip corrupted */ }
+    }
 
-    // Sort by original position and return raw — no sanitization.
-    // Sanitization happens at prompt-build time in the agent, not here.
-    all.sort((a, b) => a.seq - b.seq);
-    return all.map(({ seq: _seq, ...msg }) => msg as ModelMessage);
+    return [];
 }
 
 // ── Save ─────────────────────────────────────────────────────────────────────
 
-/** Persist history for a session — splits messages by role into separate files. */
+/** Overwrite entire history for a session. Used after trim operations. */
 export function saveHistory(sessionKey: string, messages: ModelMessage[]): void {
     const dir = sessionDir(sessionKey);
+    try { mkdirSync(dir, { recursive: true }); } catch { /* already exists */ }
+
     try {
-        mkdirSync(dir, { recursive: true });
-    } catch { /* already exists */ }
-
-    const byRole = new Map<string, Array<{ seq: number } & ModelMessage>>();
-
-    for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-        const role = (msg as any).role as string;
-        if (!byRole.has(role)) byRole.set(role, []);
-        byRole.get(role)!.push({ seq: i, ...msg });
-    }
-
-    for (const [role, entries] of byRole) {
-        try {
-            writeFileSync(rolePath(sessionKey, role), JSON.stringify(entries, null, 2), "utf-8");
-        } catch (err) {
-            logger.error(`chat-store: failed to write ${role}.json for ${sessionKey}:`, err);
-        }
-    }
-
-    // Remove role files that no longer have entries (e.g. all tool messages were trimmed)
-    const allRoles = ["user", "assistant", "tool", "system"];
-    for (const role of allRoles) {
-        if (!byRole.has(role)) {
-            const path = rolePath(sessionKey, role);
-            try { if (existsSync(path)) rmSync(path, { force: true }); } catch { /* ignore */ }
-        }
+        writeFileSync(historyPath(sessionKey), JSON.stringify(messages, null, 2), "utf-8");
+    } catch (err) {
+        logger.error(`chat-store: failed to write history for ${sessionKey}:`, err);
     }
 }
 
+/** Append new messages to the end of existing history. */
+export function appendHistory(sessionKey: string, messages: ModelMessage[]): void {
+    if (messages.length === 0) return;
+    const existing = loadHistory(sessionKey);
+    saveHistory(sessionKey, [...existing, ...messages]);
+}
 
+// ── Clear ────────────────────────────────────────────────────────────────────
+
+/** Clear history for a session — deletes the session folder and legacy flat file. */
+export function clearHistory(sessionKey: string): void {
+    try {
+        rmSync(sessionDir(sessionKey), { recursive: true, force: true });
+    } catch (err) {
+        logger.error(`Failed to clear history for ${sessionKey}:`, err);
+    }
+    // Also clean up any legacy flat file
+    const legacyFlat = resolve(CHATS_DIR, `${sessionKey}.json`);
+    try { if (existsSync(legacyFlat)) rmSync(legacyFlat, { force: true }); } catch { /* ignore */ }
+}
+
+// ── Sanitize ─────────────────────────────────────────────────────────────────
 
 /**
  * Sanitize and normalise raw stored messages into valid ModelMessage[] just before
@@ -179,97 +193,54 @@ export function sanitizeForPrompt(msgs: any[]): ModelMessage[] {
                 const normalized = (msg.content as any[]).map((p: any) => {
                     if (p.type !== "tool-result") return null; // invalid part
                     if (typeof p.toolCallId !== "string" || typeof p.toolName !== "string") return null;
-                    // Normalize output to AI SDK v6 shape: must be an object, not string/primitive
                     let output = p.output;
-                    if (output === undefined && p.result !== undefined) output = p.result; // migrate old field
+                    if (output === undefined && p.result !== undefined) output = p.result;
                     if (output === undefined) return null;
-                    // Ensure output is a valid AI SDK v6 outputSchema discriminated union.
-                    // The schema requires specific shapes per type — all checked below.
                     const validOutputTypes = new Set(["text", "json", "execution-denied", "error-text", "error-json", "content"]);
 
                     if (typeof output !== "object" || output === null || !validOutputTypes.has((output as any).type)) {
-                        // Not a valid discriminated union object — wrap it
                         output = typeof output === "string"
                             ? { type: "text", value: output }
                             : { type: "json", value: output ?? null };
                     } else {
-                        // Valid type string, but value field might be wrong shape:
                         const ot = (output as any).type;
-                        // "text" requires value: string
                         if (ot === "text") {
                             if (typeof (output as any).value !== "string") {
                                 const v = (output as any).value;
                                 output = { type: "text", value: v == null ? "" : String(typeof v === "object" ? JSON.stringify(v) : v) };
                             }
-                        }
-                        // "json" requires value field (any JSON value)
-                        else if (ot === "json") {
-                            if (!("value" in (output as any))) {
-                                output = { type: "json", value: null };
-                            }
-                        }
-                        // "error-text" requires value: string
-                        else if (ot === "error-text") {
-                            if (typeof (output as any).value !== "string") {
-                                output = { type: "error-text", value: String((output as any).value ?? "") };
-                            }
-                        }
-                        // "error-json" requires value field
-                        else if (ot === "error-json") {
-                            if (!("value" in (output as any))) {
-                                output = { type: "error-json", value: null };
-                            }
-                        }
-                        // "execution-denied" only requires optional reason: string
-                        else if (ot === "execution-denied") {
+                        } else if (ot === "json") {
+                            if (!("value" in (output as any))) output = { type: "json", value: null };
+                        } else if (ot === "error-text") {
+                            if (typeof (output as any).value !== "string") output = { type: "error-text", value: String((output as any).value ?? "") };
+                        } else if (ot === "error-json") {
+                            if (!("value" in (output as any))) output = { type: "error-json", value: null };
+                        } else if (ot === "execution-denied") {
                             const reason = (output as any).reason;
-                            if (reason !== undefined && typeof reason !== "string") {
-                                output = { type: "execution-denied", reason: String(reason) };
-                            }
-                        }
-                        // "content" requires value: array — if invalid, downgrade to json
-                        else if (ot === "content") {
-                            if (!Array.isArray((output as any).value)) {
-                                output = { type: "json", value: (output as any).value ?? null };
-                            }
+                            if (reason !== undefined && typeof reason !== "string") output = { type: "execution-denied", reason: String(reason) };
+                        } else if (ot === "content") {
+                            if (!Array.isArray((output as any).value)) output = { type: "json", value: (output as any).value ?? null };
                         }
                     }
                     return { ...p, output };
                 });
-                if (normalized.some((p: any) => p === null)) {
-                    logger.warn(`chat-store: dropping invalid tool message at index ${i}`);
-                    continue;
-                }
-                // Verify the preceding assistant message has matching tool-calls
+                if (normalized.some((p: any) => p === null)) continue;
                 const prev = valid[valid.length - 1] as any;
-                if (!prev || prev.role !== "assistant" || !Array.isArray(prev.content)) {
-                    logger.warn(`chat-store: dropping orphaned tool message at index ${i} (no preceding assistant)`);
-                    continue;
-                }
+                if (!prev || prev.role !== "assistant" || !Array.isArray(prev.content)) continue;
                 const callIds = new Set(
-                    (prev.content as any[])
-                        .filter((p: any) => p.type === "tool-call")
-                        .map((p: any) => p.toolCallId)
+                    (prev.content as any[]).filter((p: any) => p.type === "tool-call").map((p: any) => p.toolCallId)
                 );
                 const resultIds = (normalized as any[]).map((p: any) => p.toolCallId);
-                if (!resultIds.every((id: string) => callIds.has(id))) {
-                    logger.warn(`chat-store: dropping tool message at index ${i} — toolCallIds don't match preceding assistant`);
-                    continue;
-                }
+                if (!resultIds.every((id: string) => callIds.has(id))) continue;
                 valid.push({ ...msg, content: normalized } as ModelMessage);
                 continue;
             }
         }
 
-        // Sanitize user messages to mask secrets before sending to LLM
-        const sanitizedMsg = msg.role === "user" && typeof msg.content === "string"
-            ? { ...msg, content: sanitizeUserMessage(msg.content) }
-            : msg;
-        valid.push(sanitizedMsg as ModelMessage);
+        valid.push(msg as ModelMessage);
     }
 
     // Second pass: remove assistant messages whose tool-calls have no following tool-result.
-    // AI SDK v6 requires every tool-call to be answered — unpaired calls are invalid.
     const cleaned: ModelMessage[] = [];
     for (let i = 0; i < valid.length; i++) {
         const msg = valid[i] as any;
@@ -282,14 +253,8 @@ export function sanitizeForPrompt(msgs: any[]): ModelMessage[] {
                         next.content.some((tr: any) => tr.type === "tool-result" && tr.toolCallId === tc.toolCallId)
                     );
                 if (!hasResult) {
-                    // Strip tool-calls, keep any text parts — or drop entirely if nothing left
                     const textParts = msg.content.filter((p: any) => p.type === "text");
-                    if (textParts.length > 0) {
-                        logger.warn(`chat-store: assistant at index ${i} has unpaired tool-calls — stripping calls, keeping text`);
-                        cleaned.push({ ...msg, content: textParts });
-                    } else {
-                        logger.warn(`chat-store: dropping assistant at index ${i} — unpaired tool-calls, no text`);
-                    }
+                    if (textParts.length > 0) cleaned.push({ ...msg, content: textParts });
                     continue;
                 }
             }
@@ -298,23 +263,9 @@ export function sanitizeForPrompt(msgs: any[]): ModelMessage[] {
     }
 
     // Final guard: history must start with a user message.
-    // Drop any leading assistant/tool/system messages that survived sanitization.
     while (cleaned.length > 0 && (cleaned[0] as any).role !== "user") {
-        logger.warn(`chat-store: dropping leading ${(cleaned[0] as any).role} message — history must start with user`);
         cleaned.shift();
     }
 
     return cleaned;
-}
-
-/** Clear history for a session — deletes the session folder and legacy flat file. */
-export function clearHistory(sessionKey: string): void {
-    try {
-        rmSync(sessionDir(sessionKey), { recursive: true, force: true });
-    } catch (err) {
-        logger.error(`Failed to clear history dir for ${sessionKey}:`, err);
-    }
-    try {
-        rmSync(legacyPath(sessionKey), { force: true });
-    } catch { /* ignore */ }
 }

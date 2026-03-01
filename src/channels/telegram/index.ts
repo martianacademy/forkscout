@@ -20,10 +20,13 @@ import {
 } from "@/channels/telegram/api.ts";
 import { mdToHtml, splitMarkdown, stripHtml } from "@/channels/telegram/format.ts";
 import { compileTelegramMessage } from "@/channels/telegram/compile-message.ts";
-import { prepareHistory, type StoredMessage } from "@/channels/prepare-history.ts";
+import { prepareHistory } from "@/channels/prepare-history.ts";
+import { loadHistory, appendHistory, saveHistory } from "@/channels/chat-store.ts";
+import { embedNewTurns } from "@/channels/history-embeddings.ts";
 import { log } from "@/logs/logger.ts";
 import { LOG_DIR } from "@/logs/activity-log.ts";
-import { mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
+import type { ModelMessage } from "ai";
+import { readFileSync, existsSync, unlinkSync } from "fs";
 import { resolve } from "path";
 import type { Message, Update } from "@grammyjs/types";
 import {
@@ -216,7 +219,7 @@ async function start(config: AppConfig): Promise<void> {
                         const html = mdToHtml(result.text);
                         const chunks = splitMarkdown(html, 4000);
                         for (const chunk of chunks) {
-                            await sendMessage(token, ownerChatId, chunk, "HTML").catch(() => { });
+                            await sendMessage(token, ownerChatId, chunk, "HTML", true).catch(() => { });
                         }
                     }
                     logger.info(`Auto-continue task completed (${result.steps} steps)`);
@@ -385,43 +388,29 @@ async function handleMessage(
     rawMsg: Message,
     role: "owner" | "admin" | "user" = "user"
 ): Promise<void> {
-    const chatDir = resolve(CHATS_DIR, `telegram-${chatId}`);
-    mkdirSync(chatDir, { recursive: true });
+    const sessionKey = `telegram-${chatId}`;
 
-    // ── 1. Save raw user message ─────────────────────────────────────────────
-    const userFile = resolve(chatDir, "user.json");
-    const rawUsers = readJsonFile<Message[]>(userFile, []);
-    rawUsers.push(rawMsg);
-    writeFileSync(userFile, JSON.stringify(rawUsers, null, 2), "utf-8");
+    // ── 1. Migrate old split files if needed (one-time) ──────────────────────
+    migrateSplitFiles(chatId);
+
+    // ── 2. Save current user message to unified history ──────────────────────
+    const compiledMsg = compileTelegramMessage(rawMsg);
+    appendHistory(sessionKey, [compiledMsg]);
 
     // Acknowledge receipt — react 👀 on user's message so they know it's being processed
     await setMessageReaction(token, chatId, rawMsg.message_id, "👀").catch(() => { });
 
-    // ── 2. Compile raw Telegram messages → StoredMessage[] ───────────────────
-    // Each message's seq = its Telegram date (Unix seconds) — chronologically stable.
-    const compiledUsers: StoredMessage[] = rawUsers.map((m) => ({
-        seq: m.date,
-        ...compileTelegramMessage(m),
-    }));
-
-    // ── 3. Load existing agent response messages (assistant + tool) ──────────
-    const assistantFile = resolve(chatDir, "assistant.json");
-    const toolFile = resolve(chatDir, "tool.json");
-    const storedAssistant = readJsonFile<StoredMessage[]>(assistantFile, []);
-    const storedTool = readJsonFile<StoredMessage[]>(toolFile, []);
-
-    // ── 4. Prepare history via shared pipeline ───────────────────────────────
+    // ── 3. Load & prepare full history via shared pipeline ───────────────────
     const allHistory = prepareHistory(
-        { user: compiledUsers, assistant: storedAssistant, tool: storedTool },
+        loadHistory(sessionKey),
         { tokenBudget: config.telegram.historyTokenBudget }
     );
 
     // The current user message is the last in allHistory — pass it as userMessage,
     // everything before it as chatHistory.
-    const currentMsg = compiledUsers[compiledUsers.length - 1];
-    const rawContent = typeof currentMsg.content === "string"
-        ? currentMsg.content
-        : JSON.stringify(currentMsg.content);
+    const rawContent = typeof compiledMsg.content === "string"
+        ? compiledMsg.content
+        : JSON.stringify(compiledMsg.content);
     const roleTag = role === "owner" ? "OWNER" : role === "admin" ? "ADMIN" : "USER";
     const currentContent = `[${roleTag}] ${rawContent}`;
     const chatHistory = allHistory.slice(0, -1);
@@ -579,24 +568,11 @@ async function handleMessage(
     // Clean up any leftover tool bubble (edge case: agent ended mid-tool)
     if (toolBubbleId) await deleteMessage(token, chatId, toolBubbleId).catch(() => { });
 
-    // ── 6. Save response messages split by role ──────────────────────────────
-    const turnBase = rawMsg.date + 1;
-    const newAssistant: StoredMessage[] = [];
-    const newTool: StoredMessage[] = [];
+    // ── 6. Save response messages to unified history ─────────────────────────
+    appendHistory(sessionKey, result.responseMessages);
 
-    result.responseMessages.forEach((msg, i) => {
-        const stored: StoredMessage = { seq: turnBase + i, ...msg };
-        if ((msg as any).role === "tool") {
-            newTool.push(stored);
-        } else {
-            newAssistant.push(stored);
-        }
-    });
-
-    writeFileSync(assistantFile, JSON.stringify([...storedAssistant, ...newAssistant], null, 2), "utf-8");
-    if (newTool.length > 0) {
-        writeFileSync(toolFile, JSON.stringify([...storedTool, ...newTool], null, 2), "utf-8");
-    }
+    // ── 6b. Embed new turns for semantic search (fire-and-forget) ────────────
+    embedNewTurns(sessionKey, loadHistory(sessionKey));
 
     // ── 7. Finalise reply ────────────────────────────────────────────────────
     // The response message already exists with streamed plain text.
@@ -1046,6 +1022,30 @@ async function handleOwnerCommand(token: string, chatId: number, ownerUserId: nu
         return;
     }
 
+    // /backfill — re-index chat history embeddings for semantic search
+    if (cmd === "/backfill") {
+        const { backfillEmbeddings } = await import("@/channels/history-embeddings.ts");
+        const { loadHistory: loadH } = await import("@/channels/chat-store.ts");
+        const sessionKey = `telegram-${chatId}`;
+        const history = loadH(sessionKey);
+        if (history.length === 0) {
+            await sendMessage(token, chatId, "⚠️ No history to embed.");
+            return;
+        }
+        await sendMessage(token, chatId, `🔄 Backfilling embeddings for ${history.length} messages...`);
+        try {
+            const result = await backfillEmbeddings(sessionKey, history);
+            await sendMessage(
+                token, chatId,
+                `✅ <b>Backfill complete.</b>\n• Turns embedded: <code>${result.chunksEmbedded}</code>\n• Tokens used: <code>${result.totalTokens}</code>`,
+                "HTML"
+            );
+        } catch (err: any) {
+            await sendMessage(token, chatId, `❌ Backfill failed: <code>${String(err?.message ?? err).slice(0, 300)}</code>`, "HTML");
+        }
+        return;
+    }
+
     // Unknown owner command — silently ignore (don't route to agent)
 }
 
@@ -1127,15 +1127,71 @@ function sleep(ms: number): Promise<void> {
 }
 
 // ─────────────────────────────────────────────
-// File helpers
+// Migration helpers
 // ─────────────────────────────────────────────
 
-/** Read a JSON file, returning `fallback` if missing or unparsable. */
-function readJsonFile<T>(filePath: string, fallback: T): T {
+/**
+ * One-time migration: split-by-role files (user.json, assistant.json, tool.json)
+ * → unified history.json. Handles raw Telegram Message objects in user.json.
+ */
+function migrateSplitFiles(chatId: number): void {
+    const sessionKey = `telegram-${chatId}`;
+    const dir = resolve(CHATS_DIR, `telegram-${chatId}`);
+    const userFile = resolve(dir, "user.json");
+
+    // Only migrate if old user.json exists and history.json doesn't
+    if (!existsSync(userFile)) return;
+    if (existsSync(resolve(dir, "history.json"))) {
+        // history.json already exists — just clean up leftover split files
+        for (const name of ["user.json", "assistant.json", "tool.json", "system.json"]) {
+            try { const p = resolve(dir, name); if (existsSync(p)) unlinkSync(p); } catch { /* ignore */ }
+        }
+        return;
+    }
+
+    logger.info(`Migrating split chat files → history.json for chat ${chatId}`);
+
+    type SeqEntry = { seq: number } & Record<string, any>;
+    const all: SeqEntry[] = [];
+
+    // user.json: raw Telegram Message objects — compile to ModelMessage
     try {
-        return JSON.parse(readFileSync(filePath, "utf-8")) as T;
-    } catch {
-        return fallback;
+        const rawUsers = JSON.parse(readFileSync(userFile, "utf-8"));
+        if (Array.isArray(rawUsers)) {
+            for (const m of rawUsers) {
+                if (m && typeof m === "object" && typeof m.date === "number") {
+                    all.push({ seq: m.date, ...compileTelegramMessage(m) });
+                }
+            }
+        }
+    } catch { /* skip corrupted */ }
+
+    // assistant.json + tool.json: already have seq + role/content
+    for (const role of ["assistant", "tool", "system"]) {
+        const path = resolve(dir, `${role}.json`);
+        if (!existsSync(path)) continue;
+        try {
+            const parsed = JSON.parse(readFileSync(path, "utf-8"));
+            if (Array.isArray(parsed)) {
+                for (const entry of parsed) {
+                    if (entry && typeof entry === "object" && typeof entry.seq === "number") {
+                        all.push(entry);
+                    }
+                }
+            }
+        } catch { /* skip corrupted */ }
+    }
+
+    if (all.length > 0) {
+        all.sort((a, b) => a.seq - b.seq);
+        const messages: ModelMessage[] = all.map(({ seq: _, ...msg }) => msg as ModelMessage);
+        saveHistory(sessionKey, messages);
+        logger.info(`Migrated ${messages.length} messages for chat ${chatId}`);
+    }
+
+    // Clean up old split files
+    for (const name of ["user.json", "assistant.json", "tool.json", "system.json"]) {
+        try { const p = resolve(dir, name); if (existsSync(p)) unlinkSync(p); } catch { /* ignore */ }
     }
 }
 
@@ -1143,14 +1199,12 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
 // Guards
 // ─────────────────────────────────────────────
 
-/** Returns true if the message carries any supported content type. */
+/** Returns true if the message carries any content worth processing. */
 function hasContent(msg: Message | undefined): msg is Message {
     if (!msg) return false;
-    return !!(
-        msg.text || msg.photo || msg.voice || msg.audio ||
-        msg.video || msg.video_note || msg.animation ||
-        msg.document || msg.sticker || msg.location ||
-        msg.venue || msg.contact || msg.poll || msg.dice ||
-        msg.story || msg.game || msg.paid_media
-    );
+    // Since we pass the full raw JSON to the LLM, any message with
+    // at least one field beyond the base metadata is valid content.
+    // The base metadata fields (always present) are: message_id, date, chat.
+    const { message_id, date, chat, ...rest } = msg as any;
+    return Object.keys(rest).length > 0;
 }

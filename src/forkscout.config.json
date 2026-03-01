@@ -124,6 +124,13 @@
     "n8n": {
         "baseUrl": "http://localhost:5678"
     },
+    "embeddings": {
+        "enabled": true,
+        "provider": "openrouter",
+        "model": "openai/text-embedding-3-small",
+        "topK": 5,
+        "chunkMaxTokens": 500
+    },
     "telegram": {
         "pollingTimeout": 30,
         "historyTokenBudget": 12000,

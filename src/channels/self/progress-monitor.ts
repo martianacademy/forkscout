@@ -149,7 +149,7 @@ export function startProgressMonitor(opts: StartMonitorOptions): void {
             activeMonitors.delete(batchName);
             deleteMonitorState(batchName);
             if (lastMessageId) await deleteMessage(token, chatId, lastMessageId);
-            await sendMessage(token, chatId, `⏰ Task batch \`${batchName}\` timed out after ${timeoutMinutes} minutes.`);
+            await sendMessage(token, chatId, `⏰ Task batch \`${batchName}\` timed out after ${timeoutMinutes} minutes.`, "", true);
             logger.warn(`Monitor for batch "${batchName}" timed out`);
             return;
         }
@@ -191,7 +191,10 @@ export function startProgressMonitor(opts: StartMonitorOptions): void {
 
             fetch(`http://localhost:${httpPort}/trigger`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${process.env.FORKSCOUT_TRIGGER_TOKEN ?? ""}`,
+                },
                 body: JSON.stringify({ prompt: aggregatorPrompt, role: "self", session_key: `agg-${batchName}` }),
             }).catch((err) => logger.error(`Aggregator trigger error for "${batchName}":`, err.message));
 
@@ -199,7 +202,7 @@ export function startProgressMonitor(opts: StartMonitorOptions): void {
         }
 
         // ── Send fresh snapshot ───────────────────────────────────────────────
-        const msgId = await sendMessage(token, chatId, content);
+        const msgId = await sendMessage(token, chatId, content, "", true);
         if (msgId !== null) {
             lastMessageId = msgId;
             saveMonitorState({ ...state, lastMessageId });
@@ -225,7 +228,7 @@ export async function resumeMonitor(savedState: MonitorState, token: string): Pr
     let newMessageId = 0;
     if (existsSync(savedState.planFile)) {
         const content = readFileSync(savedState.planFile, "utf-8");
-        const msgId = await sendMessage(token, savedState.chatId, content);
+        const msgId = await sendMessage(token, savedState.chatId, content, "", true);
         if (msgId !== null) newMessageId = msgId;
     }
 

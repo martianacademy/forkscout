@@ -55,8 +55,15 @@ export interface AgentRunOptions {
      * Fires with the full reasoning text for that step.
      * Works with any model that sends a separate reasoning field (OpenRouter Minimax M2.5,
      * DeepSeek R1, etc.) — the AI SDK maps delta.reasoning → step.reasoningText automatically.
+     * Used by runAgent (non-streaming). For streamAgent, prefer onThinkingStart/Delta/End.
      */
     onThinking?: (text: string) => void | Promise<void>;
+    /** Called immediately when the model begins reasoning — use for instant UI feedback. */
+    onThinkingStart?: () => void | Promise<void>;
+    /** Called for each reasoning token as it arrives — stream live to the UI. */
+    onThinkingDelta?: (text: string) => void | Promise<void>;
+    /** Called when a reasoning block ends (before text/tool output begins). */
+    onThinkingEnd?: () => void | Promise<void>;
     /**
      * Called after each agentic step completes.
      * `hadToolCalls` is true when the step invoked at least one tool.
@@ -482,9 +489,9 @@ export async function streamAgent(
             if (typeof step.reasoningText === "string" && step.reasoningText.trim()) {
                 logger.info(`[thinking step ${streamStep}]\n${step.reasoningText.trim()}`);
             }
-            if (options.onThinking && typeof step.reasoningText === "string" && step.reasoningText.trim()) {
-                Promise.resolve(options.onThinking(step.reasoningText.trim())).catch(() => { });
-            }
+            // NOTE: onThinking is NOT called here for streamAgent — loggedTokenStream
+            // already fires it live as reasoning-delta chunks arrive. Calling it again
+            // from onStepFinish would duplicate the thinking indicator.
             for (const tc of step.toolCalls ?? []) {
                 activity.toolCall(tc.toolName, tc.input, "agent", streamStep);
             }
@@ -509,48 +516,44 @@ export async function streamAgent(
     // extractReasoningMiddleware strips <think> from the text stream and emits
     // reasoning-delta chunks — we forward those to onThinking live as they arrive.
     async function* loggedTokenStream(): AsyncIterable<string> {
-        let accumulatedReasoning = "";
-        let reasoningTimer: ReturnType<typeof setTimeout> | null = null;
+        let reasoningActive = false;
 
-        const flushReasoning = async () => {
-            if (!options.onThinking || !accumulatedReasoning) return;
-            const snapshot = accumulatedReasoning;
-            try { await options.onThinking(snapshot); } catch { /* never block stream */ }
-        };
-
-        const scheduleFlush = () => {
-            if (reasoningTimer) clearTimeout(reasoningTimer);
-            reasoningTimer = setTimeout(() => {
-                reasoningTimer = null;
-                flushReasoning().catch(() => { });
-            }, 600);
+        /** Close the current reasoning block — fires onThinkingEnd exactly once per block */
+        const closeReasoning = async () => {
+            if (!reasoningActive) return;
+            reasoningActive = false;
+            if (options.onThinkingEnd) {
+                try { await options.onThinkingEnd(); } catch { /* never block stream */ }
+            }
         };
 
         for await (const part of (stream as any).fullStream as AsyncIterable<import("ai").TextStreamPart<any>>) {
             if (part.type === "text-delta") {
                 const delta = part.text ?? "";
                 if (!delta) continue;
-                // Flush pending reasoning before first text token
-                if (reasoningTimer) {
-                    clearTimeout(reasoningTimer);
-                    reasoningTimer = null;
-                    await flushReasoning();
-                    accumulatedReasoning = "";
+                // Close any open reasoning block before text starts
+                if (reasoningActive) {
+                    await closeReasoning();
                 }
                 acc.text += delta;
                 activity.token(delta, channel, chatId);
                 process.stdout.write(delta);
                 yield delta;
             } else if (part.type === "reasoning-delta" && part.text) {
-                // Live reasoning chunks — log immediately + accumulate for onThinking debounce
+                // Stream reasoning tokens live
                 process.stdout.write(`\x1b[2m${part.text}\x1b[0m`); // dim text in terminal
-                if (options.onThinking) {
-                    accumulatedReasoning += part.text;
-                    scheduleFlush();
+                if (options.onThinkingDelta) {
+                    try { await options.onThinkingDelta(part.text); } catch { /* never block stream */ }
                 }
             } else if (part.type === "reasoning-start") {
-                accumulatedReasoning = "";
+                // Close any previous reasoning that wasn't closed (shouldn't happen, but defensive)
+                if (reasoningActive) await closeReasoning();
+                reasoningActive = true;
                 process.stdout.write("\n\x1b[2m[thinking]\x1b[0m ");
+                // Immediately signal "thinking started" — UI can show indicator instantly
+                if (options.onThinkingStart) {
+                    try { await options.onThinkingStart(); } catch { /* never block stream */ }
+                }
             } else if (part.type === "start-step") {
                 process.stdout.write(`\n\x1b[90m── step ${streamStep + 1} ──\x1b[0m\n`);
             } else if (part.type === "error") {
@@ -559,7 +562,8 @@ export async function streamAgent(
             }
         }
 
-        if (reasoningTimer) { clearTimeout(reasoningTimer); await flushReasoning(); }
+        // Close any open reasoning block at end of stream
+        if (reasoningActive) { await closeReasoning(); }
         process.stdout.write("\n");
     }
 

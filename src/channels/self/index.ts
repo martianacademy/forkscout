@@ -29,6 +29,7 @@ import type { ModelMessage } from "ai";
 import cron from "node-cron";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
+import { handleListModels, handleChatCompletion, handleGetHistory, handleClearHistory } from "./openai-compat.ts";
 import { setupRegistry, registerJob, unregisterJob } from "@/channels/self/cron-registry.ts";
 import { loadOrphanedMonitors, resumeMonitor } from "@/channels/self/progress-monitor.ts";
 import { sendMessage } from "@/channels/telegram/api.ts";
@@ -142,13 +143,9 @@ async function runJob(config: AppConfig, job: SelfJobConfig): Promise<void> {
             const token = process.env.TELEGRAM_BOT_TOKEN;
             if (token) {
                 const { sendMessage } = await import("@/channels/telegram/api.ts");
+                const outText = `🤖 <b>${job.name}</b>\n\n${result.text}`;
                 for (const chatId of chatIds) {
-                    await sendMessage(
-                        token,
-                        chatId,
-                        `🤖 <b>${job.name}</b>\n\n${result.text}`,
-                        "HTML",
-                    );
+                    await sendMessage(token, chatId, outText, "HTML", true);
                 }
             }
         }
@@ -214,9 +211,22 @@ export default {
 const httpQueues = new Map<string, Promise<void>>();
 
 /**
+ * Random bearer token generated at startup — required for POST /trigger.
+ * Internal callers (tools, progress-monitor, cron) import this to authenticate.
+ * Regenerated every restart — never persisted.
+ */
+export let httpTriggerToken: string = "";
+
+/**
  * POST /trigger
+ * Headers: Authorization: Bearer <httpTriggerToken>
  * Body: { prompt: string, role?: "owner" | "admin" | "user" | "self", session_key?: string }
  * Response: { ok: true, text: string, steps: number }
+ *
+ * Security:
+ *   - Bound to 127.0.0.1 (localhost only — no external access)
+ *   - Requires Authorization: Bearer <token> header (token generated at startup)
+ *   - /health is open (no auth needed)
  *
  * session_key behaviour:
  *   - omitted / "self": main chain — history loaded + passed to LLM. .agents/chats/self/
@@ -235,14 +245,107 @@ export function startHttpServer(config: AppConfig): void {
         return;
     }
 
+    // Token starts empty — no web access until `forkscout web` creates one.
+    // Token lives only in memory, generated on frontend start, revoked on stop.
+    httpTriggerToken = "";
+
+    const serverStartedAt = Date.now();
+
     Bun.serve({
         port,
+        hostname: "127.0.0.1", // localhost only — defense-in-depth
+        idleTimeout: 0, // disabled — streams stay alive as long as the server runs
         async fetch(req) {
             const url = new URL(req.url);
 
-            // ── Health check ─────────────────────────────────────────────────
+            // ── CORS preflight ───────────────────────────────────────────────
+            if (req.method === "OPTIONS") {
+                return json(null, 204);
+            }
+
+            // ── Health check (no auth) ───────────────────────────────────────
             if (req.method === "GET" && url.pathname === "/health") {
+                const uptimeSec = Math.floor((Date.now() - serverStartedAt) / 1000);
+                return json({
+                    ok: true,
+                    status: "healthy",
+                    uptime: uptimeSec,
+                    version: "3.0.0",
+                    timestamp: new Date().toISOString(),
+                });
+            }
+
+            // ── Token create (nonce challenge, no auth) ─────────────────────
+            // `forkscout web` writes a random nonce to .agents/.token-challenge,
+            // then calls POST /internal/token/create?nonce=<nonce>.
+            // Agent verifies + deletes the nonce file, generates a fresh token,
+            // and returns it. Any previous token is replaced.
+            if (req.method === "POST" && url.pathname === "/internal/token/create") {
+                const nonce = url.searchParams.get("nonce");
+                if (!nonce || nonce.length < 16) {
+                    return json({ ok: false, error: "Missing or invalid nonce" }, 400);
+                }
+                const challengePath = resolve(process.cwd(), ".agents", ".token-challenge");
+                try {
+                    if (!existsSync(challengePath)) {
+                        return json({ ok: false, error: "No challenge file found" }, 403);
+                    }
+                    const stored = readFileSync(challengePath, "utf-8").trim();
+                    // Delete immediately — one-time use
+                    try { (await import("fs/promises")).unlink(challengePath); } catch { /* best effort */ }
+                    if (stored !== nonce) {
+                        return json({ ok: false, error: "Nonce mismatch" }, 403);
+                    }
+                    // Generate fresh token
+                    httpTriggerToken = crypto.randomUUID();
+                    process.env.FORKSCOUT_TRIGGER_TOKEN = httpTriggerToken;
+                    logger.info(`Web token created (${httpTriggerToken.slice(0, 8)}…)`);
+                    return json({ ok: true, token: httpTriggerToken });
+                } catch {
+                    return json({ ok: false, error: "Challenge verification failed" }, 500);
+                }
+            }
+
+            // ── Token revoke (auth required) ─────────────────────────────────
+            // Called by `forkscout web` on Ctrl+C to invalidate the session.
+            if (req.method === "POST" && url.pathname === "/internal/token/revoke") {
+                const authH = req.headers.get("authorization") ?? "";
+                const bearer = authH.startsWith("Bearer ") ? authH.slice(7).trim() : "";
+                if (!httpTriggerToken || bearer !== httpTriggerToken) {
+                    return json({ ok: false, error: "Unauthorized" }, 401);
+                }
+                httpTriggerToken = "";
+                delete process.env.FORKSCOUT_TRIGGER_TOKEN;
+                logger.info("Web token revoked");
                 return json({ ok: true });
+            }
+
+            // ── Auth check for all other endpoints ───────────────────────────
+            const authHeader = req.headers.get("authorization") ?? "";
+            const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+            if (!httpTriggerToken || bearerToken !== httpTriggerToken) {
+                return json({ ok: false, error: "Unauthorized" }, 401);
+            }
+
+            // ── OpenAI-compatible API ─────────────────────────────────────────
+            if (req.method === "GET" && url.pathname === "/v1/models") {
+                return handleListModels();
+            }
+
+            if (req.method === "GET" && url.pathname === "/v1/history") {
+                return handleGetHistory();
+            }
+
+            if (req.method === "DELETE" && url.pathname === "/v1/history") {
+                return handleClearHistory();
+            }
+
+            if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
+                let body: unknown;
+                try { body = await req.json(); } catch {
+                    return json({ error: { message: "Invalid JSON body", type: "invalid_request_error" } }, 400);
+                }
+                return handleChatCompletion(getConfig(), body, "owner");
             }
 
             // ── Trigger ──────────────────────────────────────────────────────
@@ -292,7 +395,7 @@ export function startHttpServer(config: AppConfig): void {
         },
     });
 
-    logger.info(`HTTP trigger server listening on port ${port}`);
+    logger.info(`HTTP trigger server listening on 127.0.0.1:${port} (token: none — awaiting forkscout web)`);
 }
 
 /**
@@ -351,10 +454,16 @@ async function handleHttpMessage(
     return { ok: true, text: result.text, steps: result.steps };
 }
 
+const CORS_HEADERS: Record<string, string> = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
 function json(data: unknown, status = 200): Response {
-    return new Response(JSON.stringify(data), {
+    return new Response(data === null ? null : JSON.stringify(data), {
         status,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
 }
 
@@ -418,8 +527,8 @@ export async function checkOrphanedMonitors(config: AppConfig): Promise<void> {
     const msg = lines.join("\n");
 
     for (const chatId of ownerIds) {
-        await sendMessage(token, chatId, msg, "Markdown").catch(() =>
-            sendMessage(token, chatId, msg.replace(/[*`]/g, ""))
+        await sendMessage(token, chatId, msg, "Markdown", true).catch(() =>
+            sendMessage(token, chatId, msg.replace(/[*`]/g, ""), "", true)
         );
     }
 }

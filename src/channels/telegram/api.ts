@@ -2,6 +2,7 @@
 import { readFileSync } from "fs";
 import { basename } from "path";
 import { log } from "@/logs/logger.ts";
+import { appendHistory } from "@/channels/chat-store.ts";
 
 const logger = log("telegram/api");
 const BASE = "https://api.telegram.org/bot";
@@ -10,7 +11,9 @@ export async function sendMessage(
     token: string,
     chatId: number,
     text: string,
-    parseMode: "MarkdownV2" | "HTML" | "Markdown" | "" = ""
+    parseMode: "MarkdownV2" | "HTML" | "Markdown" | "" = "",
+    /** When true, appends the message to the recipient's chat history. Default false. */
+    sync: boolean = false
 ): Promise<number | null> {
     const body: Record<string, unknown> = {
         chat_id: chatId,
@@ -29,7 +32,12 @@ export async function sendMessage(
             logger.error(`sendMessage rejected by Telegram (${data.error_code}): ${data.description}`);
             return null;
         }
-        return data.result?.message_id ?? null;
+        const msgId = data.result?.message_id ?? null;
+        // Only sync to history when explicitly requested (e.g. self-channel, send_telegram tool)
+        if (sync && msgId !== null) {
+            appendHistory(`telegram-${chatId}`, [{ role: "assistant", content: text }]);
+        }
+        return msgId;
     } catch (err) {
         logger.error("sendMessage failed:", err);
         return null;

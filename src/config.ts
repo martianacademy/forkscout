@@ -213,6 +213,19 @@ export interface AppConfig {
     };
     /** n8n integration — for triggering workflows */
     n8n?: N8nConfig;
+    /** Embedding config for semantic history search */
+    embeddings?: {
+        /** Enable/disable the embedding system. Default: true. */
+        enabled: boolean;
+        /** Provider for embeddings: "openrouter" or "google". */
+        provider: "openrouter" | "google";
+        /** Embedding model ID (provider-specific). */
+        model: string;
+        /** Number of top results to return from search. Default: 5. */
+        topK: number;
+        /** Max tokens per chunk text before truncation. Default: 500. */
+        chunkMaxTokens: number;
+    };
 }
 
 let _config: AppConfig | null = null;

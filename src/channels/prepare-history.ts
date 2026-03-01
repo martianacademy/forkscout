@@ -1,13 +1,11 @@
 // src/channels/prepare-history.ts — Shared history preparation pipeline for all channels.
-// Trims to token budget, merges user/assistant/tool messages in chronological order.
 //
-// Any channel calls prepareHistory({ user, assistant, tool }) and gets back
-// a clean ModelMessage[] that is safe to pass directly to the LLM:
-//   1. Merge & sort by seq (preserves interleaved order from split storage)
-//   2. Sanitize — validate AI SDK v6 schema, enforce tool-call/result pairing
-//   3. Strip media — replace base64 images/screenshots with text placeholders
-//   4. Cap tool results — extractive summarisation on oversized results
-//   5. Trim to token budget — drop oldest messages until within budget
+// Takes a flat, already-sequential ModelMessage[] (from chat-store) and
+// makes it safe for the LLM:
+//   1. Sanitize — validate AI SDK v6 schema, enforce tool-call/result pairing
+//   2. Strip media — replace base64 images/screenshots with text placeholders
+//   3. Cap tool results — extractive summarisation on oversized results
+//   4. Trim to token budget — drop oldest messages until within budget
 
 import { encode } from "gpt-tokenizer";
 import { compressIfLong } from "@/utils/extractive-summary.ts";
@@ -17,20 +15,6 @@ import type { ModelMessage } from "ai";
 // ─────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────
-
-/** A ModelMessage that may carry a `seq` field from split storage. */
-export type StoredMessage = ModelMessage & { seq?: number };
-
-export interface PrepareHistoryInput {
-    /** User-role messages (may carry `seq` for ordering). */
-    user: StoredMessage[];
-    /** Assistant-role messages (may carry `seq` for ordering). */
-    assistant: StoredMessage[];
-    /** Tool-role messages (may carry `seq` for ordering). */
-    tool?: StoredMessage[];
-    /** System-role messages (rare; prepended after merge). */
-    system?: StoredMessage[];
-}
 
 export interface PrepareHistoryOptions {
     /**
@@ -56,20 +40,17 @@ export interface PrepareHistoryOptions {
 // ─────────────────────────────────────────────
 
 /**
- * Prepare a chat history from split role arrays into a clean ModelMessage[]
- * ready to be passed directly to the LLM.
+ * Prepare a flat sequential chat history into a clean ModelMessage[] ready
+ * for the LLM. Input is already in chronological order (from chat-store).
  *
  * @example
  * ```ts
- * const history = prepareHistory(
- *   { user: userMsgs, assistant: assistantMsgs, tool: toolMsgs },
- *   { tokenBudget: 12_000, maxToolResultTokens: 4_000 }
- * );
+ * const history = prepareHistory(allMessages, { tokenBudget: 12_000 });
  * const result = await runAgent(config, { userMessage, chatHistory: history });
  * ```
  */
 export function prepareHistory(
-    input: PrepareHistoryInput,
+    messages: ModelMessage[],
     options: PrepareHistoryOptions = {}
 ): ModelMessage[] {
     const {
@@ -78,35 +59,19 @@ export function prepareHistory(
         maxToolResultSentences = 20
     } = options;
 
-    // 1. Merge all role buckets tagging seq (use position within bucket as fallback)
-    const all: StoredMessage[] = [
-        ...tagSeq(input.user),
-        ...tagSeq(input.assistant),
-        ...tagSeq(input.tool ?? []),
-        ...tagSeq(input.system ?? [])
-    ];
+    // 1. Validate AI SDK v6 schema & enforce tool-call/result pairing
+    const sanitized = sanitizeForPrompt(messages);
 
-    // 2. Sort by seq to restore original interleaved order
-    all.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
-
-    // Strip seq before handing off (not part of ModelMessage schema)
-    const merged: ModelMessage[] = all.map(
-        ({ seq: _seq, ...msg }) => msg as ModelMessage
-    );
-
-    // 3. Validate AI SDK v6 schema & enforce tool-call/result pairing
-    const sanitized = sanitizeForPrompt(merged);
-
-    // 4. Strip media (base64 images / screenshots) — replace with text placeholders
+    // 2. Strip media (base64 images / screenshots) — replace with text placeholders
     const stripped = stripMedia(sanitized);
 
-    // 5. Cap oversized tool-results via extractive summarisation
+    // 3. Cap oversized tool-results via extractive summarisation
     const capped =
         maxToolResultTokens > 0
             ? capToolResults(stripped, maxToolResultTokens, maxToolResultSentences)
             : stripped;
 
-    // 6. Trim oldest messages to fit within token budget
+    // 4. Trim oldest messages to fit within token budget
     return tokenBudget != null ? trimTobudget(capped, tokenBudget) : capped;
 }
 
@@ -114,16 +79,9 @@ export function prepareHistory(
 // Internal helpers
 // ─────────────────────────────────────────────
 
-/** Tag messages with their seq index if they don't already have one. */
-function tagSeq(msgs: StoredMessage[]): StoredMessage[] {
-    return msgs.map((m, i) => (m.seq != null ? m : { ...m, seq: i }));
-}
-
 /**
  * Replace base64 images and screenshots with a text placeholder.
  * The LLM already acted on them at the time — keeping raw bytes wastes tokens.
- *
- * Exported so agent/index.ts can use it directly when history arrives pre-merged.
  */
 export function stripMedia(history: ModelMessage[]): ModelMessage[] {
     return history.map((msg) => {
@@ -227,6 +185,8 @@ function trimTobudget(
     while (total > tokenBudget && trimmed.length > 2) {
         total -= countTokens(trimmed.shift()!);
     }
+
+    // AI SDK requires history to start with a user message
     while (trimmed.length > 0 && (trimmed[0] as any).role !== "user") {
         trimmed.shift();
     }

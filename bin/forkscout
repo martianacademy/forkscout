@@ -10,6 +10,7 @@
 //   stop        Stop all running instances
 //   status      Show agent status
 //   logs        Tail live logs
+//   web         Show authenticated URL for web dashboard
 //   help        Show this help
 
 import { resolve, dirname } from "path";
@@ -27,6 +28,19 @@ const envPath = resolve(ROOT, ".env");
 if (existsSync(envPath)) {
     const { config } = await import("dotenv");
     config({ path: envPath });
+}
+
+/** Kill any Next.js web server running on the given port */
+async function killWebServer(port: string) {
+    const pids = (await $`lsof -ti :${port} 2>/dev/null || true`.text()).trim();
+    if (pids) {
+        for (const pid of pids.split("\n").filter(Boolean)) {
+            try { process.kill(Number(pid), "SIGTERM"); } catch { }
+        }
+        // Brief wait for graceful shutdown
+        await new Promise(r => setTimeout(r, 500));
+        console.log(`  ⏹  Killed existing process on port ${port}`);
+    }
 }
 
 const COMMANDS: Record<string, () => Promise<void>> = {
@@ -50,6 +64,9 @@ const COMMANDS: Record<string, () => Promise<void>> = {
 
     async stop() {
         await $`bun run stop`.cwd(ROOT);
+        // Also kill any web server
+        const webPort = process.env.WEB_PORT || "3000";
+        await killWebServer(webPort);
     },
 
     async status() {
@@ -69,6 +86,237 @@ const COMMANDS: Record<string, () => Promise<void>> = {
         await $`tail -f /tmp/forkscout.log`.cwd(ROOT);
     },
 
+    async web() {
+        // Challenge-response: create a session token (lives only in agent memory).
+        // Token is born when web starts, dies when web stops.
+        const agentPort = process.env.AGENT_PORT || "3200";
+        let token: string;
+        try {
+            // 1. Verify agent is running
+            const healthResp = await fetch(`http://127.0.0.1:${agentPort}/health`);
+            const health = await healthResp.json() as { ok: boolean };
+            if (!health.ok) throw new Error("not healthy");
+
+            // 2. Write a random nonce to .agents/.token-challenge
+            const nonce = crypto.randomUUID() + crypto.randomUUID();
+            const challengePath = resolve(ROOT, ".agents", ".token-challenge");
+            const { mkdirSync: mk, writeFileSync: wf } = await import("fs");
+            mk(resolve(ROOT, ".agents"), { recursive: true });
+            wf(challengePath, nonce, { mode: 0o600 });
+
+            // 3. Create token via challenge handshake
+            const tokenResp = await fetch(`http://127.0.0.1:${agentPort}/internal/token/create?nonce=${nonce}`, { method: "POST" });
+            const data = await tokenResp.json() as { ok: boolean; token?: string };
+            if (!data.ok || !data.token) throw new Error("handshake failed");
+            token = data.token;
+        } catch {
+            console.error("  \u274c Agent is not running or handshake failed. Start it first: forkscout start");
+            process.exit(1);
+        }
+
+        /** Revoke the token — called on exit so the session dies with the frontend */
+        const revokeToken = async () => {
+            try {
+                await fetch(`http://127.0.0.1:${agentPort}/internal/token/revoke`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+            } catch { /* agent may already be down */ }
+        };
+
+        // Read web port from next.js config or default to 3000
+        const webPort = process.env.WEB_PORT || "3000";
+        const host = process.env.WEB_HOST || "localhost";
+        const chatUrl = `http://${host}:${webPort}/chat?token=${token}`;
+        const dashUrl = `http://${host}:${webPort}/dashboard?token=${token}`;
+
+        // Kill any existing web server on this port (before banner for clean output)
+        await killWebServer(webPort);
+
+        // ANSI codes
+        const g = "\x1b[32m"; // green
+        const d = "\x1b[2m";  // dim
+        const b = "\x1b[1m";  // bold
+        const r = "\x1b[0m";  // reset
+
+        // Copy chat URL to clipboard if pbcopy is available (macOS)
+        let copied = false;
+        try {
+            const proc = Bun.spawn(["pbcopy"], { stdin: "pipe" });
+            proc.stdin.write(chatUrl);
+            proc.stdin.end();
+            await proc.exited;
+            copied = true;
+        } catch {
+            // Not macOS or pbcopy not available — skip
+        }
+
+        /** Print the full banner — called only when server is ready */
+        const printBanner = () => {
+            console.clear();
+            const lines = [
+                ``,
+                `  ${b}⑂  ForkScout Web Dashboard${r}`,
+                ``,
+                `  🔑 Auth Token: ${d}${token.slice(0, 8)}…${token.slice(-4)}${r}`,
+                `  💬 Chat:       ${g}${chatUrl}${r}`,
+                `  📊 Dashboard:  ${g}${dashUrl}${r}`,
+            ];
+            if (copied) lines.push(`  📋 Chat URL copied to clipboard!`);
+            lines.push(``);
+            lines.push(`  ${g}● Server ready${r} on port ${webPort}  ${d}Press Ctrl+C to stop.${r}`);
+            lines.push(``);
+
+            // Move to bottom of terminal
+            const rows = process.stdout.rows || 24;
+            const pad = Math.max(0, rows - lines.length);
+            process.stdout.write("\n".repeat(pad));
+            for (const l of lines) console.log(l);
+        };
+
+        // Build web app if needed
+        const webDir = resolve(ROOT, "web");
+        const nextBuildDir = resolve(webDir, ".next");
+        if (!existsSync(nextBuildDir)) {
+            console.log(`\n  📦 Building web app for the first time...`);
+            await $`bun run build`.cwd(webDir);
+        }
+
+        // Show a simple spinner while server starts
+        process.stdout.write(`\n  ${d}⏳ Starting server on port ${webPort}…${r}`);
+
+        // Start Next.js with stdout/stderr piped (suppressed)
+        const child = Bun.spawn(["bun", "run", "start", "--", "-p", webPort], {
+            cwd: webDir,
+            stdout: "pipe",
+            stderr: "pipe",
+            env: { ...process.env },
+        });
+
+        // Forward Ctrl+C to child + revoke token
+        const cleanup = async () => {
+            child.kill("SIGTERM");
+            await revokeToken();
+            process.exit(0);
+        };
+        process.on("SIGINT", () => { cleanup(); });
+        process.on("SIGTERM", () => { cleanup(); });
+
+        // Watch stdout for "Ready" signal, then show full banner
+        (async () => {
+            const decoder = new TextDecoder();
+            for await (const chunk of child.stdout as AsyncIterable<Uint8Array>) {
+                const text = decoder.decode(chunk);
+                if (text.includes("Ready")) {
+                    printBanner();
+                    break;
+                }
+            }
+        })().catch(() => { });
+
+        // Drain stderr silently (or it can block)
+        (async () => {
+            for await (const _ of child.stderr as AsyncIterable<Uint8Array>) { /* discard */ }
+        })().catch(() => { });
+
+        // Wait for child to exit
+        const exitCode = await child.exited;
+        process.exit(exitCode);
+    },
+
+    async ["web:dev"]() {
+        // Challenge-response: create a session token
+        const agentPort = process.env.AGENT_PORT || "3200";
+        let token: string;
+        try {
+            const healthResp = await fetch(`http://127.0.0.1:${agentPort}/health`);
+            const health = await healthResp.json() as { ok: boolean };
+            if (!health.ok) throw new Error("not healthy");
+
+            const nonce = crypto.randomUUID() + crypto.randomUUID();
+            const challengePath = resolve(ROOT, ".agents", ".token-challenge");
+            const { mkdirSync: mk, writeFileSync: wf } = await import("fs");
+            mk(resolve(ROOT, ".agents"), { recursive: true });
+            wf(challengePath, nonce, { mode: 0o600 });
+
+            const tokenResp = await fetch(`http://127.0.0.1:${agentPort}/internal/token/create?nonce=${nonce}`, { method: "POST" });
+            const data = await tokenResp.json() as { ok: boolean; token?: string };
+            if (!data.ok || !data.token) throw new Error("handshake failed");
+            token = data.token;
+        } catch {
+            console.error("  \u274c Agent is not running or handshake failed. Start it first: forkscout start");
+            process.exit(1);
+        }
+
+        const revokeToken = async () => {
+            try {
+                await fetch(`http://127.0.0.1:${agentPort}/internal/token/revoke`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+            } catch { /* agent may already be down */ }
+        };
+        const webPort = process.env.WEB_PORT || "3000";
+        const host = process.env.WEB_HOST || "localhost";
+        const chatUrl = `http://${host}:${webPort}/chat?token=${token}`;
+        const dashUrl = `http://${host}:${webPort}/dashboard?token=${token}`;
+
+        // Kill any existing web server on this port (before banner for clean output)
+        await killWebServer(webPort);
+
+        const g = "\x1b[32m"; const d = "\x1b[2m"; const b = "\x1b[1m"; const r = "\x1b[0m";
+
+        const printBanner = () => {
+            console.clear();
+            const lines = [
+                ``,
+                `  ${b}⑂  ForkScout Web (dev mode)${r}`,
+                ``,
+                `  💬 Chat:       ${g}${chatUrl}${r}`,
+                `  📊 Dashboard:  ${g}${dashUrl}${r}`,
+                ``,
+                `  ${g}● Server ready${r} on port ${webPort}  ${d}Press Ctrl+C to stop.${r}`,
+                ``,
+            ];
+            const rows = process.stdout.rows || 24;
+            const pad = Math.max(0, rows - lines.length);
+            process.stdout.write("\n".repeat(pad));
+            for (const l of lines) console.log(l);
+        };
+
+        process.stdout.write(`\n  ${d}⏳ Starting dev server on port ${webPort}…${r}`);
+
+        const webDir = resolve(ROOT, "web");
+        const child = Bun.spawn(["bun", "run", "dev", "--", "-p", webPort], {
+            cwd: webDir,
+            stdout: "pipe",
+            stderr: "pipe",
+            env: { ...process.env },
+        });
+
+        const cleanup = async () => { child.kill("SIGTERM"); await revokeToken(); process.exit(0); };
+        process.on("SIGINT", () => { cleanup(); });
+        process.on("SIGTERM", () => { cleanup(); });
+
+        (async () => {
+            const decoder = new TextDecoder();
+            for await (const chunk of child.stdout as AsyncIterable<Uint8Array>) {
+                const text = decoder.decode(chunk);
+                if (text.includes("Ready")) {
+                    printBanner();
+                    break;
+                }
+            }
+        })().catch(() => { });
+
+        (async () => {
+            for await (const _ of child.stderr as AsyncIterable<Uint8Array>) { /* discard */ }
+        })().catch(() => { });
+
+        const exitCode = await child.exited;
+        process.exit(exitCode);
+    },
+
     async help() {
         console.log(`
   ⑂  ForkScout v3.0.0 — Autonomous AI Agent
@@ -78,8 +326,10 @@ const COMMANDS: Record<string, () => Promise<void>> = {
   Commands:
     start       Start Telegram bot (default channel)
     setup       Run interactive setup wizard
-    cli         Start terminal chat
+    cli         Chat in terminal
     dev         Start with hot reload (development)
+    web         Start web dashboard server (Ctrl+C to stop)
+    web:dev     Start web dashboard in dev mode with hot reload
     stop        Stop all running instances
     status      Check if agent is running
     logs        Tail live logs
@@ -88,6 +338,8 @@ const COMMANDS: Record<string, () => Promise<void>> = {
   Examples:
     forkscout start          Start the agent
     forkscout setup          Configure provider, keys, Telegram
+    forkscout web            Start web dashboard (production)
+    forkscout web:dev        Start web dashboard (dev + hot reload)
     forkscout cli            Chat in terminal
     forkscout stop           Stop everything
 `);

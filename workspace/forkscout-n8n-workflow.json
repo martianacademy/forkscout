@@ -1,0 +1,93 @@
+{
+  "name": "ForkScout Trigger",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "forkscout",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "forkscout-trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Access incoming data\nconst data = $input.first().json;\n\n// Log the received data\nconsole.log('ForkScout payload:', JSON.stringify(data, null, 2));\n\n// You can process data here and return results\n// Example: extract workflow_name, payload, etc.\n\nreturn {\n  json: {\n    received: true,\n    workflowName: data.workflow_name || 'unknown',\n    payload: data.payload || data,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "process",
+      "name": "Process Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Customize your response here\nconst inputData = $input.first().json;\n\n// Example: return success message\nreturn {\n  json: {\n    success: true,\n    message: 'Workflow executed successfully',\n    data: inputData\n  }\n};"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.message }}"
+      },
+      "id": "respondToWebhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Process Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Data": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-03-01T20:45:00.000Z",
+  "versionId": "1"
+}
