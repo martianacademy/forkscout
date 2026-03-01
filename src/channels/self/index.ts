@@ -320,24 +320,36 @@ export function startHttpServer(config: AppConfig): void {
                 return json({ ok: true });
             }
 
-            // ── Auth check for all other endpoints ───────────────────────────
+            // ── Auth check ───────────────────────────────────────────────────
+            // Two auth modes:
+            //   1. Internal secret — Next.js server → agent (for /v1/* web endpoints)
+            //      Bearer token = INTERNAL_API_SECRET env var (default: "forkscout-internal")
+            //   2. Trigger token — self tools / forkscout web CLI → agent (for /trigger)
+            //      Bearer token = httpTriggerToken (in-memory, per-session)
             const authHeader = req.headers.get("authorization") ?? "";
             const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-            if (!httpTriggerToken || bearerToken !== httpTriggerToken) {
+            const internalSecret = process.env.INTERNAL_API_SECRET || "forkscout-internal";
+            const isInternalAuth = bearerToken === internalSecret;
+            const isTriggerAuth = httpTriggerToken && bearerToken === httpTriggerToken;
+
+            if (!isInternalAuth && !isTriggerAuth) {
                 return json({ ok: false, error: "Unauthorized" }, 401);
             }
 
-            // ── OpenAI-compatible API ─────────────────────────────────────────
+            // ── Extract userId from X-User-Id header (set by Next.js with Clerk userId) ─
+            const userId = req.headers.get("x-user-id") ?? "anonymous";
+
+            // ── OpenAI-compatible API (web channel) ───────────────────────────
             if (req.method === "GET" && url.pathname === "/v1/models") {
                 return handleListModels();
             }
 
             if (req.method === "GET" && url.pathname === "/v1/history") {
-                return handleGetHistory();
+                return handleGetHistory(userId);
             }
 
             if (req.method === "DELETE" && url.pathname === "/v1/history") {
-                return handleClearHistory();
+                return handleClearHistory(userId);
             }
 
             if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
@@ -345,7 +357,7 @@ export function startHttpServer(config: AppConfig): void {
                 try { body = await req.json(); } catch {
                     return json({ error: { message: "Invalid JSON body", type: "invalid_request_error" } }, 400);
                 }
-                return handleChatCompletion(getConfig(), body, "owner");
+                return handleChatCompletion(getConfig(), body, "owner", userId);
             }
 
             // ── Trigger ──────────────────────────────────────────────────────

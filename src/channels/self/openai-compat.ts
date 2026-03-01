@@ -10,7 +10,10 @@ import { log } from "@/logs/logger.ts";
 
 const logger = log("openai-compat");
 
-const WEB_SESSION_KEY = "web";
+/** Build session key from userId. Each user gets their own history. */
+function sessionKeyForUser(userId: string): string {
+    return `web-${userId}`;
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,8 +56,9 @@ function sseChunk(data: unknown): string {
 // ── GET /v1/history ─────────────────────────────────────────────────────────
 
 /** Return server-side chat history as simple {role, content}[] for the web client. */
-export function handleGetHistory(): Response {
-    const history = loadHistory(WEB_SESSION_KEY);
+export function handleGetHistory(userId: string): Response {
+    const sessionKey = sessionKeyForUser(userId);
+    const history = loadHistory(sessionKey);
     // Convert ModelMessage[] to simple format the web client can use
     const simple = history
         .filter((m: any) => m.role === "user" || m.role === "assistant")
@@ -73,10 +77,11 @@ export function handleGetHistory(): Response {
 
 // ── DELETE /v1/history ──────────────────────────────────────────────────────
 
-/** Clear server-side web chat history. */
-export function handleClearHistory(): Response {
-    clearHistory(WEB_SESSION_KEY);
-    logger.info("web chat history cleared");
+/** Clear server-side web chat history for a specific user. */
+export function handleClearHistory(userId: string): Response {
+    const sessionKey = sessionKeyForUser(userId);
+    clearHistory(sessionKey);
+    logger.info(`web chat history cleared for user ${userId}`);
     return jsonResponse({ ok: true });
 }
 
@@ -102,6 +107,7 @@ export async function handleChatCompletion(
     config: AppConfig,
     body: unknown,
     role: "owner" | "admin" | "user" | "self",
+    userId: string,
 ): Promise<Response> {
     const { messages, stream = true, model: modelName = "forkscout" } =
         body as ChatCompletionRequest;
@@ -126,7 +132,7 @@ export async function handleChatCompletion(
     const requestId = `chatcmpl-${crypto.randomUUID()}`;
     const created = Math.floor(Date.now() / 1000);
 
-    logger.info(`[${role}] ${stream ? "stream" : "generate"}: ${userMessage.slice(0, 100)}`);
+    logger.info(`[${role}][${userId}] ${stream ? "stream" : "generate"}: ${userMessage.slice(0, 100)}`);
 
     // ── Non-streaming ────────────────────────────────────────────────────────
     if (!stream) {
@@ -135,11 +141,12 @@ export async function handleChatCompletion(
                 userMessage,
                 chatHistory,
                 role,
-                meta: { channel: "web" },
+                meta: { channel: "web", chatId: userId },
             });
 
-            // Save to server-side history
-            appendHistory(WEB_SESSION_KEY, [
+            // Save to server-side history (per-user)
+            const sessionKey = sessionKeyForUser(userId);
+            appendHistory(sessionKey, [
                 { role: "user", content: userMessage } as ModelMessage,
                 ...result.responseMessages,
             ]);
@@ -198,7 +205,7 @@ export async function handleChatCompletion(
             userMessage,
             chatHistory,
             role,
-            meta: { channel: "web" },
+            meta: { channel: "web", chatId: userId },
             onToolCall: (toolName, input) => {
                 if (closed) return;
                 stepNum++;
@@ -258,8 +265,9 @@ export async function handleChatCompletion(
                     // 3. Finalize agent run (internal bookkeeping + history save)
                     const result = await finalize();
 
-                    // Save to server-side history
-                    appendHistory(WEB_SESSION_KEY, [
+                    // Save to server-side history (per-user)
+                    const sessionKey = sessionKeyForUser(userId);
+                    appendHistory(sessionKey, [
                         { role: "user", content: userMessage } as ModelMessage,
                         ...result.responseMessages,
                     ]);

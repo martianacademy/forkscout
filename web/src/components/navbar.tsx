@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bot, MessageSquare, LayoutDashboard, Github, Menu, X } from "lucide-react";
 import { useState } from "react";
-import { useAuth } from "@web/lib/auth-context";
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 
 const NAV_ITEMS = [
     { href: "/", label: "Home", icon: Bot },
@@ -14,14 +14,13 @@ const NAV_ITEMS = [
 
 export default function Navbar() {
     const pathname = usePathname();
-    const { tokenParam } = useAuth();
     const [mobileOpen, setMobileOpen] = useState(false);
 
     return (
         <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-xl">
             <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
                 {/* Logo */}
-                <Link href={`/${tokenParam}`} className="flex items-center gap-2 text-lg font-bold">
+                <Link href="/" className="flex items-center gap-2 text-lg font-bold">
                     <Bot className="h-6 w-6 text-accent" />
                     <span>ForkScout</span>
                 </Link>
@@ -33,7 +32,7 @@ export default function Navbar() {
                         return (
                             <Link
                                 key={href}
-                                href={`${href}${tokenParam}`}
+                                href={href}
                                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${active
                                     ? "bg-accent/10 text-accent"
                                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -52,6 +51,26 @@ export default function Navbar() {
                     >
                         <Github className="h-5 w-5" />
                     </a>
+                    {/* Clerk auth buttons */}
+                    <div className="ml-3">
+                        <SignedIn>
+                            <UserButton
+                                afterSignOutUrl="/"
+                                appearance={{
+                                    elements: {
+                                        avatarBox: "h-8 w-8",
+                                    },
+                                }}
+                            />
+                        </SignedIn>
+                        <SignedOut>
+                            <SignInButton mode="modal">
+                                <button className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-all hover:brightness-110">
+                                    Sign In
+                                </button>
+                            </SignInButton>
+                        </SignedOut>
+                    </div>
                 </div>
 
                 {/* Mobile hamburger */}
@@ -71,7 +90,7 @@ export default function Navbar() {
                         return (
                             <Link
                                 key={href}
-                                href={`${href}${tokenParam}`}
+                                href={href}
                                 onClick={() => setMobileOpen(false)}
                                 className={`flex items-center gap-2 rounded-lg px-3 py-3 text-sm font-medium transition-colors ${active
                                     ? "bg-accent/10 text-accent"
@@ -83,6 +102,25 @@ export default function Navbar() {
                             </Link>
                         );
                     })}
+                    <div className="mt-3 px-3">
+                        <SignedIn>
+                            <UserButton
+                                afterSignOutUrl="/"
+                                appearance={{
+                                    elements: {
+                                        avatarBox: "h-8 w-8",
+                                    },
+                                }}
+                            />
+                        </SignedIn>
+                        <SignedOut>
+                            <SignInButton mode="modal">
+                                <button className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-all hover:brightness-110">
+                                    Sign In
+                                </button>
+                            </SignInButton>
+                        </SignedOut>
+                    </div>
                 </div>
             )}
         </nav>

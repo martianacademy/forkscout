@@ -4,6 +4,7 @@ import type { Channel } from "@/channels/types.ts";
 import telegramChannel from "@/channels/telegram/index.ts";
 import terminalChannel from "@/channels/terminal/index.ts";
 import selfChannel, { startCronJobs, startHttpServer, checkOrphanedMonitors } from "@/channels/self/index.ts";
+import webChannel from "@/channels/web/index.ts";
 import { log } from "@/logs/logger.ts";
 import { populateEnvFromVault } from "@/secrets/vault.ts";
 
@@ -27,9 +28,11 @@ const channelName = process.argv.includes("--cli")
     ? "terminal"
     : process.argv.includes("--self")
         ? "self"
-        : "telegram";
+        : process.argv.includes("--web")
+            ? "web"
+            : "telegram";
 
-const channels: Channel[] = [telegramChannel, terminalChannel, selfChannel];
+const channels: Channel[] = [telegramChannel, terminalChannel, selfChannel, webChannel];
 const channel = channels.find((c) => c.name === channelName);
 
 if (!channel) throw new Error(`Unknown channel: ${channelName}`);

@@ -11,6 +11,8 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.37",
     "@ai-sdk/react": "^3.0.107",
+    "@clerk/nextjs": "^6.39.0",
+    "@clerk/themes": "^2.4.57",
     "ai": "^6.0.105",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",

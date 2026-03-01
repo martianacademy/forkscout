@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Navbar from "@web/components/navbar";
 import { useAuth } from "@web/lib/auth-context";
+import { SignInButton } from "@clerk/nextjs";
 import { AGENT_URL, getHealth, type HealthResponse } from "@web/lib/api";
 import {
     Activity,
@@ -57,7 +58,7 @@ function formatUptime(seconds: number): string {
 }
 
 export default function DashboardPage() {
-    const { token, isAuthenticated } = useAuth();
+    const { isAuthenticated, isLoaded } = useAuth();
     const [health, setHealth] = useState<HealthResponse | null>(null);
     const [isOnline, setIsOnline] = useState(false);
     const [lastCheck, setLastCheck] = useState<Date | null>(null);
@@ -86,15 +87,14 @@ export default function DashboardPage() {
         return () => clearInterval(interval);
     }, [checkHealth]);
 
-    // Fetch recent logs (requires auth)
+    // Fetch recent logs
     useEffect(() => {
-        if (!token) return;
+        if (!isAuthenticated) return;
         async function fetchLogs() {
             try {
                 const res = await fetch(`${AGENT_URL}/logs?limit=50`, {
                     cache: "no-store",
                     signal: AbortSignal.timeout(5000),
-                    headers: { Authorization: `Bearer ${token}` },
                 });
                 if (res.ok) {
                     const data = await res.json();
@@ -107,9 +107,21 @@ export default function DashboardPage() {
         fetchLogs();
         const interval = setInterval(fetchLogs, 15_000);
         return () => clearInterval(interval);
-    }, [token]);
+    }, [isAuthenticated]);
 
-    // Gate: no token → unauthorized
+    // Loading state
+    if (!isLoaded) {
+        return (
+            <>
+                <Navbar />
+                <div className="flex h-screen items-center justify-center pt-16">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                </div>
+            </>
+        );
+    }
+
+    // Gate: not signed in
     if (!isAuthenticated) {
         return (
             <>
@@ -117,10 +129,15 @@ export default function DashboardPage() {
                 <div className="flex h-screen items-center justify-center pt-16">
                     <div className="text-center">
                         <ShieldAlert className="mx-auto mb-4 h-16 w-16 text-destructive/50" />
-                        <h2 className="mb-2 text-xl font-semibold">Unauthorized</h2>
-                        <p className="max-w-sm text-sm text-muted-foreground">
-                            Open the authenticated URL from <code className="rounded bg-muted px-1.5 py-0.5">forkscout web</code> to access the dashboard.
+                        <h2 className="mb-2 text-xl font-semibold">Sign in required</h2>
+                        <p className="mb-6 max-w-sm text-sm text-muted-foreground">
+                            Sign in to access the dashboard.
                         </p>
+                        <SignInButton mode="modal">
+                            <button className="inline-flex items-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-all hover:brightness-110">
+                                Sign In
+                            </button>
+                        </SignInButton>
                     </div>
                 </div>
             </>

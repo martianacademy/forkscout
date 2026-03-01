@@ -2,7 +2,6 @@
 
 import Navbar from "@web/components/navbar";
 import Link from "next/link";
-import { useAuth } from "@web/lib/auth-context";
 import {
   Bot,
   MessageSquare,
@@ -73,8 +72,6 @@ const PROVIDERS = [
 ];
 
 export default function Home() {
-  const { tokenParam } = useAuth();
-
   return (
     <>
       <Navbar />
@@ -96,7 +93,7 @@ export default function Home() {
             </p>
             <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Link
-                href={`/chat${tokenParam}`}
+                href="/chat"
                 className="glow inline-flex items-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-all hover:brightness-110"
               >
                 <MessageSquare className="h-4 w-4" />

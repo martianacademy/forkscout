@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Navbar from "@web/components/navbar";
 import MarkdownContent from "@web/components/markdown";
 import { parseAgentContent, AgentStatusPill } from "@web/components/agent-status";
@@ -14,8 +14,10 @@ import {
     RotateCcw,
     Sparkles,
     Trash2,
+    LogIn,
 } from "lucide-react";
 import { useAuth } from "@web/lib/auth-context";
+import { SignInButton } from "@clerk/nextjs";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 
@@ -75,21 +77,16 @@ function AssistantMessage({ text }: { text: string }) {
 /* ── Component ────────────────────────────────────────────────────────── */
 
 export default function ChatPage() {
-    const { token, isAuthenticated } = useAuth();
+    const { isAuthenticated, isLoaded, displayName, userId } = useAuth();
     const [input, setInput] = useState("");
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     /* ── Transport ─────────────────────────────────────────────────────── */
 
-    const transport = useMemo(
-        () =>
-            new DefaultChatTransport({
-                api: "/api/chat",
-                headers: { "X-Agent-Token": token },
-            }),
-        [token],
-    );
+    const transport = new DefaultChatTransport({
+        api: "/api/chat",
+    });
 
     const { messages, sendMessage, status, stop, error, regenerate, setMessages } = useChat({
         id: CHAT_ID,
@@ -104,10 +101,10 @@ export default function ChatPage() {
     const historyLoaded = useRef(false);
 
     useEffect(() => {
-        if (historyLoaded.current || !token) return;
+        if (historyLoaded.current || !isAuthenticated) return;
         historyLoaded.current = true;
 
-        fetch("/api/history", { headers: { "X-Agent-Token": token } })
+        fetch("/api/history")
             .then((r) => r.json())
             .then((data) => {
                 if (data.messages?.length && messages.length === 0) {
@@ -115,16 +112,15 @@ export default function ChatPage() {
                 }
             })
             .catch(() => { /* ignore — fresh chat on error */ });
-    }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const clearChat = useCallback(() => {
         setMessages([]);
         // Also clear server-side history
         fetch("/api/history", {
             method: "DELETE",
-            headers: { "X-Agent-Token": token },
         }).catch(() => { /* ignore */ });
-    }, [setMessages, token]);
+    }, [setMessages]);
 
     /* ── Auto-scroll ───────────────────────────────────────────────────── */
 
@@ -175,6 +171,17 @@ export default function ChatPage() {
 
     /* ── Auth gate ─────────────────────────────────────────────────────── */
 
+    if (!isLoaded) {
+        return (
+            <>
+                <Navbar />
+                <div className="flex h-screen items-center justify-center pt-16">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                </div>
+            </>
+        );
+    }
+
     if (!isAuthenticated) {
         return (
             <>
@@ -182,14 +189,16 @@ export default function ChatPage() {
                 <div className="flex h-screen items-center justify-center pt-16">
                     <div className="text-center">
                         <ShieldAlert className="mx-auto mb-4 h-16 w-16 text-destructive/50" />
-                        <h2 className="mb-2 text-xl font-semibold">Unauthorized</h2>
-                        <p className="max-w-sm text-sm text-muted-foreground">
-                            Open the authenticated URL from{" "}
-                            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                                forkscout web
-                            </code>{" "}
-                            to access the chat.
+                        <h2 className="mb-2 text-xl font-semibold">Sign in required</h2>
+                        <p className="mb-6 max-w-sm text-sm text-muted-foreground">
+                            Sign in to start chatting with ForkScout.
                         </p>
+                        <SignInButton mode="modal">
+                            <button className="inline-flex items-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-all hover:brightness-110">
+                                <LogIn className="h-4 w-4" />
+                                Sign In
+                            </button>
+                        </SignInButton>
                     </div>
                 </div>
             </>
