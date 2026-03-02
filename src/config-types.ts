@@ -103,6 +103,74 @@ export interface AppConfig {
         ownerToken?: string;
         allowPublic?: boolean;
     };
+    teams?: {
+        historyTokenBudget?: number;
+        ownerIds?: string[];
+        allowedUserIds?: string[];
+        rateLimitPerMinute?: number;
+    };
+    googleChat?: {
+        historyTokenBudget?: number;
+        ownerEmails?: string[];
+        allowedEmails?: string[];
+        allowedSpaces?: string[];
+        rateLimitPerMinute?: number;
+    };
+    line?: {
+        historyTokenBudget?: number;
+        ownerIds?: string[];
+        allowedUserIds?: string[];
+        rateLimitPerMinute?: number;
+    };
+    viber?: {
+        historyTokenBudget?: number;
+        ownerIds?: string[];
+        allowedUserIds?: string[];
+        rateLimitPerMinute?: number;
+    };
+    messenger?: {
+        historyTokenBudget?: number;
+        ownerPsids?: string[];
+        allowedPsids?: string[];
+        rateLimitPerMinute?: number;
+    };
+    instagram?: {
+        historyTokenBudget?: number;
+        ownerIgIds?: string[];
+        allowedIgIds?: string[];
+        rateLimitPerMinute?: number;
+    };
+    twitter?: {
+        historyTokenBudget?: number;
+        ownerIds?: string[];
+        allowedUserIds?: string[];
+        pollIntervalMs?: number;
+        rateLimitPerMinute?: number;
+    };
+    reddit?: {
+        historyTokenBudget?: number;
+        ownerUsernames?: string[];
+        pollIntervalMs?: number;
+        rateLimitPerMinute?: number;
+    };
+    youtube?: {
+        historyTokenBudget?: number;
+        ownerChannelIds?: string[];
+        pollIntervalMs?: number;
+        rateLimitPerMinute?: number;
+    };
+    sms?: {
+        historyTokenBudget?: number;
+        ownerPhones?: string[];
+        allowedPhones?: string[];
+        rateLimitPerMinute?: number;
+    };
+    voice?: {
+        historyTokenBudget?: number;
+        ownerPhones?: string[];
+        allowedPhones?: string[];
+        rateLimitPerMinute?: number;
+    };
     llm: LLMConfig;
     agent: AgentConfig;
     browserAgent: BrowserAgentConfig;

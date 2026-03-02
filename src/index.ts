@@ -11,6 +11,17 @@ import slackChannel from "@/channels/slack/index.ts";
 import emailChannel from "@/channels/email/index.ts";
 import matrixChannel from "@/channels/matrix/index.ts";
 import webchatChannel from "@/channels/webchat/index.ts";
+import teamsChannel from "@/channels/teams/index.ts";
+import googleChatChannel from "@/channels/google_chat/index.ts";
+import lineChannel from "@/channels/line/index.ts";
+import viberChannel from "@/channels/viber/index.ts";
+import messengerChannel from "@/channels/messenger/index.ts";
+import instagramChannel from "@/channels/instagram/index.ts";
+import twitterChannel from "@/channels/twitter/index.ts";
+import redditChannel from "@/channels/reddit/index.ts";
+import youtubeChannel from "@/channels/youtube/index.ts";
+import smsChannel from "@/channels/sms/index.ts";
+import voiceChannel from "@/channels/voice/index.ts";
 import { log } from "@/logs/logger.ts";
 import { populateEnvFromVault } from "@/secrets/vault.ts";
 
@@ -41,6 +52,8 @@ const channelName = process.argv.includes("--cli")
 const channels: Channel[] = [
     telegramChannel, terminalChannel, selfChannel, whatsappChannel,
     discordChannel, slackChannel, emailChannel, matrixChannel, webchatChannel,
+    teamsChannel, googleChatChannel, lineChannel, viberChannel, messengerChannel,
+    instagramChannel, twitterChannel, redditChannel, youtubeChannel, smsChannel, voiceChannel,
 ];
 const channel = channels.find((c) => c.name === channelName);
 
@@ -65,7 +78,12 @@ if (channelName === "telegram" || channelName === "terminal") {
         }
 
         // Auto-start optional channels if their env vars are set
-        const autoChannels = [discordChannel, slackChannel, emailChannel, matrixChannel];
+        const autoChannels = [
+            discordChannel, slackChannel, emailChannel, matrixChannel,
+            teamsChannel, googleChatChannel, lineChannel, viberChannel,
+            messengerChannel, instagramChannel, twitterChannel, redditChannel,
+            youtubeChannel, smsChannel, voiceChannel,
+        ];
         for (const ch of autoChannels) {
             ch.start(config).catch((err) => logger.warn(`${ch.name} channel skipped: ${err.message}`));
         }
