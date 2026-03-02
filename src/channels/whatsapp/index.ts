@@ -105,7 +105,6 @@ async function start(config: AppConfig): Promise<void> {
 
         const sock = makeWASocket({
             auth: state,
-            printQRInTerminal: true,
             browser: ["ForkScout", "Chrome", "120.0.0"],
         });
 
