@@ -100,8 +100,16 @@ async function start(config: AppConfig): Promise<void> {
 
     logger.info(`Starting WhatsApp channel (session: ${sessionDir})`);
 
+    let retryCount = 0;
+    const MAX_RETRIES_UNAUTHENTICATED = 5;
+
     const connectSocket = async (): Promise<void> => {
         const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        const hasCredentials = existsSync(resolve(sessionDir, "creds.json"));
+
+        if (!hasCredentials) {
+            logger.info("No credentials found — starting QR code pairing flow...");
+        }
 
         const sock = makeWASocket({
             auth: state,
@@ -116,7 +124,7 @@ async function start(config: AppConfig): Promise<void> {
             const { connection, lastDisconnect, qr } = update;
 
             if (qr) {
-                logger.info("Scan QR code in terminal to connect WhatsApp");
+                logger.info("QR code received — scan with WhatsApp mobile app to pair");
                 await setWhatsAppQR(qr);
             }
 
@@ -127,14 +135,35 @@ async function start(config: AppConfig): Promise<void> {
                 if (reason === DisconnectReason.loggedOut) {
                     logger.error("Logged out — delete session dir and re-scan QR code");
                     setWhatsAppDisconnected();
+                    retryCount = 0;
                     return; // Don't reconnect — user logged out
                 }
 
-                // Reconnect after a short delay
-                logger.info("Reconnecting in 3s...");
-                await sleep(3000);
-                connectSocket(); // Recursive reconnect
+                // If not yet authenticated, limit retries with backoff
+                const isAuthenticated = existsSync(resolve(sessionDir, "creds.json"));
+                if (!isAuthenticated) {
+                    retryCount++;
+                    if (retryCount > MAX_RETRIES_UNAUTHENTICATED) {
+                        logger.error(
+                            `Pairing failed after ${MAX_RETRIES_UNAUTHENTICATED} attempts — ` +
+                            `waiting for credentials. Use dashboard or restart to try again.`
+                        );
+                        setWhatsAppDisconnected();
+                        return;
+                    }
+                    const delay = Math.min(3000 * Math.pow(2, retryCount - 1), 60_000);
+                    logger.info(`Not yet paired — retrying in ${Math.round(delay / 1000)}s (attempt ${retryCount}/${MAX_RETRIES_UNAUTHENTICATED})...`);
+                    await sleep(delay);
+                } else {
+                    // Authenticated but disconnected — reconnect quickly
+                    retryCount = 0;
+                    logger.info("Reconnecting in 3s...");
+                    await sleep(3000);
+                }
+
+                connectSocket(); // Reconnect
             } else if (connection === "open") {
+                retryCount = 0;
                 logger.info("Connected to WhatsApp!");
                 setWhatsAppConnected(sock.user?.id ?? "");
             }
