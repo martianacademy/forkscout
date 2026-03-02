@@ -157,6 +157,23 @@ export interface AppConfig {
         /** Cron jobs — can also be defined in .agents/self-jobs.json (gitignored). */
         jobs?: SelfJobConfig[];
     };
+    /** WhatsApp channel — connects via Baileys (WhatsApp Web protocol) */
+    whatsapp?: {
+        /** Directory to store WhatsApp session credentials. Default: ".agents/whatsapp-sessions" */
+        sessionDir: string;
+        /** Max tokens to keep in per-chat history before trimming oldest messages. Default: 12000 */
+        historyTokenBudget: number;
+        /** Owner JIDs (phone@s.whatsapp.net) — full agent access. Loaded from vault WHATSAPP_OWNER_JIDS. */
+        ownerJids: string[];
+        /** Allowed JIDs — can use the agent. Empty = everyone allowed (dev mode). */
+        allowedJids: string[];
+        /** Max messages per user per minute before rate-limiting. 0 = disabled. Default: 15 */
+        rateLimitPerMinute: number;
+        /** Max input length in characters. Messages longer than this are rejected. 0 = disabled. Default: 2000 */
+        maxInputLength: number;
+        /** Tool names restricted to owners only. */
+        ownerOnlyTools: string[];
+    };
     llm: LLMConfig;
     agent: AgentConfig;
     /** Browser sub-agent config — drives browse_task autonomously */

@@ -6,6 +6,7 @@
 //   start       Start the Telegram bot (default)
 //   setup       Run interactive setup wizard
 //   cli         Start terminal chat
+//   whatsapp    Start WhatsApp channel
 //   dev         Start with hot reload
 //   stop        Stop all running instances
 //   status      Show agent status
@@ -56,6 +57,10 @@ const COMMANDS: Record<string, () => Promise<void>> = {
 
     async cli() {
         await $`bun run src/index.ts --cli`.cwd(ROOT);
+    },
+
+    async whatsapp() {
+        await $`bun run src/index.ts --whatsapp`.cwd(ROOT);
     },
 
     async dev() {

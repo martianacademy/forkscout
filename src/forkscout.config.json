@@ -150,5 +150,17 @@
     "self": {
         "historyTokenBudget": 12000,
         "httpPort": 3200
+    },
+    "whatsapp": {
+        "sessionDir": ".agents/whatsapp-sessions",
+        "historyTokenBudget": 12000,
+        "ownerJids": [],
+        "allowedJids": [],
+        "rateLimitPerMinute": 15,
+        "maxInputLength": 2000,
+        "ownerOnlyTools": [
+            "run_shell_commands",
+            "write_file"
+        ]
     }
 }

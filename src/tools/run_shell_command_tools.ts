@@ -1,7 +1,8 @@
-// src/tools/run_shell_command_tools.ts — Run shell commands with self-kill protection
+// src/tools/run_shell_command_tools.ts — Run shell commands with self-kill + sensitive-path protection
 import { tool } from "ai";
 import { z } from "zod";
 import { execSync } from "child_process";
+import { commandTouchesSensitivePath, SENSITIVE_CMD_BLOCKED_MSG } from "@/utils/sensitive-paths.ts";
 
 export const IS_BOOTSTRAP_TOOL = true;
 
@@ -45,6 +46,15 @@ export const run_shell_command_tools = tool({
             };
         }
 
+        // Block ANY command that references sensitive paths, env vars, or credentials.
+        // This is path-based — catches cat, cp, base64, curl -d@, python open(), etc.
+        if (commandTouchesSensitivePath(command)) {
+            return {
+                success: false,
+                output: "",
+                error: SENSITIVE_CMD_BLOCKED_MSG,
+            };
+        }
         try {
             const output = execSync(command, {
                 cwd: cwd ?? process.cwd(),

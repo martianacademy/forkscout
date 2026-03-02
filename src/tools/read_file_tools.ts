@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { isSensitivePath, SENSITIVE_PATH_BLOCKED_MSG } from "@/utils/sensitive-paths.ts";
 
 export const IS_BOOTSTRAP_TOOL = true;
 
@@ -20,6 +21,14 @@ export const read_file_tools = tool({
         endLine: z.number().int().min(1).optional().describe("Last line to read (1-based, inclusive). Omit to auto-read."),
     }),
     execute: async (input) => {
+        // Block access to sensitive files for ALL callers
+        if (isSensitivePath(input.path)) {
+            return {
+                success: false,
+                error: SENSITIVE_PATH_BLOCKED_MSG,
+            };
+        }
+
         try {
             const allLines = readFileSync(resolve(input.path), "utf-8").split("\n");
             const totalLines = allLines.length;

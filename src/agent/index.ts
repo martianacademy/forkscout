@@ -45,6 +45,8 @@ export interface AgentRunOptions {
     excludeTools?: string[];
     /** Optional channel metadata for activity logging */
     meta?: { channel?: string; chatId?: number | string; };
+    /** Abort signal — when triggered, cancels the in-flight LLM call and stream */
+    abortSignal?: AbortSignal;
     /**
      * Called just before each tool executes — use to show live progress in the channel.
      * Fires with the tool name and its input. Channel-agnostic hook.
@@ -359,6 +361,7 @@ export async function runAgent(
         tools: toolsForRun as any,
         stopWhen: stepCountIs(config.llm.maxSteps),
         maxTokens: config.llm.maxTokens,
+        ...(options.abortSignal && { abortSignal: options.abortSignal }),
         ...(devtoolsEnabled && { experimental_telemetry: { isEnabled: true } }),
         onStepFinish(step: any) {
             stepNum++;
@@ -483,6 +486,7 @@ export async function streamAgent(
         tools: streamTools as any,
         stopWhen: stepCountIs(config.llm.maxSteps),
         maxTokens: config.llm.maxTokens,
+        ...(options.abortSignal && { abortSignal: options.abortSignal }),
         ...(devtoolsEnabled && { experimental_telemetry: { isEnabled: true } }),
         onStepFinish(step: any) {
             streamStep++;

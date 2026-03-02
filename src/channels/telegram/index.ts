@@ -17,6 +17,7 @@ import {
     deleteMessage,
     setMessageReaction,
     setMyCommands,
+    sendTyping,
 } from "@/channels/telegram/api.ts";
 import { mdToHtml, splitMarkdown, stripHtml } from "@/channels/telegram/format.ts";
 import { compileTelegramMessage } from "@/channels/telegram/compile-message.ts";
@@ -91,6 +92,9 @@ function toolInputPreview(input: unknown): string {
 
 /** Per-chat sequential queue — one message processed at a time per chat, no races. */
 const chatQueues = new Map<number, Promise<void>>();
+
+/** Per-chat abort controllers — abort the previous task when a new message arrives. */
+const chatAbortControllers = new Map<number, AbortController>();
 
 /** Per-user rate limit tracking: userId → { count, windowStart } */
 const rateLimiter = new Map<number, { count: number; windowStart: number }>();
@@ -351,18 +355,44 @@ async function start(config: AppConfig): Promise<void> {
 
                 logger.info(`[${role}] ${userId}/${chatId}: ${text.slice(0, 80)}`);
 
+                // Abort any in-flight task for this chat — new message takes priority
+                const prevController = chatAbortControllers.get(chatId);
+                if (prevController) {
+                    logger.info(`[abort] Aborting previous task for chatId=${chatId}`);
+                    prevController.abort();
+                }
+
+                // Create a new AbortController for this message
+                const controller = new AbortController();
+                chatAbortControllers.set(chatId, controller);
+
                 // Queue per chat — serialises concurrent messages, never races
                 const prev = chatQueues.get(chatId) ?? Promise.resolve();
-                const next = prev.then(() =>
-                    handleMessage(config, token, chatId, msg, role as "owner" | "admin" | "user").catch(async (err) => {
+                const next = prev.then(() => {
+                    // If already aborted before we even start, skip
+                    if (controller.signal.aborted) {
+                        logger.info(`[abort] Skipping already-aborted task for chatId=${chatId}`);
+                        return;
+                    }
+                    return handleMessage(config, token, chatId, msg, role as "owner" | "admin" | "user", controller.signal).catch(async (err) => {
+                        // AbortError is expected when we cancel — not a real error
+                        if (err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))) {
+                            logger.info(`[abort] Task aborted for chatId=${chatId}`);
+                            return;
+                        }
                         logger.error("Handler error:", err);
                         // Send clean user-facing message for LLM errors
                         const userMsg = (err instanceof LLMError)
                             ? `⚠️ ${err.classified.userMessage}`
                             : "⚠️ Something went wrong processing your message. Please try again.";
                         await sendMessage(token, chatId, userMsg).catch(() => { });
-                    })
-                );
+                    }).finally(() => {
+                        // Clean up the controller if it's still ours
+                        if (chatAbortControllers.get(chatId) === controller) {
+                            chatAbortControllers.delete(chatId);
+                        }
+                    });
+                });
                 chatQueues.set(chatId, next);
             }
         } catch (err) {
@@ -386,7 +416,8 @@ async function handleMessage(
     token: string,
     chatId: number,
     rawMsg: Message,
-    role: "owner" | "admin" | "user" = "user"
+    role: "owner" | "admin" | "user" = "user",
+    abortSignal?: AbortSignal
 ): Promise<void> {
     const sessionKey = `telegram-${chatId}`;
 
@@ -433,13 +464,21 @@ async function handleMessage(
     let dotIdx = 0;
     let thinkingMsgId: number | null = await sendMessage(token, chatId, "⚡ Thinking.").catch(() => null);
     let thinkingActive = true;
+    // Fire the native Telegram "is typing..." indicator immediately
+    sendTyping(token, chatId).catch(() => { });
     const thinkingLoop = (async () => {
+        let typingCounter = 0;
         while (thinkingActive) {
             await sleep(500);
             if (!thinkingActive) break;
             dotIdx = (dotIdx + 1) % DOTS.length;
             if (thinkingMsgId) {
                 await editMessage(token, chatId, thinkingMsgId, `⚡ Thinking${DOTS[dotIdx]}`).catch(() => { });
+            }
+            // Re-send typing action every ~4s (Telegram expires it after 5s)
+            typingCounter++;
+            if (typingCounter % 8 === 0) {
+                sendTyping(token, chatId).catch(() => { });
             }
         }
     })();
@@ -526,6 +565,7 @@ async function handleMessage(
             chatHistory,
             role,
             meta: { channel: "telegram", chatId },
+            abortSignal,
             onToolCall,
             onStepFinish,
             onThinking,
@@ -561,6 +601,15 @@ async function handleMessage(
         }
         if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
         await thinkingLoop;
+    }
+
+    // ── Abort check — if we were cancelled, clean up partial UI and bail out ──
+    if (abortSignal?.aborted) {
+        logger.info(`[abort] Cleaning up aborted task for chatId=${chatId}`);
+        // Delete any partial response message and tool bubble
+        if (responseMsgId) await deleteMessage(token, chatId, responseMsgId).catch(() => { });
+        if (toolBubbleId) await deleteMessage(token, chatId, toolBubbleId).catch(() => { });
+        return;
     }
 
     const result = await streamResult!.finalize();
