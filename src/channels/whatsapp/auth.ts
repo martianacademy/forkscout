@@ -36,7 +36,6 @@ export function getRole(senderJid: string): "owner" | "user" | "denied" {
     if (devMode) return "owner";
     if (ownerJids.has(senderJid)) return "owner";
     if (allowedJids.has(senderJid)) return "user";
-    // If no allowlist, everyone except owners is a user
-    if (allowedJids.size === 0) return "user";
+    // No allowlist configured → only owners can interact, deny everyone else
     return "denied";
 }

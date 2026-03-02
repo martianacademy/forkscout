@@ -2,7 +2,8 @@
     "agent": {
         "name": "ForkScout",
         "description": "An autonomous agent that can use tools and access the web to answer questions and perform tasks.",
-        "github": "https://github.com/marsnext/forkscout"
+        "github": "https://github.com/marsnext/forkscout",
+        "gender": "female"
     },
     "browser": {
         "headless": false,
@@ -154,7 +155,9 @@
     "whatsapp": {
         "sessionDir": ".agents/whatsapp-sessions",
         "historyTokenBudget": 12000,
-        "ownerJids": [],
+        "ownerJids": [
+            "196207594975310@lid"
+        ],
         "allowedJids": [],
         "rateLimitPerMinute": 15,
         "maxInputLength": 2000,
