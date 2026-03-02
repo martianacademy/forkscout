@@ -12,8 +12,6 @@ import { useAuth } from "@web/lib/auth-context";
 import { AGENT_URL } from "@web/lib/api";
 import {
     MessageCircle,
-    Play,
-    QrCode,
     RefreshCw,
     Shield,
     Trash2,
@@ -21,6 +19,7 @@ import {
     Wifi,
     WifiOff,
 } from "lucide-react";
+import { PairingCodeDisplay, QrCodeDisplay, ConnectOptions } from "@web/components/whatsapp-connection-ui";
 
 type Config = Record<string, any>;
 
@@ -35,6 +34,7 @@ interface WhatsAppStatus {
     started?: boolean;
     qr?: string;
     jid?: string;
+    pairingCode?: string;
 }
 
 export default function WhatsAppSettings({ config, updateField, get }: Props) {
@@ -44,6 +44,7 @@ export default function WhatsAppSettings({ config, updateField, get }: Props) {
     const [connecting, setConnecting] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [phoneNumber, setPhoneNumber] = useState("");
 
     const ownerJids: string[] = (get(["whatsapp", "ownerJids"]) as string[]) ?? [];
     const allowedJids: string[] = (get(["whatsapp", "allowedJids"]) as string[]) ?? [];
@@ -65,7 +66,7 @@ export default function WhatsAppSettings({ config, updateField, get }: Props) {
 
     useEffect(() => {
         fetchStatus();
-        const iv = setInterval(fetchStatus, 8000); // poll QR every 8s
+        const iv = setInterval(fetchStatus, 8000); // poll every 8s
         return () => clearInterval(iv);
     }, [fetchStatus]);
 
@@ -84,19 +85,27 @@ export default function WhatsAppSettings({ config, updateField, get }: Props) {
         }
     };
 
-    const handleConnect = async () => {
+    const handleConnect = async (usePairingCode: boolean) => {
         if (!token) return;
+        if (usePairingCode && !phoneNumber.trim()) return;
         setConnecting(true);
         try {
+            const body = usePairingCode
+                ? JSON.stringify({ phoneNumber: phoneNumber.trim() })
+                : undefined;
             await fetch(`${AGENT_URL}/api/whatsapp/connect`, {
                 method: "POST",
-                headers: { Authorization: `Bearer ${token}` },
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    ...(body ? { "Content-Type": "application/json" } : {}),
+                },
+                body,
             });
-            // Poll quickly for a few seconds to catch the QR
-            for (let i = 0; i < 5; i++) {
+            // Poll quickly to catch the QR or pairing code
+            for (let i = 0; i < 8; i++) {
                 await new Promise((r) => setTimeout(r, 2000));
                 await fetchStatus();
-                if (status?.qr || status?.connected) break;
+                if (status?.qr || status?.connected || status?.pairingCode) break;
             }
         } catch { /* ignore */ } finally {
             setConnecting(false);
@@ -105,7 +114,7 @@ export default function WhatsAppSettings({ config, updateField, get }: Props) {
 
     return (
         <div className="space-y-6">
-            {/* Connection Status + QR */}
+            {/* Connection Status */}
             <Section
                 title="Connection"
                 icon={status?.connected ? Wifi : WifiOff}
@@ -121,6 +130,7 @@ export default function WhatsAppSettings({ config, updateField, get }: Props) {
                 }
             >
                 {status?.connected ? (
+                    /* ── Connected ────────────────────────────── */
                     <div className="flex items-center gap-3 rounded-lg border border-accent/20 bg-accent/5 p-4">
                         <Wifi className="h-5 w-5 text-accent" />
                         <div>
@@ -130,66 +140,28 @@ export default function WhatsAppSettings({ config, updateField, get }: Props) {
                             )}
                         </div>
                     </div>
+                ) : status?.pairingCode ? (
+                    /* ── Pairing Code Display ────────────────── */
+                    <PairingCodeDisplay code={status.pairingCode} />
                 ) : status?.qr ? (
-                    <div className="text-center">
-                        <p className="mb-3 text-sm text-muted-foreground">
-                            Scan this QR code with WhatsApp to connect:
-                        </p>
-                        <div className="mx-auto inline-block rounded-xl border border-border bg-white p-4">
-                            {/* If qr is a data URL, render as img; otherwise render as text QR */}
-                            {status.qr.startsWith("data:") ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={status.qr} alt="WhatsApp QR" className="h-64 w-64" />
-                            ) : (
-                                <div className="flex items-center justify-center h-64 w-64">
-                                    <QrCode className="h-16 w-16 text-muted-foreground" />
-                                    <p className="mt-2 text-xs text-muted-foreground break-all">
-                                        QR available in terminal
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                        <p className="mt-2 text-xs text-muted-foreground">
-                            QR refreshes automatically every few seconds.
-                        </p>
-                    </div>
+                    /* ── QR Code Display ──────────────────────── */
+                    <QrCodeDisplay qr={status.qr} />
                 ) : (
-                    <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-4">
-                        <div className="flex items-center gap-3">
-                            <WifiOff className="h-5 w-5 text-muted-foreground" />
-                            <div>
-                                <p className="text-sm font-medium">
-                                    {status?.started ? "Waiting for QR…" : "Not connected"}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                    {status?.started
-                                        ? "WhatsApp channel is starting — QR code will appear shortly."
-                                        : "Start the WhatsApp channel to pair your device."}
-                                </p>
-                            </div>
-                        </div>
-                        {!status?.started && (
-                            <button
-                                onClick={handleConnect}
-                                disabled={connecting}
-                                className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-xs font-medium text-accent-foreground hover:bg-accent/90 disabled:opacity-50"
-                            >
-                                {connecting ? (
-                                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                    <Play className="h-3.5 w-3.5" />
-                                )}
-                                {connecting ? "Starting…" : "Connect"}
-                            </button>
-                        )}
-                    </div>
+                    /* ── Not Connected — show connect options ── */
+                    <ConnectOptions
+                        status={status}
+                        connecting={connecting}
+                        phoneNumber={phoneNumber}
+                        onPhoneChange={setPhoneNumber}
+                        onConnect={handleConnect}
+                    />
                 )}
 
                 {/* Delete session */}
                 <div className="mt-4 border-t border-border pt-4">
                     {confirmDelete ? (
                         <div className="flex items-center gap-2">
-                            <span className="text-xs text-destructive">Delete session data? You will need to re-scan QR.</span>
+                            <span className="text-xs text-destructive">Delete session data? You will need to re-pair.</span>
                             <button
                                 onClick={handleDeleteSession}
                                 disabled={deleting}

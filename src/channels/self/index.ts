@@ -424,10 +424,19 @@ export function startHttpServer(config: AppConfig): void {
             }
 
             // POST /api/whatsapp/connect → start WhatsApp channel on-demand
+            // Body (optional): { phoneNumber?: string } — if provided, uses pairing code instead of QR
             if (req.method === "POST" && url.pathname === "/api/whatsapp/connect") {
-                const result = startWhatsAppChannel();
+                let phoneNumber: string | undefined;
+                try {
+                    const body = await req.json() as Record<string, unknown>;
+                    if (body.phoneNumber && typeof body.phoneNumber === "string") {
+                        phoneNumber = body.phoneNumber;
+                    }
+                } catch { /* no body or invalid JSON — use QR flow */ }
+
+                const result = startWhatsAppChannel(phoneNumber);
                 if (result.ok) {
-                    logger.info("WhatsApp channel started via dashboard API");
+                    logger.info(`WhatsApp channel started via dashboard API${phoneNumber ? " (pairing code)" : " (QR)"}`);
                     return json({ ok: true });
                 }
                 return json({ ok: false, error: result.error }, 500);
