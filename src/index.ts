@@ -5,7 +5,7 @@ import telegramChannel from "@/channels/telegram/index.ts";
 import terminalChannel from "@/channels/terminal/index.ts";
 import selfChannel, { startCronJobs, startHttpServer, checkOrphanedMonitors } from "@/channels/self/index.ts";
 import whatsappChannel from "@/channels/whatsapp/index.ts";
-import { startWhatsAppChannel } from "@/channels/whatsapp/index.ts";
+import { startWhatsAppChannel, hasWhatsAppCredentials } from "@/channels/whatsapp/index.ts";
 import { log } from "@/logs/logger.ts";
 import { populateEnvFromVault } from "@/secrets/vault.ts";
 
@@ -48,8 +48,13 @@ if (channelName === "telegram" || channelName === "terminal") {
         startCronJobs(config);
         startHttpServer(config);
         checkOrphanedMonitors(config).catch(() => { });
-        // Always start WhatsApp in the background so it's available for the owner
-        startWhatsAppChannel();
+        // Only auto-start WhatsApp if credentials exist (device already paired).
+        // If not paired yet, the owner can initiate pairing from the dashboard.
+        if (hasWhatsAppCredentials()) {
+            startWhatsAppChannel();
+        } else {
+            logger.info("WhatsApp not paired yet — use Dashboard → Settings → WhatsApp to connect");
+        }
     } else {
         logger.info("Smoke mode — HTTP server, cron jobs, and orphan monitor disabled");
     }

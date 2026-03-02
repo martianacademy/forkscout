@@ -20,6 +20,13 @@ export default {
     start,
 } satisfies Channel;
 
+/** Check if WhatsApp credentials exist (i.e. device has been paired before). */
+export function hasWhatsAppCredentials(): boolean {
+    const config = getConfig();
+    const sessionDir = resolve(process.cwd(), config.whatsapp?.sessionDir ?? ".agents/whatsapp-sessions");
+    return existsSync(resolve(sessionDir, "creds.json"));
+}
+
 /** Start the WhatsApp channel from outside (e.g. dashboard API). Safe to call multiple times. */
 export function startWhatsAppChannel(): { ok: boolean; error?: string } {
     const state = getWhatsAppState();
@@ -101,7 +108,7 @@ async function start(config: AppConfig): Promise<void> {
     logger.info(`Starting WhatsApp channel (session: ${sessionDir})`);
 
     let retryCount = 0;
-    const MAX_RETRIES_UNAUTHENTICATED = 5;
+    const MAX_RETRIES_UNAUTHENTICATED = 3;
 
     const connectSocket = async (): Promise<void> => {
         const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
@@ -151,7 +158,7 @@ async function start(config: AppConfig): Promise<void> {
                         setWhatsAppDisconnected();
                         return;
                     }
-                    const delay = Math.min(3000 * Math.pow(2, retryCount - 1), 60_000);
+                    const delay = Math.min(5000 * Math.pow(2, retryCount - 1), 60_000);
                     logger.info(`Not yet paired — retrying in ${Math.round(delay / 1000)}s (attempt ${retryCount}/${MAX_RETRIES_UNAUTHENTICATED})...`);
                     await sleep(delay);
                 } else {
