@@ -80,6 +80,11 @@ async function start(config: AppConfig): Promise<void> {
     setWhatsAppStarted();
     logger.info(`Starting WhatsApp channel (session: ${sessionDir})`);
 
+    // Resolvable keep-alive: resolves when channel should stop (pairing failed / logged out).
+    // For registered sessions this never resolves — channel runs forever.
+    let stopChannel: () => void;
+    const running = new Promise<void>((resolve) => { stopChannel = resolve; });
+
     const connectSocket = async (): Promise<void> => {
         const { state: authState, saveCreds } = await useMultiFileAuthState(sessionDir);
         const isRegistered = authState.creds.registered;
@@ -146,6 +151,7 @@ async function start(config: AppConfig): Promise<void> {
             if (reason === DisconnectReason.loggedOut) {
                 logger.error("Logged out — delete session and re-pair.");
                 resetWhatsAppState();
+                stopChannel!(); // let start() complete — no zombie
                 return;
             }
 
@@ -155,6 +161,7 @@ async function start(config: AppConfig): Promise<void> {
             if (!isRegistered) {
                 logger.info("Connection closed during pairing — click Connect to try again.");
                 resetWhatsAppState(); // sets started=false so Connect button reappears
+                stopChannel!(); // let start() complete — no zombie
                 return;
             }
 
@@ -175,5 +182,5 @@ async function start(config: AppConfig): Promise<void> {
 
     let retryCount = 0;
     await connectSocket();
-    await new Promise(() => { }); // Keep running forever
+    await running; // blocks until stopChannel() or forever for registered sessions
 }
