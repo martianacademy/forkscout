@@ -10,7 +10,7 @@ import {
     fetchLatestBaileysVersion, makeCacheableSignalKeyStore,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
-import { existsSync, mkdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import { makeSilentLogger } from "@/channels/whatsapp/baileys-logger.ts";
 import {
@@ -66,10 +66,7 @@ async function start(config: AppConfig): Promise<void> {
     const wa = config.whatsapp;
     const sessionDir = resolve(process.cwd(), wa?.sessionDir ?? ".agents/whatsapp-sessions");
 
-    // Clean session dir for fresh pairing (like opening a new incognito tab)
-    if (!hasWhatsAppCredentials()) {
-        if (existsSync(sessionDir)) rmSync(sessionDir, { recursive: true, force: true });
-    }
+    // Ensure session dir exists (never delete — creds must persist across restarts)
     if (!existsSync(sessionDir)) mkdirSync(sessionDir, { recursive: true });
 
     initAuth(config);
