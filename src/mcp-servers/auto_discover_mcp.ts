@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { Tool } from "@/tools/index.ts";
 import { getConfig } from "@/config.ts";
 import { log } from "@/logs/logger.ts";
+import { redactOutput } from "@/utils/redact.ts";
 
 const logger = log("mcp");
 
@@ -46,9 +47,9 @@ function scanMcpDir(dir: string): string[] {
 function getConfigSnapshot(): string {
     const coreDir = import.meta.dir;
     const extendedDir = resolve(process.cwd(), ".agents", "mcp-servers");
-    
+
     const allFiles = [...scanMcpDir(coreDir), ...scanMcpDir(extendedDir)].sort();
-    
+
     try {
         return allFiles
             .map((f) => {
@@ -96,7 +97,7 @@ async function loadMcpServer(
 ): Promise<void> {
     const config = getConfig();
     let mcpConfig: McpServerConfig;
-    
+
     try {
         mcpConfig = JSON.parse(readFileSync(filePath, "utf-8")) as McpServerConfig;
     } catch (err) {
@@ -111,9 +112,9 @@ async function loadMcpServer(
     }
 
     try {
-        const client = new Client({ 
-            name: getConfig().agent.name.toLowerCase(), 
-            version: "3.0.0" 
+        const client = new Client({
+            name: getConfig().agent.name.toLowerCase(),
+            version: "3.0.0"
         }, {});
 
         if (mcpConfig.url) {
@@ -167,7 +168,8 @@ async function loadMcpServer(
                             name: t.name,
                             arguments: (mergedInput as Record<string, unknown>) ?? {}
                         });
-                        return result;
+                        // Redact sensitive data before LLM sees it
+                        return redactOutput(result);
                     } catch (err: any) {
                         logger.error(`Tool "${toolName}" failed:`, err?.message ?? err);
                         return { success: false, error: err?.message ?? "MCP tool call failed" };
@@ -198,7 +200,7 @@ export async function discoverMcpTools(): Promise<Record<string, Tool>> {
     // Core MCP configs (versioned): src/mcp-servers/
     const coreDir = import.meta.dir;
     const coreFiles = scanMcpDir(coreDir);
-    
+
     // Extended MCP configs (runtime): .agents/mcp-servers/
     const extendedDir = resolve(process.cwd(), ".agents", "mcp-servers");
     const extendedFiles = scanMcpDir(extendedDir);
