@@ -3,7 +3,14 @@
         "name": "ForkScout",
         "description": "An autonomous agent that can use tools and access the web to answer questions and perform tasks.",
         "github": "https://github.com/marsnext/forkscout",
-        "gender": "female"
+        "gender": "female",
+        "ownerOnlyTools": [
+            "run_shell_commands",
+            "write_file",
+            "git_operations",
+            "validate_and_restart",
+            "secret_vault"
+        ]
     },
     "browser": {
         "headless": false,
@@ -138,10 +145,6 @@
         "allowedUserIds": [],
         "rateLimitPerMinute": 20,
         "maxInputLength": 2000,
-        "ownerOnlyTools": [
-            "run_shell_commands",
-            "write_file"
-        ],
         "maxToolResultTokens": 3000,
         "maxSentencesPerToolResult": 20
     },
@@ -160,10 +163,6 @@
         ],
         "allowedJids": [],
         "rateLimitPerMinute": 15,
-        "maxInputLength": 2000,
-        "ownerOnlyTools": [
-            "run_shell_commands",
-            "write_file"
-        ]
+        "maxInputLength": 2000
     }
 }

@@ -35,6 +35,7 @@ export interface AgentConfig {
     description?: string;
     github: string;
     systemPromptExtra?: string;
+    ownerOnlyTools?: string[];
 }
 
 export interface SelfJobConfig {
@@ -56,7 +57,6 @@ export interface AppConfig {
         allowedUserIds: number[];
         rateLimitPerMinute: number;
         maxInputLength: number;
-        ownerOnlyTools: string[];
         maxToolResultTokens: number;
         maxSentencesPerToolResult: number;
     };
@@ -69,7 +69,6 @@ export interface AppConfig {
         allowedJids: string[];
         rateLimitPerMinute: number;
         maxInputLength: number;
-        ownerOnlyTools: string[];
     };
     discord?: {
         historyTokenBudget?: number;

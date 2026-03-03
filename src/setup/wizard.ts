@@ -175,7 +175,6 @@ export function buildDefaultConfig(opts: {
             allowedUserIds: [],
             rateLimitPerMinute: 20,
             maxInputLength: 2000,
-            ownerOnlyTools: ["run_shell_commands", "write_file"],
             maxToolResultTokens: 3000,
             maxSentencesPerToolResult: 20,
         },
@@ -190,6 +189,7 @@ export function buildDefaultConfig(opts: {
             name: opts.agentName,
             description: "An autonomous agent that can use tools and access the web to answer questions and perform tasks.",
             github: "https://github.com/marsnext/forkscout",
+            ownerOnlyTools: ["run_shell_commands", "write_file", "git_operations", "validate_and_restart", "secret_vault"],
         },
         browser: {
             headless: false,
