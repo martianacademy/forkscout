@@ -57,7 +57,7 @@ function removeJobFromFile(name: string): void {
 
 /** Load jobs from .agents/self-jobs.json + config.self.jobs, deduplicated by name. */
 function loadJobs(config: AppConfig): SelfJobConfig[] {
-    const configJobs: SelfJobConfig[] = config.self?.jobs ?? [];
+    const configJobs: SelfJobConfig[] = config.channels.self?.jobs ?? [];
     let fileJobs: SelfJobConfig[] = [];
 
     if (existsSync(JOBS_FILE)) {
@@ -117,7 +117,7 @@ function trimHistory(history: ModelMessage[], tokenBudget: number): ModelMessage
 const SELF_SESSION_KEY = "self";
 
 async function runJob(config: AppConfig, job: SelfJobConfig): Promise<void> {
-    const budget = config.self?.historyTokenBudget ?? 12000;
+    const budget = config.channels.self?.historyTokenBudget ?? 12000;
     const history = trimHistory(loadHistory(SELF_SESSION_KEY), budget);
 
     logger.info(`Running job: ${job.name}`);
@@ -242,7 +242,7 @@ export let httpTriggerToken: string = "";
  * GET /health → { ok: true }
  */
 export function startHttpServer(config: AppConfig): void {
-    const port = config.self?.httpPort ?? 3200;
+    const port = config.channels.self?.httpPort ?? 3200;
     if (port === 0) {
         logger.info("HTTP trigger server disabled (httpPort = 0)");
         return;
@@ -437,7 +437,7 @@ export function startHttpServer(config: AppConfig): void {
             if (req.method === "DELETE" && url.pathname === "/api/whatsapp/session") {
                 try {
                     const cfg = getConfig();
-                    const sessionDir = resolve(process.cwd(), cfg.whatsapp?.sessionDir ?? ".agents/whatsapp-sessions");
+                    const sessionDir = resolve(process.cwd(), cfg.channels.whatsapp?.sessionDir ?? ".agents/whatsapp-sessions");
                     if (existsSync(sessionDir)) {
                         rmSync(sessionDir, { recursive: true, force: true });
                         logger.info("WhatsApp session deleted via dashboard API");
@@ -513,7 +513,7 @@ async function handleHttpMessage(
     prompt: string,
     role: "owner" | "admin" | "user" | "self"
 ): Promise<{ ok: true; text: string; steps: number } | { ok: false; error: string }> {
-    const budget = config.self?.historyTokenBudget ?? 12000;
+    const budget = config.channels.self?.historyTokenBudget ?? 12000;
 
     // ── 1. Load history — main chain only; workers start with empty context ───
     const isMainChain = sessionKey === SELF_SESSION_KEY;

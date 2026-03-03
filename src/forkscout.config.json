@@ -139,30 +139,37 @@
         "topK": 5,
         "chunkMaxTokens": 500
     },
-    "telegram": {
-        "pollingTimeout": 30,
-        "historyTokenBudget": 12000,
-        "allowedUserIds": [],
-        "rateLimitPerMinute": 20,
-        "maxInputLength": 2000,
-        "maxToolResultTokens": 3000,
-        "maxSentencesPerToolResult": 20
-    },
-    "terminal": {
-        "historyTokenBudget": 12000
-    },
-    "self": {
-        "historyTokenBudget": 12000,
-        "httpPort": 3200
-    },
-    "whatsapp": {
-        "sessionDir": ".agents/whatsapp-sessions",
-        "historyTokenBudget": 12000,
-        "ownerJids": [
-            "196207594975310@lid"
-        ],
-        "allowedJids": [],
-        "rateLimitPerMinute": 15,
-        "maxInputLength": 2000
+    "channels": {
+        "defaults": {
+            "historyTokenBudget": 12000,
+            "rateLimitPerMinute": 20,
+            "maxInputLength": 3000
+        },
+        "telegram": {
+            "pollingTimeout": 30,
+            "historyTokenBudget": 12000,
+            "allowedUserIds": [],
+            "rateLimitPerMinute": 20,
+            "maxInputLength": 2000,
+            "maxToolResultTokens": 3000,
+            "maxSentencesPerToolResult": 20
+        },
+        "terminal": {
+            "historyTokenBudget": 12000
+        },
+        "self": {
+            "historyTokenBudget": 12000,
+            "httpPort": 3200
+        },
+        "whatsapp": {
+            "sessionDir": ".agents/whatsapp-sessions",
+            "historyTokenBudget": 12000,
+            "ownerJids": [
+                "196207594975310@lid"
+            ],
+            "allowedJids": [],
+            "rateLimitPerMinute": 15,
+            "maxInputLength": 2000
+        }
     }
 }

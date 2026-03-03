@@ -14,7 +14,7 @@ let allowedJids: Set<string>;
 let devMode: boolean;
 
 export function initAuth(config: AppConfig): void {
-    const wa = config.whatsapp;
+    const wa = config.channels.whatsapp;
     const vaultOwnerJids = (process.env.WHATSAPP_OWNER_JIDS ?? "")
         .split(",")
         .map((s) => s.trim())

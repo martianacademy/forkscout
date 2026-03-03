@@ -169,21 +169,28 @@ export function buildDefaultConfig(opts: {
     agentName: string;
 }): any {
     return {
-        telegram: {
-            pollingTimeout: 30,
-            historyTokenBudget: 12000,
-            allowedUserIds: [],
-            rateLimitPerMinute: 20,
-            maxInputLength: 2000,
-            maxToolResultTokens: 3000,
-            maxSentencesPerToolResult: 20,
-        },
-        terminal: {
-            historyTokenBudget: 12000,
-        },
-        self: {
-            historyTokenBudget: 12000,
-            httpPort: 3200,
+        channels: {
+            defaults: {
+                historyTokenBudget: 12000,
+                rateLimitPerMinute: 20,
+                maxInputLength: 3000,
+            },
+            telegram: {
+                pollingTimeout: 30,
+                historyTokenBudget: 12000,
+                allowedUserIds: [],
+                rateLimitPerMinute: 20,
+                maxInputLength: 2000,
+                maxToolResultTokens: 3000,
+                maxSentencesPerToolResult: 20,
+            },
+            terminal: {
+                historyTokenBudget: 16000,
+            },
+            self: {
+                historyTokenBudget: 12000,
+                httpPort: 3200,
+            },
         },
         agent: {
             name: opts.agentName,
@@ -739,8 +746,8 @@ export async function runSetupWizard(): Promise<void> {
             if (existingConfig.browser?.chromePath) {
                 generatedConfig.browser.chromePath = existingConfig.browser.chromePath;
             }
-            if (existingConfig.self?.jobs) {
-                generatedConfig.self.jobs = existingConfig.self.jobs;
+            if (existingConfig.channels?.self?.jobs) {
+                generatedConfig.channels.self.jobs = existingConfig.channels.self.jobs;
             }
         }
 

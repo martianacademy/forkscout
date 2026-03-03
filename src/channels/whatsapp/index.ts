@@ -31,7 +31,7 @@ export default {
 /** Check if WhatsApp credentials exist (i.e. device has been paired before). */
 export function hasWhatsAppCredentials(): boolean {
     const config = getConfig();
-    const sessionDir = resolve(process.cwd(), config.whatsapp?.sessionDir ?? ".agents/whatsapp-sessions");
+    const sessionDir = resolve(process.cwd(), config.channels.whatsapp?.sessionDir ?? ".agents/whatsapp-sessions");
     return existsSync(resolve(sessionDir, "creds.json"));
 }
 
@@ -51,7 +51,7 @@ export function startWhatsAppChannel(): { ok: boolean; error?: string } {
 
 // ── Main channel ─────────────────────────────────────────────────────────────
 async function start(config: AppConfig): Promise<void> {
-    const wa = config.whatsapp;
+    const wa = config.channels.whatsapp;
     const sessionDir = resolve(process.cwd(), wa?.sessionDir ?? ".agents/whatsapp-sessions");
 
     // Ensure session dir exists (never delete — creds must persist across restarts)

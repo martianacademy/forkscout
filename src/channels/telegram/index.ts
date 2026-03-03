@@ -166,8 +166,8 @@ async function start(config: AppConfig): Promise<void> {
 
     // Seed runtime auth state from vault + config
     const vaultOwnerIds = getVaultOwnerIds();
-    devMode = vaultOwnerIds.length === 0 && config.telegram.allowedUserIds.length === 0;
-    runtimeAllowedUsers = new Set(config.telegram.allowedUserIds);
+    devMode = vaultOwnerIds.length === 0 && config.channels.telegram.allowedUserIds.length === 0;
+    runtimeAllowedUsers = new Set(config.channels.telegram.allowedUserIds);
     runtimeOwnerUsers = new Set(vaultOwnerIds);
     // Seed admins from persisted approved requests
     const savedRequests = loadRequests();
@@ -258,7 +258,7 @@ async function start(config: AppConfig): Promise<void> {
 
     while (true) {
         try {
-            const updates = await getUpdates(token, offset, config.telegram.pollingTimeout);
+            const updates = await getUpdates(token, offset, config.channels.telegram.pollingTimeout);
 
             for (const update of updates) {
                 offset = update.update_id + 1;
@@ -340,14 +340,14 @@ async function start(config: AppConfig): Promise<void> {
                 if (text.startsWith("/")) continue;
 
                 // Input length cap
-                const maxLen = config.telegram.maxInputLength;
+                const maxLen = config.channels.telegram.maxInputLength;
                 if (maxLen > 0 && text.length > maxLen) {
                     await sendMessage(token, chatId, `⚠️ Message too long (max ${maxLen} characters).`);
                     continue;
                 }
 
                 // Rate limiting (owners and admins bypass)
-                if (role !== "owner" && role !== "admin" && !checkRateLimit(userId, config.telegram.rateLimitPerMinute)) {
+                if (role !== "owner" && role !== "admin" && !checkRateLimit(userId, config.channels.telegram.rateLimitPerMinute)) {
                     logger.warn(`Rate limit exceeded for userId ${userId}`);
                     await sendMessage(token, chatId, "⏳ Too many messages. Please wait a moment.");
                     continue;
@@ -434,7 +434,7 @@ async function handleMessage(
     // ── 3. Load & prepare full history via shared pipeline ───────────────────
     const allHistory = prepareHistory(
         loadHistory(sessionKey),
-        { tokenBudget: config.telegram.historyTokenBudget }
+        { tokenBudget: config.channels.telegram.historyTokenBudget }
     );
 
     // The current user message is the last in allHistory — pass it as userMessage,

@@ -7,6 +7,14 @@ import { fileURLToPath } from "url";
 export type {
     ModelTiers, ModelTier, LLMConfig, BrowserAgentConfig, AgentConfig,
     SelfJobConfig, ToolDefaults, N8nConfig, AppConfig,
+    ChannelDefaults, ChannelsConfig,
+    TelegramChannelConfig, TerminalChannelConfig, SelfChannelConfig,
+    WhatsAppChannelConfig, DiscordChannelConfig, SlackChannelConfig,
+    EmailChannelConfig, MatrixChannelConfig, WebchatChannelConfig,
+    TeamsChannelConfig, GoogleChatChannelConfig, LineChannelConfig,
+    ViberChannelConfig, MessengerChannelConfig, InstagramChannelConfig,
+    TwitterChannelConfig, RedditChannelConfig, YoutubeChannelConfig,
+    SmsChannelConfig, VoiceChannelConfig,
 } from "@/config-types.ts";
 import type { AppConfig } from "@/config-types.ts";
 
@@ -52,7 +60,7 @@ export function loadConfig(): AppConfig {
     const raw = readFileSync(configPath, "utf-8");
     let config = JSON.parse(raw) as AppConfig;
 
-    if (!config.telegram.ownerUserIds) config.telegram.ownerUserIds = [];
+    if (!config.channels.telegram.ownerUserIds) config.channels.telegram.ownerUserIds = [];
 
     if (existsSync(AUTH_FILE)) {
         const authRaw = readFileSync(AUTH_FILE, "utf-8");

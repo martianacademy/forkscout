@@ -1,5 +1,17 @@
 // src/config-types.ts — All config interface types (extracted from config.ts for 200-line limit)
 
+export type {
+    ChannelDefaults, ChannelsConfig,
+    TelegramChannelConfig, TerminalChannelConfig, SelfChannelConfig,
+    WhatsAppChannelConfig, DiscordChannelConfig, SlackChannelConfig,
+    EmailChannelConfig, MatrixChannelConfig, WebchatChannelConfig,
+    TeamsChannelConfig, GoogleChatChannelConfig, LineChannelConfig,
+    ViberChannelConfig, MessengerChannelConfig, InstagramChannelConfig,
+    TwitterChannelConfig, RedditChannelConfig, YoutubeChannelConfig,
+    SmsChannelConfig, VoiceChannelConfig,
+} from "@/channel-types.ts";
+import type { ChannelsConfig } from "@/channel-types.ts";
+
 export interface ModelTiers {
     fast: string;
     balanced: string;
@@ -50,126 +62,7 @@ export interface ToolDefaults { [toolName: string]: Record<string, unknown> }
 export interface N8nConfig { baseUrl: string; workflows?: string[] }
 
 export interface AppConfig {
-    telegram: {
-        pollingTimeout: number;
-        historyTokenBudget: number;
-        ownerUserIds: number[];
-        allowedUserIds: number[];
-        rateLimitPerMinute: number;
-        maxInputLength: number;
-        maxToolResultTokens: number;
-        maxSentencesPerToolResult: number;
-    };
-    terminal: { historyTokenBudget: number };
-    self?: { historyTokenBudget: number; httpPort: number; jobs?: SelfJobConfig[] };
-    whatsapp?: {
-        sessionDir: string;
-        historyTokenBudget: number;
-        ownerJids: string[];
-        allowedJids: string[];
-        rateLimitPerMinute: number;
-        maxInputLength: number;
-    };
-    discord?: {
-        historyTokenBudget?: number;
-        ownerIds?: string[];
-        allowedUserIds?: string[];
-        allowedChannelIds?: string[];
-        rateLimitPerMinute?: number;
-    };
-    slack?: {
-        historyTokenBudget?: number;
-        ownerIds?: string[];
-        allowedUserIds?: string[];
-        allowedChannelIds?: string[];
-        rateLimitPerMinute?: number;
-    };
-    email?: {
-        historyTokenBudget?: number;
-        ownerEmails?: string[];
-        allowedEmails?: string[];
-        pollIntervalMs?: number;
-    };
-    matrix?: {
-        historyTokenBudget?: number;
-        ownerIds?: string[];
-        allowedUserIds?: string[];
-        allowedRoomIds?: string[];
-        rateLimitPerMinute?: number;
-    };
-    webchat?: {
-        historyTokenBudget?: number;
-        ownerToken?: string;
-        allowPublic?: boolean;
-    };
-    teams?: {
-        historyTokenBudget?: number;
-        ownerIds?: string[];
-        allowedUserIds?: string[];
-        rateLimitPerMinute?: number;
-    };
-    googleChat?: {
-        historyTokenBudget?: number;
-        ownerEmails?: string[];
-        allowedEmails?: string[];
-        allowedSpaces?: string[];
-        rateLimitPerMinute?: number;
-    };
-    line?: {
-        historyTokenBudget?: number;
-        ownerIds?: string[];
-        allowedUserIds?: string[];
-        rateLimitPerMinute?: number;
-    };
-    viber?: {
-        historyTokenBudget?: number;
-        ownerIds?: string[];
-        allowedUserIds?: string[];
-        rateLimitPerMinute?: number;
-    };
-    messenger?: {
-        historyTokenBudget?: number;
-        ownerPsids?: string[];
-        allowedPsids?: string[];
-        rateLimitPerMinute?: number;
-    };
-    instagram?: {
-        historyTokenBudget?: number;
-        ownerIgIds?: string[];
-        allowedIgIds?: string[];
-        rateLimitPerMinute?: number;
-    };
-    twitter?: {
-        historyTokenBudget?: number;
-        ownerIds?: string[];
-        allowedUserIds?: string[];
-        pollIntervalMs?: number;
-        rateLimitPerMinute?: number;
-    };
-    reddit?: {
-        historyTokenBudget?: number;
-        ownerUsernames?: string[];
-        pollIntervalMs?: number;
-        rateLimitPerMinute?: number;
-    };
-    youtube?: {
-        historyTokenBudget?: number;
-        ownerChannelIds?: string[];
-        pollIntervalMs?: number;
-        rateLimitPerMinute?: number;
-    };
-    sms?: {
-        historyTokenBudget?: number;
-        ownerPhones?: string[];
-        allowedPhones?: string[];
-        rateLimitPerMinute?: number;
-    };
-    voice?: {
-        historyTokenBudget?: number;
-        ownerPhones?: string[];
-        allowedPhones?: string[];
-        rateLimitPerMinute?: number;
-    };
+    channels: ChannelsConfig;
     llm: LLMConfig;
     agent: AgentConfig;
     browserAgent: BrowserAgentConfig;

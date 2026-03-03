@@ -98,7 +98,7 @@ async function start(config: AppConfig) {
                 const final = await stream.finalize();
                 history = trimHistory(
                     [...history, { role: "user", content: text }, ...final.responseMessages],
-                    config.terminal.historyTokenBudget
+                    config.channels.terminal.historyTokenBudget
                 );
                 saveHistory(sessionKey, history);
             } catch (err: any) {

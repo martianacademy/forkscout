@@ -58,7 +58,7 @@ function hasMedia(message: any): boolean {
 /** Process a batch of incoming messages from a Baileys messages.upsert event. */
 export function processIncomingMessages(sock: Sock, messages: any[]): void {
     const config = getConfig();
-    const wa = config.whatsapp;
+    const wa = config.channels.whatsapp;
 
     for (const msg of messages) {
         if (msg.key.fromMe) continue;
@@ -100,7 +100,7 @@ export function processIncomingMessages(sock: Sock, messages: any[]): void {
 /** Enqueue a validated message for sequential processing per chat. */
 function enqueueMessage(
     config: AppConfig, sock: Sock, remoteJid: string, senderJid: string,
-    senderName: string, rawMsg: any, role: "owner" | "user", wa: AppConfig["whatsapp"],
+    senderName: string, rawMsg: any, role: "owner" | "user", wa: AppConfig["channels"]["whatsapp"],
 ): void {
     const isGroup = remoteJid.endsWith("@g.us");
     const chatKey = isGroup ? remoteJid : senderJid;
@@ -134,7 +134,7 @@ function enqueueMessage(
 async function handleMessage(
     config: AppConfig, sock: Sock, remoteJid: string, senderName: string,
     rawMsg: any, role: "owner" | "user", sessionKey: string,
-    wa: AppConfig["whatsapp"], abortSignal: AbortSignal,
+    wa: AppConfig["channels"]["whatsapp"], abortSignal: AbortSignal,
 ): Promise<void> {
     const compiledMsg = compileWhatsAppMessage(rawMsg);
     appendHistory(sessionKey, [compiledMsg]);
