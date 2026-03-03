@@ -22,7 +22,6 @@ const organizationSchema = {
     logo: `${siteUrl}/logo.svg`,
     sameAs: [
         "https://github.com/marsnext/forkscout",
-        "https://github.com/marsnext/forkscout-frontend",
     ],
 };
 

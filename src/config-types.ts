@@ -175,25 +175,24 @@ export interface AppConfig {
     agent: AgentConfig;
     browserAgent: BrowserAgentConfig;
     browser: {
-        headless: boolean;
-        profileDir: string;
-        screenshotQuality: number;
-        chromePath?: string;
-        extraArgs?: string[];
+        headless: boolean; profileDir: string; screenshotQuality: number;
+        chromePath?: string; extraArgs?: string[];
         viewport?: { width: number; height: number };
-        userAgent?: string;
-        locale?: string;
-        timezone?: string;
+        userAgent?: string; locale?: string; timezone?: string;
         context?: Record<string, unknown>;
+    };
+    speech?: {
+        enabled: boolean;
+        ttsProvider: "elevenlabs" | "openai" | "google" | "openrouter";
+        ttsModel: string; ttsVoice: string;
+        sttProvider: "elevenlabs" | "openai" | "google" | "openrouter";
+        sttModel: string; language: string;
     };
     toolDefaults?: ToolDefaults;
     skills?: { dirs?: string[] };
     n8n?: N8nConfig;
     embeddings?: {
-        enabled: boolean;
-        provider: "openrouter" | "google";
-        model: string;
-        topK: number;
-        chunkMaxTokens: number;
+        enabled: boolean; provider: "openrouter" | "google"; model: string;
+        topK: number; chunkMaxTokens: number;
     };
 }

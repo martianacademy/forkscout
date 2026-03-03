@@ -97,7 +97,7 @@ export function HeroSection() {
                     <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
                         <Button size="lg" variant="outline" className="gap-2 border-purple-500/20 px-6 hover:border-purple-500/40 hover:bg-purple-500/5" asChild>
                             <a
-                                href="https://github.com/marsnext/forkscout-frontend"
+                                href="https://github.com/marsnext/forkscout"
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >

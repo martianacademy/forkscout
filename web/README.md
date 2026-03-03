@@ -6,7 +6,7 @@
   <p>
     <a href="https://www.forkscout.com">Website</a> ·
     <a href="https://github.com/marsnext/forkscout">Agent Repo</a> ·
-    <a href="https://github.com/marsnext/forkscout-frontend/issues">Issues</a>
+    <a href="https://github.com/marsnext/forkscout/issues">Issues</a>
   </p>
 </div>
 
@@ -50,8 +50,8 @@ Marketing and documentation landing page for **ForkScout** — an autonomous AI 
 
 ```bash
 # Clone
-git clone https://github.com/marsnext/forkscout-frontend.git
-cd forkscout-frontend
+git clone https://github.com/marsnext/forkscout.git
+cd forkscout
 
 # Install dependencies
 bun install
@@ -107,7 +107,7 @@ Hosted on [Vercel](https://vercel.com). Every push to `main` triggers automatic 
 
 ### Deploy Your Own
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/marsnext/forkscout-frontend)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/marsnext/forkscout)
 
 ## Related Repos
 
