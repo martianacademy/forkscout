@@ -45,7 +45,6 @@ async function loadOnDemandTools(): Promise<ToolEntry[]> {
         const mod = (await import(resolve(AGENTS_TOOLS_DIR, file))) as Record<string, unknown>;
 
         for (const [key, value] of Object.entries(mod)) {
-            if (key === "IS_BOOTSTRAP_TOOL") continue;
             if (
                 typeof value !== "object" ||
                 value === null ||

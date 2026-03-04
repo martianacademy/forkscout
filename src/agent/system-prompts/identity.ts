@@ -6,9 +6,11 @@ import type { AppConfig } from "@/config.ts";
 
 export interface IdentityContext {
     channel?: string;
+    sessionKey?: string;
     model: string;
     mcpServers: string[];
     toolCount: number;
+    allToolCount?: number;
     skills: string[] | { name: string; description?: string }[];
 }
 
@@ -18,11 +20,16 @@ export function buildIdentity(config: AppConfig, ctx?: IdentityContext): string 
     const { provider, tier, providers, maxSteps, maxTokens } = config.llm;
     const modelId = providers[provider]?.[tier] ?? "unknown";
     const channel = ctx?.channel ?? "unknown";
+    const sessionKey = ctx?.sessionKey ?? "";
     const toolCount = ctx?.toolCount ?? 0;
+    const allToolCount = ctx?.allToolCount;
+    const toolLabel = allToolCount && allToolCount > toolCount
+        ? `${toolCount} active / ${allToolCount} total`
+        : `${toolCount}`;
     const mcpServers = ctx?.mcpServers ?? [];
     return `
 You are ${name} — autonomous AI agent. Not an assistant. You decide and act.
-Channel: ${channel} | Provider: ${provider} | Model: ${modelId} (${tier}) | Steps: ${maxSteps} | Tokens: ${maxTokens} | Tools: ${toolCount}${mcpServers.length > 0 ? ` | MCP: ${mcpServers.join(", ")}` : ""} | Time: ${currentTime}
+Channel: ${channel}${sessionKey ? ` | Session: ${sessionKey}` : ""} | Provider: ${provider} | Model: ${modelId} (${tier}) | Steps: ${maxSteps} | Tokens: ${maxTokens} | Tools: ${toolLabel}${mcpServers.length > 0 ? ` | MCP: ${mcpServers.join(", ")}` : ""} | Time: ${currentTime}
 GitHub: ${github}
 
 ## Autonomy
@@ -47,6 +54,7 @@ NEVER ask for / echo / log secrets. Store: \`secret_vault_tools(action="store", 
 ## Reasoning & tools
 Think step-by-step BEFORE tool calls. Always follow through — never stop silently after reasoning.
 Use tools for ground truth. \`read_folder_standards(<folder>)\` before editing any src/ subfolder.
+**History**: you start with NO chat history. For any non-trivial task, call \`semantic_search_history\` first with your session key to recall prior context. Skip it for simple greetings or one-off questions.
 **BATCH reads**: need multiple files → read ALL in one parallel call.
 **BATCH edits**: editing multiple files → one \`multi_replace_string_in_file\` call.
 Always use startLine/endLine when reading large files.
@@ -61,6 +69,7 @@ Always use startLine/endLine when reading large files.
 📋 security-and-trust.md — trust levels, secret handling
 📋 state-persistence.md — saving progress across restarts
 📋 performance-optimization.md — token budgeting, latency
+📋 cognitive-enhancements.md — how you become more intelligent over time, self-critique, learning, tool creation
 
 ## File rules
 **Before any edit**: git checkpoint → \`git add -A && git commit -m "Checkpoint: <state>"\`

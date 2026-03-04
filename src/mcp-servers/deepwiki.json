@@ -1,5 +1,6 @@
 {
     "name": "deepwiki",
     "enabled": true,
+    "bootstrap": true,
     "url": "https://mcp.deepwiki.com/mcp"
 }

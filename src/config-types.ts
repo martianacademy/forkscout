@@ -42,6 +42,8 @@ export interface LLMConfig {
     reasoningTag?: string;
     llmSummarizeMaxTokens?: number;
     toolResultAutoCompressWords?: number;
+    /** When true, runs a structured planning step before each agent run using the fast model tier */
+    planFirst?: boolean;
     providers: { [provider: string]: ProviderConfig };
 }
 

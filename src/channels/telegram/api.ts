@@ -36,7 +36,12 @@ export async function setMessageReaction(token: string, chatId: number, messageI
             body: JSON.stringify({ chat_id: chatId, message_id: messageId, reaction: [{ type: "emoji", emoji }] }),
         });
         const data = await res.json() as { ok: boolean; description?: string };
-        if (!data.ok) { logger.error(`setMessageReaction rejected: ${data.description}`); return false; }
+        if (!data.ok) {
+            // "Not Found" = message was deleted before reaction — expected, not an error
+            if (data.description?.includes("Not Found")) return false;
+            logger.warn(`setMessageReaction rejected: ${data.description}`);
+            return false;
+        }
         return true;
     } catch (err) { logger.error("setMessageReaction failed:", err); return false; }
 }

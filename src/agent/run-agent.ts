@@ -8,6 +8,8 @@ import { withRetry } from "@/llm/index.ts";
 import { sanitizeForDisplay } from "@/utils/secrets.ts";
 import { buildAgentParams } from "@/agent/build-params.ts";
 import { wrapToolsWithProgress } from "@/agent/tool-wrappers.ts";
+import { planTask, formatPlanAsContext } from "@/agent/planner.ts";
+import type { TaskPlan } from "@/agent/planner.ts";
 import type { AgentRunOptions, AgentRunResult } from "@/agent/types.ts";
 
 const logger = log("agent");
@@ -29,6 +31,20 @@ export async function runAgent(
     const reasoningTag = config.llm.reasoningTag?.trim();
 
     activity.msgIn(channel ?? "unknown", chatId, sanitizeForDisplay(options.userMessage));
+
+    // ── Optional structured planning step ─────────────────────────────────────
+    let taskPlan: TaskPlan | null = null;
+    let planMessages = messages;
+    if (config.llm.planFirst) {
+        taskPlan = await planTask(model, options.userMessage);
+        if (taskPlan) {
+            const planCtx = formatPlanAsContext(taskPlan);
+            planMessages = [
+                { role: "system", content: planCtx } as ModelMessage,
+                ...messages,
+            ];
+        }
+    }
 
     // ── FAKE_LLM mode — bypass real LLM, log assembled messages, return stub ─
     if (process.env.FAKE_LLM === "1") {
@@ -53,7 +69,7 @@ export async function runAgent(
     const result = await withRetry(() => generateText({
         model,
         system: systemPrompt,
-        messages,
+        messages: planMessages,
         tools: toolsForRun as any,
         stopWhen: stepCountIs(config.llm.maxSteps),
         maxTokens: config.llm.maxTokens,
@@ -82,7 +98,7 @@ export async function runAgent(
     if (!strippedText.trim()) {
         logger.warn("[runAgent] empty text after reasoning strip — retrying with nudge");
         const retryMessages: ModelMessage[] = [
-            ...messages,
+            ...planMessages,
             ...(result.response.messages as ModelMessage[]),
             { role: "user", content: "[SYSTEM] You finished reasoning but produced no visible response. Respond to the user now — do NOT think silently again." } as ModelMessage,
         ];
@@ -107,5 +123,5 @@ export async function runAgent(
 
     const cleanText = strippedText.trim() || "(I finished thinking but produced no response. Please ask again or rephrase.)";
     activity.msgOut(channel ?? "unknown", chatId, cleanText, finalResult.steps?.length ?? 0, Date.now() - startMs);
-    return { text: cleanText, steps: finalResult.steps?.length ?? 0, bootstrapToolNames: Object.keys(bootstrapTools), responseMessages: finalResult.response.messages as ModelMessage[] };
+    return { text: cleanText, steps: finalResult.steps?.length ?? 0, bootstrapToolNames: Object.keys(bootstrapTools), responseMessages: finalResult.response.messages as ModelMessage[], ...(taskPlan ? { plan: taskPlan } : {}) };
 }

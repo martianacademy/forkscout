@@ -27,15 +27,17 @@ function loadRoleExtension(role: "owner" | "admin" | "user" | "self"): string {
 }
 
 export async function buildAgentParams(config: AppConfig, options: AgentRunOptions) {
-    const [{ allTools, bootstrapTools }, mcpTools] = await Promise.all([
+    const [{ allTools, bootstrapTools }, { allMcpTools, bootstrapMcpTools }] = await Promise.all([
         discoverTools(),
         discoverMcpTools(),
     ]);
     const skills = getSkills(config);
 
     const excluded = new Set(options.excludeTools ?? []);
+    // Only bootstrap tools are injected into the agent by default.
+    // src/tools/ are all bootstrap. MCP tools are bootstrap only if "bootstrap": true in their config.
     const rawTools = Object.fromEntries(
-        Object.entries({ ...allTools, ...mcpTools }).filter(([k]) => !excluded.has(k))
+        Object.entries({ ...bootstrapTools, ...bootstrapMcpTools }).filter(([k]) => !excluded.has(k))
     );
 
     const secretSafeTools = wrapToolsWithSecretHandling(rawTools);
@@ -46,16 +48,18 @@ export async function buildAgentParams(config: AppConfig, options: AgentRunOptio
     const baseModel = getProvider(provider).chat(modelId);
 
     const mcpServers = [...new Set(
-        Object.keys(mcpTools)
+        Object.keys(allMcpTools)
             .map((k) => k.split("__")[0])
             .filter(Boolean)
     )];
 
     const ctx: IdentityContext = {
         channel: options.meta?.channel,
+        sessionKey: options.meta?.sessionKey,
         model: `${provider}/${modelId}`,
         mcpServers,
         toolCount: Object.keys(tools).length,
+        allToolCount: Object.keys({ ...allTools, ...allMcpTools }).length,
         skills,
     };
 

@@ -23,6 +23,8 @@ export interface McpServerConfig {
     name: string;
     /** false = skip without deleting the file */
     enabled: boolean;
+    /** true = included in the initial tool set passed to the agent (default: false) */
+    bootstrap?: boolean;
     /** stdio transport */
     command?: string;
     args?: string[];
@@ -33,7 +35,12 @@ export interface McpServerConfig {
     headers?: Record<string, string>;
 }
 
-let _cache: Record<string, Tool> | null = null;
+export interface McpDiscoveryResult {
+    allMcpTools: Record<string, Tool>;
+    bootstrapMcpTools: Record<string, Tool>;
+}
+
+let _cache: McpDiscoveryResult | null = null;
 let _configSnapshot = "";
 let _activeClients: Client[] = [];
 
@@ -93,7 +100,8 @@ export function forceReDiscover(): void {
 /** Load and connect a single MCP server from a config file */
 async function loadMcpServer(
     filePath: string,
-    allTools: Record<string, Tool>
+    allTools: Record<string, Tool>,
+    bootstrapTools: Record<string, Tool>
 ): Promise<void> {
     const config = getConfig();
     let mcpConfig: McpServerConfig;
@@ -155,7 +163,7 @@ async function loadMcpServer(
 
         for (const t of tools) {
             const toolName = `${mcpConfig.name}__${t.name}`;
-            allTools[toolName] = tool({
+            const mcpTool = tool({
                 description: t.description ?? toolName,
                 inputSchema: z.object({}).passthrough(),
                 execute: async (input) => {
@@ -176,16 +184,19 @@ async function loadMcpServer(
                     }
                 }
             });
+            allTools[toolName] = mcpTool;
+            if (mcpConfig.bootstrap === true) bootstrapTools[toolName] = mcpTool;
         }
 
-        logger.info(`"${mcpConfig.name}" connected — ${tools.length} tools loaded`);
+        const tag = mcpConfig.bootstrap === true ? " [bootstrap]" : "";
+        logger.info(`"${mcpConfig.name}" connected — ${tools.length} tools loaded${tag}`);
         _activeClients.push(client);
     } catch (err) {
         logger.error(`Failed to connect "${mcpConfig.name}":`, err);
     }
 }
 
-export async function discoverMcpTools(): Promise<Record<string, Tool>> {
+export async function discoverMcpTools(): Promise<McpDiscoveryResult> {
     const snapshot = getConfigSnapshot();
     if (_cache && snapshot === _configSnapshot) return _cache;
 
@@ -206,17 +217,18 @@ export async function discoverMcpTools(): Promise<Record<string, Tool>> {
     const extendedFiles = scanMcpDir(extendedDir);
 
     const allTools: Record<string, Tool> = {};
+    const bootstrapTools: Record<string, Tool> = {};
 
     // Load core configs first
     for (const file of coreFiles) {
-        await loadMcpServer(resolve(coreDir, file), allTools);
+        await loadMcpServer(resolve(coreDir, file), allTools, bootstrapTools);
     }
 
     // Then load extended configs (can override core with same name)
     for (const file of extendedFiles) {
-        await loadMcpServer(resolve(extendedDir, file), allTools);
+        await loadMcpServer(resolve(extendedDir, file), allTools, bootstrapTools);
     }
 
-    _cache = allTools;
-    return allTools;
+    _cache = { allMcpTools: allTools, bootstrapMcpTools: bootstrapTools };
+    return _cache;
 }

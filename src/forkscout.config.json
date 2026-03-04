@@ -45,11 +45,12 @@
         "maxTokens": 4096
     },
     "llm": {
-        "provider": "lmstudio",
-        "tier": "powerful",
+        "provider": "openrouter",
+        "tier": "balanced",
         "maxTokens": 2000,
         "maxSteps": 200,
         "reasoningTag": "think",
+        "planFirst": false,
         "llmSummarizeMaxTokens": 1200,
         "toolResultAutoCompressWords": 400,
         "providers": {

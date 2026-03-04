@@ -1,5 +1,6 @@
 // src/agent/types.ts — Agent public interface types
 import type { ModelMessage } from "ai";
+import type { TaskPlan } from "@/agent/planner.ts";
 
 export interface AgentRunOptions {
     userMessage: string;
@@ -9,7 +10,7 @@ export interface AgentRunOptions {
     /** Tool names to exclude from this run (e.g. restricted tools for non-owner users) */
     excludeTools?: string[];
     /** Optional channel metadata for activity logging */
-    meta?: { channel?: string; chatId?: number | string; };
+    meta?: { channel?: string; chatId?: number | string; sessionKey?: string; };
     /** Abort signal — when triggered, cancels the in-flight LLM call and stream */
     abortSignal?: AbortSignal;
     /**
@@ -43,6 +44,8 @@ export interface AgentRunResult {
     bootstrapToolNames: string[];
     /** Full messages from this turn (including tool calls/results) — append to history */
     responseMessages: ModelMessage[];
+    /** Structured task plan produced before the run (only when config.llm.planFirst=true) */
+    plan?: TaskPlan;
 }
 
 export interface StreamAgentResult {

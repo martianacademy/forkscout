@@ -63,7 +63,6 @@ async function scanDirectory(
             const mod = (await import(resolve(dir, file))) as Record<string, unknown>;
 
             for (const [key, value] of Object.entries(mod)) {
-                if (key === "IS_BOOTSTRAP_TOOL") continue;
                 if (
                     typeof value === "object" &&
                     value !== null &&

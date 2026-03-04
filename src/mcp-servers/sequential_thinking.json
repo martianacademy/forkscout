@@ -1,6 +1,10 @@
 {
     "name": "sequential_thinking",
     "enabled": true,
+    "bootstrap": true,
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+    ]
 }

@@ -6,8 +6,7 @@ import type { Message } from "@grammyjs/types";
 import { streamAgent } from "@/agent/index.ts";
 import { sendMessage, editMessage, deleteMessage, setMessageReaction, sendTyping } from "@/channels/telegram/api.ts";
 import { mdToHtml, splitMarkdown, stripHtml } from "@/channels/telegram/format.ts";
-import { appendHistory, loadHistory } from "@/channels/chat-store.ts";
-import { embedNewTurns } from "@/channels/history-embeddings.ts";
+import { saveSemanticTurn, summarizeAssistantResponse, extractToolsUsed } from "@/channels/semantic-store.ts";
 import { TOOL_LABELS, toolInputPreview } from "@/channels/telegram/tool-progress.ts";
 import { log } from "@/logs/logger.ts";
 import { sleep } from "@/channels/telegram/api-utils.ts";
@@ -51,7 +50,6 @@ export async function streamReply(
 
     let responseMsgId: number | null = null;
     let responseText = "";
-    let thinkingSuffix = "";
     let toolBubbleId: number | null = null;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let firstToken = true;
@@ -63,22 +61,12 @@ export async function streamReply(
 
     const flushToTelegram = async (): Promise<void> => {
         const cleanText = thinkStripRe ? responseText.replace(thinkStripRe, "").trim() : responseText;
-        if (!cleanText && !thinkingSuffix) return;
-        let display: string;
-        let parseMode: "HTML" | undefined;
-        if (thinkingSuffix) {
-            const esc = cleanText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            display = esc + thinkingSuffix;
-            parseMode = "HTML";
-        } else {
-            display = cleanText;
-            parseMode = undefined;
-        }
-        const safe = display.length > 3900 ? display.slice(0, 3897) + "…" : display;
+        if (!cleanText) return;
+        const safe = cleanText.length > 3900 ? cleanText.slice(0, 3897) + "…" : cleanText;
         if (responseMsgId) {
-            await editMessage(token, chatId, responseMsgId, safe, parseMode).catch(() => { });
+            await editMessage(token, chatId, responseMsgId, safe).catch(() => { });
         } else {
-            responseMsgId = await sendMessage(token, chatId, safe, parseMode).catch(() => null);
+            responseMsgId = await sendMessage(token, chatId, safe).catch(() => null);
         }
     };
 
@@ -100,21 +88,15 @@ export async function streamReply(
         if (hadToolCalls && toolBubbleId) { await deleteMessage(token, chatId, toolBubbleId).catch(() => { }); toolBubbleId = null; }
     };
 
-    const onThinking = async (text: string): Promise<void> => {
-        const escaped = text.slice(0, 200).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        thinkingSuffix = `\n\n<i>💭 ${escaped}</i>`;
-        scheduleFlush();
-    };
-
     let streamResult: Awaited<ReturnType<typeof streamAgent>>;
     try {
         streamResult = await streamAgent(config, {
             userMessage: currentContent, chatHistory, role,
-            meta: { channel: "telegram", chatId }, abortSignal, onToolCall, onStepFinish, onThinking,
+            meta: { channel: "telegram", chatId, sessionKey }, abortSignal, onToolCall, onStepFinish,
         });
         for await (const token_text of streamResult.textStream) {
             if (firstToken) {
-                firstToken = false; thinkingActive = false; thinkingSuffix = "";
+                firstToken = false; thinkingActive = false;
                 if (thinkingMsgId) { const _id = thinkingMsgId; thinkingMsgId = null; await deleteMessage(token, chatId, _id).catch(() => { }); }
             }
             responseText += token_text;
@@ -138,8 +120,12 @@ export async function streamReply(
 
     const result = await streamResult!.finalize();
     if (toolBubbleId) await deleteMessage(token, chatId, toolBubbleId).catch(() => { });
-    appendHistory(sessionKey, result.responseMessages);
-    embedNewTurns(sessionKey, loadHistory(sessionKey));
+    saveSemanticTurn(sessionKey, {
+        ts: Date.now(),
+        user: currentContent,
+        assistant: result.text?.trim() ?? summarizeAssistantResponse(result.responseMessages),
+        tools: extractToolsUsed(result.responseMessages),
+    });
 
     const replyText = result.text?.trim();
     if (!replyText) {
