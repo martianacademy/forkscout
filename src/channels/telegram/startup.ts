@@ -39,7 +39,7 @@ async function autoContinueTask(token: string, ownerChatId: number, reason: stri
             const result = await runAgent(getConfig(), { userMessage: selfMessage, role: "self", meta: { channel: "telegram", chatId: ownerChatId } });
             if (result.text) {
                 for (const chunk of splitMarkdown(result.text).map(mdToHtml)) {
-                    await sendMessage(token, ownerChatId, chunk, "HTML", true).catch(() => { });
+                    await sendMessage(token, ownerChatId, chunk, "HTML").catch(() => { });
                 }
             }
             logger.info(`Auto-continue task completed (${result.steps} steps)`);

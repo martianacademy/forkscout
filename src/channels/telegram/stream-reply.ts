@@ -37,14 +37,14 @@ export async function streamReply(
     const thinkingLoop = (async () => {
         let typingCounter = 0;
         while (thinkingActive) {
-            await sleep(500);
+            await sleep(2000);  // 2s cadence — keeps well under Telegram's ~20 edits/min limit
             if (!thinkingActive) break;
             dotIdx = (dotIdx + 1) % DOTS.length;
             if (thinkingMsgId) {
                 await editMessage(token, chatId, thinkingMsgId, `⚡ Thinking${DOTS[dotIdx]}`).catch(() => { });
             }
             typingCounter++;
-            if (typingCounter % 8 === 0) sendTyping(token, chatId).catch(() => { });
+            if (typingCounter % 2 === 0) sendTyping(token, chatId).catch(() => { });  // every ~4s
         }
     })();
 

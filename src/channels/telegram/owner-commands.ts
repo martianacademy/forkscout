@@ -33,7 +33,7 @@ export async function handleOwnerCommand(token: string, chatId: number, ownerUse
         addToAuthAllowList(targetId);
         if (req) {
             saveRequests(updateRequestStatus(requests, targetId, "approved", ownerUserId));
-            await sendMessage(token, req.chatId, "✅ Your access request has been approved!").catch(() => {});
+            await sendMessage(token, req.chatId, "✅ Your access request has been approved!").catch(() => { });
         }
         const name = req ? (req.firstName ? `${req.firstName}${req.username ? ` (@${req.username})` : ""}` : `User ${targetId}`) : `User ${targetId}`;
         await sendMessage(token, chatId, `✅ <b>${name}</b> (<code>${targetId}</code>) approved.`, "HTML");
@@ -47,7 +47,7 @@ export async function handleOwnerCommand(token: string, chatId: number, ownerUse
         const req = requests.find((r) => r.userId === targetId);
         if (req) {
             saveRequests(updateRequestStatus(requests, targetId, "denied", ownerUserId));
-            await sendMessage(token, req.chatId, "⛔ Your access request was denied.").catch(() => {});
+            await sendMessage(token, req.chatId, "⛔ Your access request was denied.").catch(() => { });
         }
         const name = req ? (req.firstName ? `${req.firstName}${req.username ? ` (@${req.username})` : ""}` : `User ${targetId}`) : `User ${targetId}`;
         await sendMessage(token, chatId, `⛔ <b>${name}</b> (<code>${targetId}</code>) denied.`, "HTML");
@@ -77,20 +77,6 @@ export async function handleOwnerCommand(token: string, chatId: number, ownerUse
         return;
     }
 
-    if (cmd === "/backfill") {
-        const { backfillEmbeddings } = await import("@/channels/history-embeddings.ts");
-        const { loadHistory: loadH } = await import("@/channels/chat-store.ts");
-        const history = loadH(`telegram-${chatId}`);
-        if (!history.length) { await sendMessage(token, chatId, "⚠️ No history to embed."); return; }
-        await sendMessage(token, chatId, `🔄 Backfilling ${history.length} messages...`);
-        try {
-            const result = await backfillEmbeddings(`telegram-${chatId}`, history);
-            await sendMessage(token, chatId, `✅ <b>Backfill complete.</b>\n• Turns: <code>${result.chunksEmbedded}</code>\n• Tokens: <code>${result.totalTokens}</code>`, "HTML");
-        } catch (err: any) {
-            await sendMessage(token, chatId, `❌ Backfill failed: <code>${String(err?.message ?? err).slice(0, 300)}</code>`, "HTML");
-        }
-        return;
-    }
     // Unknown owner command — silently ignore
 }
 

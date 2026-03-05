@@ -7,8 +7,7 @@
 import type { AppConfig } from "@/config.ts";
 import { getConfig } from "@/config.ts";
 import { streamAgent } from "@/agent/index.ts";
-import { prepareHistory } from "@/channels/prepare-history.ts";
-import { loadHistory, appendHistory } from "@/channels/chat-store.ts";
+import { buildChatHistory, saveSemanticTurn, extractToolsUsed } from "@/channels/semantic-store.ts";
 import { log } from "@/logs/logger.ts";
 import { makeWASocket } from "@whiskeysockets/baileys";
 import { getRole } from "@/channels/whatsapp/auth.ts";
@@ -137,13 +136,7 @@ async function handleMessage(
     wa: AppConfig["channels"]["whatsapp"], abortSignal: AbortSignal,
 ): Promise<void> {
     const compiledMsg = compileWhatsAppMessage(rawMsg);
-    appendHistory(sessionKey, [compiledMsg]);
-
-    const allHistory = prepareHistory(
-        loadHistory(sessionKey),
-        { tokenBudget: wa?.historyTokenBudget ?? 12000 },
-    );
-    const chatHistory = allHistory.slice(0, -1);
+    const chatHistory = buildChatHistory(sessionKey);
     const roleTag = role === "owner" ? "OWNER" : "USER";
     const rawContent = typeof compiledMsg.content === "string"
         ? compiledMsg.content
@@ -182,7 +175,12 @@ async function handleMessage(
                 await sleep(500);
             }
         }
-        appendHistory(sessionKey, result.responseMessages);
+        saveSemanticTurn(sessionKey, {
+            ts: Date.now(),
+            user: `[${roleTag}] ${rawContent}`,
+            assistant: replyText,
+            tools: extractToolsUsed(result.responseMessages),
+        });
     } catch (err) {
         composingActive = false; await composingLoop;
         await sock.sendPresenceUpdate("paused", remoteJid).catch(() => { });

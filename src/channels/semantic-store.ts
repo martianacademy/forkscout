@@ -2,7 +2,7 @@
 // Stores compressed turn summaries in JSONL. No embeddings needed.
 // Used as the history context passed to the agent at the start of each new message.
 
-import { appendFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import type { ModelMessage } from "ai";
 import { LOG_DIR } from "@/logs/activity-log.ts";
@@ -26,6 +26,14 @@ function sessionPath(sessionKey: string): string {
 export function saveSemanticTurn(sessionKey: string, turn: SemanticTurn): void {
     try {
         appendFileSync(sessionPath(sessionKey), JSON.stringify(turn) + "\n", "utf-8");
+    } catch { /* best effort */ }
+}
+
+/** Wipe all history for a session */
+export function clearSemanticHistory(sessionKey: string): void {
+    try {
+        const p = sessionPath(sessionKey);
+        if (existsSync(p)) writeFileSync(p, "", "utf-8");
     } catch { /* best effort */ }
 }
 

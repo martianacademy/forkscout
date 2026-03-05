@@ -6,8 +6,7 @@
 import type { AppConfig } from "@/config.ts";
 import type { ModelMessage } from "ai";
 import { streamAgent } from "@/agent/index.ts";
-import { prepareHistory } from "@/channels/prepare-history.ts";
-import { loadHistory, appendHistory } from "@/channels/chat-store.ts";
+import { buildChatHistory, saveSemanticTurn, extractToolsUsed } from "@/channels/semantic-store.ts";
 import { log } from "@/logs/logger.ts";
 
 export interface ChannelAdapterOpts {
@@ -51,10 +50,7 @@ export function createChannelHandler(opts: ChannelAdapterOpts) {
     ): Promise<void> {
         const sessionKey = `${opts.channel}-${chatId}`;
         const compiled: ModelMessage = { role: "user", content: JSON.stringify(rawMsg) };
-        appendHistory(sessionKey, [compiled]);
-
-        const all = prepareHistory(loadHistory(sessionKey), { tokenBudget: budget });
-        const chatHistory = all.slice(0, -1);
+        const chatHistory = buildChatHistory(sessionKey);
         const roleTag = role === "owner" ? "OWNER" : role === "admin" ? "ADMIN" : "USER";
         const content = typeof compiled.content === "string" ? compiled.content : JSON.stringify(compiled.content);
 
@@ -82,7 +78,12 @@ export function createChannelHandler(opts: ChannelAdapterOpts) {
                 await opts.sendReply(chatId, reply.slice(i, i + maxLen));
             }
         }
-        appendHistory(sessionKey, result.responseMessages);
+        saveSemanticTurn(sessionKey, {
+            ts: Date.now(),
+            user: `[${roleTag}] ${content}`,
+            assistant: reply,
+            tools: extractToolsUsed(result.responseMessages),
+        });
     }
 
     /** Enqueue a message for sequential processing per chat. */

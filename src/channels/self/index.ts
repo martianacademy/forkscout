@@ -22,9 +22,8 @@ import type { Channel } from "@/channels/types.ts";
 import type { AppConfig, SelfJobConfig } from "@/config.ts";
 import { getConfig } from "@/config.ts";
 import { runAgent } from "@/agent/index.ts";
-import { loadHistory, saveHistory } from "@/channels/chat-store.ts";
+import { buildChatHistory, saveSemanticTurn, extractToolsUsed } from "@/channels/semantic-store.ts";
 import { log } from "@/logs/logger.ts";
-import { encode } from "gpt-tokenizer";
 import type { ModelMessage } from "ai";
 import cron from "node-cron";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
@@ -82,44 +81,13 @@ function loadJobs(config: AppConfig): SelfJobConfig[] {
     return [...byName.values()];
 }
 
-// ── Token counting ────────────────────────────────────────────────────────────
-
-function countTokens(msg: ModelMessage): number {
-    if (typeof msg.content === "string") return encode(msg.content).length;
-    if (Array.isArray(msg.content)) {
-        return (msg.content as any[]).reduce((sum: number, p: any) => {
-            if (p.type === "text" && typeof p.text === "string") return sum + encode(p.text).length;
-            return sum + encode(JSON.stringify(p)).length;
-        }, 0);
-    }
-    return 0;
-}
-
-// ── History helpers ───────────────────────────────────────────────────────────
-
-function trimHistory(history: ModelMessage[], tokenBudget: number): ModelMessage[] {
-    let total = history.reduce((sum, m) => sum + countTokens(m), 0);
-    let trimmed = [...history];
-    while (total > tokenBudget && trimmed.length > 2) {
-        const removed = trimmed.shift()!;
-        total -= countTokens(removed);
-    }
-    // Must always start with a user message
-    while (trimmed.length > 0 && (trimmed[0] as any).role !== "user") {
-        trimmed.shift();
-    }
-    return trimmed;
-}
-
 // ── Job runner ────────────────────────────────────────────────────────────────
 
 /** Shared session key — all self-channel activity reads from and writes to this single history. */
 const SELF_SESSION_KEY = "self";
 
 async function runJob(config: AppConfig, job: SelfJobConfig): Promise<void> {
-    const budget = config.channels.self?.historyTokenBudget ?? 12000;
-    const history = trimHistory(loadHistory(SELF_SESSION_KEY), budget);
-
+    const history = buildChatHistory(SELF_SESSION_KEY);
     logger.info(`Running job: ${job.name}`);
 
     // Prefix with job name so the agent knows which cron fired
@@ -132,11 +100,12 @@ async function runJob(config: AppConfig, job: SelfJobConfig): Promise<void> {
             meta: { channel: "self", chatId: SELF_SESSION_KEY },
         });
 
-        const updated = trimHistory(
-            [...history, { role: "user", content: userMessage }, ...result.responseMessages],
-            budget,
-        );
-        saveHistory(SELF_SESSION_KEY, updated);
+        saveSemanticTurn(SELF_SESSION_KEY, {
+            ts: Date.now(),
+            user: userMessage,
+            assistant: result.text?.trim() ?? "",
+            tools: extractToolsUsed(result.responseMessages),
+        });
 
         logger.info(`Job "${job.name}" done (${result.steps} steps): ${result.text.slice(0, 120)}`);
 
@@ -148,7 +117,7 @@ async function runJob(config: AppConfig, job: SelfJobConfig): Promise<void> {
                 const { sendMessage } = await import("@/channels/telegram/api.ts");
                 const outText = `🤖 <b>${job.name}</b>\n\n${result.text}`;
                 for (const chatId of chatIds) {
-                    await sendMessage(token, chatId, outText, "HTML", true);
+                    await sendMessage(token, chatId, outText, "HTML");
                 }
             }
         }
@@ -513,13 +482,9 @@ async function handleHttpMessage(
     prompt: string,
     role: "owner" | "admin" | "user" | "self"
 ): Promise<{ ok: true; text: string; steps: number } | { ok: false; error: string }> {
-    const budget = config.channels.self?.historyTokenBudget ?? 12000;
-
     // ── 1. Load history — main chain only; workers start with empty context ───
     const isMainChain = sessionKey === SELF_SESSION_KEY;
-    const history: ModelMessage[] = isMainChain
-        ? trimHistory(loadHistory(SELF_SESSION_KEY), budget)
-        : [];
+    const history = isMainChain ? buildChatHistory(SELF_SESSION_KEY) : [];
 
     const roleTag = role === "self" ? "SELF" : role === "owner" ? "OWNER" : role === "admin" ? "ADMIN" : "USER";
     const taggedPrompt = `[${roleTag}] ${prompt}`;
@@ -543,11 +508,12 @@ async function handleHttpMessage(
 
     // ── 3. Save — always save for audit trail, regardless of main chain or worker
     const storageKey = isMainChain ? SELF_SESSION_KEY : `self-${sessionKey}`;
-    const updated = trimHistory(
-        [...history, { role: "user", content: taggedPrompt }, ...result.responseMessages],
-        budget,
-    );
-    saveHistory(storageKey, updated);
+    saveSemanticTurn(storageKey, {
+        ts: Date.now(),
+        user: taggedPrompt,
+        assistant: result.text?.trim() ?? "",
+        tools: extractToolsUsed(result.responseMessages),
+    });
 
     logger.info(`HTTP trigger done [${keyLabel}] (${result.steps} steps): ${result.text.slice(0, 120)}`);
 
@@ -627,8 +593,8 @@ export async function checkOrphanedMonitors(config: AppConfig): Promise<void> {
     const msg = lines.join("\n");
 
     for (const chatId of ownerIds) {
-        await sendMessage(token, chatId, msg, "Markdown", true).catch(() =>
-            sendMessage(token, chatId, msg.replace(/[*`]/g, ""), "", true)
+        await sendMessage(token, chatId, msg, "Markdown").catch(() =>
+            sendMessage(token, chatId, msg.replace(/[*`]/g, ""), "")
         );
     }
 }

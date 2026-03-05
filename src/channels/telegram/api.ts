@@ -4,6 +4,7 @@
 export {
     sendMessage, editMessage, sendMessageWithInlineKeyboard,
     answerCallbackQuery, editMessageReplyMarkup, deleteMessage,
+    getFile, downloadFile,
 } from "@/channels/telegram/api-core.ts";
 
 export {

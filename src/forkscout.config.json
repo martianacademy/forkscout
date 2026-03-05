@@ -48,7 +48,7 @@
         "provider": "openrouter",
         "tier": "balanced",
         "maxTokens": 2000,
-        "maxSteps": 200,
+        "maxSteps": 40,
         "reasoningTag": "think",
         "planFirst": false,
         "llmSummarizeMaxTokens": 1200,

@@ -4,7 +4,6 @@ import type { AppConfig } from "@/config.ts";
 import type { Message, Update } from "@grammyjs/types";
 import { sendMessage, sendMessageWithInlineKeyboard, answerCallbackQuery, editMessageReplyMarkup, setMessageReaction } from "@/channels/telegram/api.ts";
 import { compileTelegramMessage } from "@/channels/telegram/compile-message.ts";
-import { migrateSplitFiles } from "@/channels/telegram/migration-helpers.ts";
 import { streamReply } from "@/channels/telegram/stream-reply.ts";
 import { buildChatHistory } from "@/channels/semantic-store.ts";
 import { getRole, getVaultOwnerIds, addRuntimeAllowed, addRuntimeAdmin } from "@/channels/telegram/auth-helpers.ts";
@@ -15,8 +14,7 @@ const logger = log("telegram/message-handler");
 
 export async function handleMessage(config: AppConfig, token: string, chatId: number, rawMsg: Message, role: "owner" | "admin" | "user" = "user", abortSignal?: AbortSignal): Promise<void> {
     const sessionKey = `telegram-${chatId}`;
-    migrateSplitFiles(chatId);
-    const compiledMsg = compileTelegramMessage(rawMsg);
+    const compiledMsg = await compileTelegramMessage(rawMsg, token);
     await setMessageReaction(token, chatId, rawMsg.message_id, "👀").catch(() => { });
     const rawContent = typeof compiledMsg.content === "string" ? compiledMsg.content : JSON.stringify(compiledMsg.content);
     const roleTag = role === "owner" ? "OWNER" : role === "admin" ? "ADMIN" : "USER";

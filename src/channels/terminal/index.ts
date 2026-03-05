@@ -1,14 +1,12 @@
 // src/channels/terminal/index.ts — Terminal chat channel
 import * as readline from "readline";
 import * as os from "os";
-import { encode } from "gpt-tokenizer";
-import type { ModelMessage } from "ai";
 import type { AppConfig } from "@/config.ts";
 import type { Channel } from "@/channels/types.ts";
 import { streamAgent } from "@/agent/index.ts";
 import { LLMError } from "@/llm/index.ts";
 import { log } from "@/logs/logger.ts";
-import { loadHistory, saveHistory, clearHistory } from "@/channels/chat-store.ts";
+import { buildChatHistory, saveSemanticTurn, extractToolsUsed, clearSemanticHistory, loadSemanticTurns } from "@/channels/semantic-store.ts";
 
 const logger = log("terminal");
 
@@ -17,39 +15,10 @@ export default {
     start,
 } satisfies Channel;
 
-function countTokens(msg: ModelMessage): number {
-    if (typeof msg.content === "string") return encode(msg.content).length;
-    if (Array.isArray(msg.content)) {
-        return msg.content.reduce((sum, part) => {
-            if ("text" in part && typeof part.text === "string") return sum + encode(part.text).length;
-            return sum + 256;
-        }, 0);
-    }
-    return 0;
-}
-
-function trimHistory(history: ModelMessage[], tokenBudget: number): ModelMessage[] {
-    let total = history.reduce((sum, m) => sum + countTokens(m), 0);
-    let trimmed = [...history];
-    while (total > tokenBudget && trimmed.length > 2) {
-        const removed = trimmed.shift()!;
-        total -= countTokens(removed);
-    }
-    // AI SDK requires the first message to be from 'user'.
-    while (trimmed.length > 0 && (trimmed[0] as any).role !== "user") {
-        trimmed.shift();
-    }
-    return trimmed;
-}
-
 async function start(config: AppConfig) {
     const sessionKey = `terminal-${os.userInfo().username}`;
-
-    // Load history from disk — survives restarts
-    let history: ModelMessage[] = loadHistory(sessionKey);
-    if (history.length > 0) {
-        log("terminal").info(`Resumed session for ${sessionKey} (${history.length} messages)`);
-    }
+    const turns = loadSemanticTurns(sessionKey);
+    if (turns.length > 0) log("terminal").info(`Resumed session for ${sessionKey} (${turns.length} turns)`);
 
     const rl = readline.createInterface({
         input: process.stdin,
@@ -66,8 +35,7 @@ async function start(config: AppConfig) {
             if (!text) return ask();
 
             if (text === "/clear") {
-                history = [];
-                clearHistory(sessionKey);
+                clearSemanticHistory(sessionKey);
                 logger.info("history cleared");
                 return ask();
             }
@@ -83,9 +51,9 @@ async function start(config: AppConfig) {
             try {
                 const stream = await streamAgent(config, {
                     userMessage: text,
-                    chatHistory: history,
+                    chatHistory: buildChatHistory(sessionKey),
                     role: "owner",
-                    meta: { channel: "terminal" },
+                    meta: { channel: "terminal", sessionKey },
                 });
 
                 // Stream tokens live to terminal
@@ -94,13 +62,13 @@ async function start(config: AppConfig) {
                 }
                 process.stdout.write("\n\n");
 
-                // Collect final messages for history, trim, persist
                 const final = await stream.finalize();
-                history = trimHistory(
-                    [...history, { role: "user", content: text }, ...final.responseMessages],
-                    config.channels.terminal.historyTokenBudget
-                );
-                saveHistory(sessionKey, history);
+                saveSemanticTurn(sessionKey, {
+                    ts: Date.now(),
+                    user: text,
+                    assistant: final.text?.trim() ?? "",
+                    tools: extractToolsUsed(final.responseMessages),
+                });
             } catch (err: any) {
                 if (err instanceof LLMError) {
                     console.error(`\n\x1b[31m${err.classified.userMessage}\x1b[0m`);

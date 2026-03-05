@@ -5,7 +5,7 @@
 import type { AppConfig } from "@/config.ts";
 import type { ModelMessage } from "ai";
 import { runAgent, streamAgent } from "@/agent/index.ts";
-import { loadHistory, appendHistory, clearHistory } from "@/channels/chat-store.ts";
+import { buildChatHistory, saveSemanticTurn, extractToolsUsed, clearSemanticHistory, loadSemanticTurns } from "@/channels/semantic-store.ts";
 import { log } from "@/logs/logger.ts";
 
 const logger = log("openai-compat");
@@ -54,20 +54,11 @@ function sseChunk(data: unknown): string {
 
 /** Return server-side chat history as simple {role, content}[] for the web client. */
 export function handleGetHistory(): Response {
-    const history = loadHistory(WEB_SESSION_KEY);
-    // Convert ModelMessage[] to simple format the web client can use
-    const simple = history
-        .filter((m: any) => m.role === "user" || m.role === "assistant")
-        .map((m: any) => ({
-            role: m.role as string,
-            content: typeof m.content === "string"
-                ? m.content
-                : Array.isArray(m.content)
-                    ? (m.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join("")
-                    : "",
-        }))
-        .filter((m) => m.content.length > 0);
-
+    const turns = loadSemanticTurns(WEB_SESSION_KEY);
+    const simple = turns.map((t) => [
+        { role: "user", content: t.user },
+        { role: "assistant", content: t.assistant },
+    ]).flat().filter((m) => m.content.length > 0);
     return jsonResponse({ messages: simple });
 }
 
@@ -75,7 +66,7 @@ export function handleGetHistory(): Response {
 
 /** Clear server-side web chat history. */
 export function handleClearHistory(): Response {
-    clearHistory(WEB_SESSION_KEY);
+    clearSemanticHistory(WEB_SESSION_KEY);
     logger.info("web chat history cleared");
     return jsonResponse({ ok: true });
 }
@@ -138,11 +129,13 @@ export async function handleChatCompletion(
                 meta: { channel: "web" },
             });
 
-            // Save to server-side history
-            appendHistory(WEB_SESSION_KEY, [
-                { role: "user", content: userMessage } as ModelMessage,
-                ...result.responseMessages,
-            ]);
+            // Save to semantic history
+            saveSemanticTurn(WEB_SESSION_KEY, {
+                ts: Date.now(),
+                user: userMessage,
+                assistant: result.text?.trim() ?? "",
+                tools: extractToolsUsed(result.responseMessages),
+            });
 
             return jsonResponse({
                 id: requestId,
@@ -255,14 +248,16 @@ export async function handleChatCompletion(
                         hasText = true;
                     }
 
-                    // 3. Finalize agent run (internal bookkeeping + history save)
+                    // 3. Finalize agent run
                     const result = await finalize();
 
-                    // Save to server-side history
-                    appendHistory(WEB_SESSION_KEY, [
-                        { role: "user", content: userMessage } as ModelMessage,
-                        ...result.responseMessages,
-                    ]);
+                    // Save to semantic history
+                    saveSemanticTurn(WEB_SESSION_KEY, {
+                        ts: Date.now(),
+                        user: userMessage,
+                        assistant: result.text?.trim() ?? "",
+                        tools: extractToolsUsed(result.responseMessages),
+                    });
 
                     // 4. Stop chunk
                     enqueue(encoder.encode(sseChunk({

@@ -8,9 +8,9 @@ import { discoverTools } from "@/tools/auto_discover_tools.ts";
 import { discoverMcpTools } from "@/mcp-servers/auto_discover_mcp.ts";
 import { buildIdentity, type IdentityContext } from "@/agent/system-prompts/identity.ts";
 import { getSkills } from "@/skills/auto_discover_skills.ts";
-import { sanitizeForPrompt } from "@/channels/chat-store.ts";
+import { sanitizeForPrompt } from "@/utils/sanitize-messages.ts";
 import { sanitizeUserMessage } from "@/utils/secrets.ts";
-import { stripMedia } from "@/channels/prepare-history.ts";
+import { stripMedia } from "@/utils/sanitize-messages.ts";
 import {
     wrapToolsWithSecretHandling,
     wrapToolsWithErrorSafetyNet,
