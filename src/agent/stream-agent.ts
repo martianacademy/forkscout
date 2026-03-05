@@ -8,13 +8,15 @@ import { withRetry } from "@/llm/index.ts";
 import { sanitizeForDisplay } from "@/utils/secrets.ts";
 import { buildAgentParams } from "@/agent/build-params.ts";
 import { wrapToolsWithProgress } from "@/agent/tool-wrappers.ts";
+import { retryWithContextTrim } from "@/agent/context-retry.ts";
+import { stripReasoning, makeLoopGuard, NUDGE_PROMPT } from "@/agent/agent-utils.ts";
 import type { AgentRunOptions, AgentRunResult, StreamAgentResult } from "@/agent/types.ts";
 
 const logger = log("agent");
-
-function stripReasoning(text: string, tag?: string): string {
-    if (!tag) return text;
-    return text.replace(new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>\\n?`, "gi"), "").trim();
+const CONTEXT_OVERFLOW_PHRASES = ["tokens to keep from the initial prompt", "context_length", "context window", "exceeds model", "prompt is too long"];
+function isContextOverflow(payload: unknown): boolean {
+    const s = (typeof payload === "string" ? payload : JSON.stringify(payload ?? "")).toLowerCase();
+    return CONTEXT_OVERFLOW_PHRASES.some(p => s.includes(p));
 }
 
 export async function streamAgent(
@@ -27,78 +29,32 @@ export async function streamAgent(
     const { channel, chatId } = options.meta ?? {};
     const startMs = Date.now();
     const reasoningTag = config.llm.reasoningTag?.trim();
-
     activity.msgIn(channel ?? "unknown", chatId, sanitizeForDisplay(options.userMessage));
 
-    let streamStep = 0;
     const streamTools = options.onToolCall
         ? wrapToolsWithProgress(tools, options.onToolCall)
         : tools;
-
-    // Loop guard: abort if same tool called N+ consecutive steps, OR all tools failed N+ steps in a row
-    const loopAbort = new AbortController();
-    if (options.abortSignal) options.abortSignal.addEventListener("abort", () => loopAbort.abort());
-    const loopGuard = { lastTool: "", lastInputHash: "", count: 0, failStreak: 0 };
+    const { loopAbort, stepRef, onStepFinish } = makeLoopGuard(config, options, channel, chatId, "stream");
 
     const stream = streamText({
         model, system: systemPrompt, messages, tools: streamTools as any,
-        stopWhen: stepCountIs(config.llm.maxSteps),
-        maxTokens: config.llm.maxTokens,
+        stopWhen: stepCountIs(config.llm.maxSteps), maxTokens: config.llm.maxTokens,
         abortSignal: loopAbort.signal,
         ...(devtoolsEnabled && { experimental_telemetry: { isEnabled: true } }),
-        onStepFinish(step: any) {
-            streamStep++;
-            if (typeof step.reasoningText === "string" && step.reasoningText.trim()) {
-                logger.info(`[thinking step ${streamStep}]\n${step.reasoningText.trim()}`);
-            }
-            for (const tc of step.toolCalls ?? []) activity.toolCall(tc.toolName, tc.input, "agent", streamStep);
-            for (const tr of step.toolResults ?? []) activity.toolResult(tr.toolName, tr.output, undefined, "agent", streamStep);
-            if (options.onStepFinish) {
-                Promise.resolve(options.onStepFinish((step.toolCalls?.length ?? 0) > 0)).catch(() => { });
-            }
-            // Detect tight loops: same tool N+ consecutive WITH same input OR all-fail streak
-            const toolNames = (step.toolCalls ?? []).map((t: any) => t.toolName);
-            const maxConsec = config.llm.loopGuardMaxConsecutive ?? 3;
-            if (toolNames.length === 1) {
-                const inputHash = JSON.stringify((step.toolCalls ?? [])[0]?.input ?? {});
-                if (toolNames[0] === loopGuard.lastTool && inputHash === loopGuard.lastInputHash) {
-                    loopGuard.count++;
-                    if (loopGuard.count >= maxConsec) {
-                        logger.warn(`[loop-guard] "${loopGuard.lastTool}" called ${loopGuard.count} consecutive steps with identical input — aborting stream`);
-                        loopAbort.abort();
-                    }
-                } else { loopGuard.lastTool = toolNames[0]; loopGuard.lastInputHash = inputHash; loopGuard.count = 1; }
-            } else { loopGuard.count = 0; loopGuard.lastTool = ""; loopGuard.lastInputHash = ""; }
-            // All-fail streak: every tool result this step was { success: false }
-            // Exclude partial-success: stopped_early=true with some succeeded commands
-            const results = step.toolResults ?? [];
-            const isPartialSuccess = results.some((r: any) => {
-                const out = r?.result ?? r?.output;
-                return out?.stopped_early === true && (out?.failed_count ?? 0) < (out?.results?.length ?? 1);
-            });
-            const allFailed = !isPartialSuccess && results.length > 0 && results.every((r: any) => r?.result?.success === false || r?.output?.success === false);
-            if (allFailed) {
-                loopGuard.failStreak++;
-                if (loopGuard.failStreak >= maxConsec) {
-                    logger.warn(`[loop-guard] all tools failed for ${loopGuard.failStreak} consecutive steps — aborting stream`);
-                    loopAbort.abort();
-                }
-            } else { loopGuard.failStreak = 0; }
-        },
+        onStepFinish,
     } as any);
 
     // Accumulate text here — stream.text throws "No output generated" after fullStream consumed (AI SDK v6 bug)
     const acc = { text: "" };
+    let contextOverflow = false;
 
     async function* loggedTokenStream(): AsyncIterable<string> {
         let reasoningActive = false;
-
         const closeReasoning = async () => {
             if (!reasoningActive) return;
             reasoningActive = false;
             if (options.onThinkingEnd) { try { await options.onThinkingEnd(); } catch { /* never block stream */ } }
         };
-
         for await (const part of (stream as any).fullStream as AsyncIterable<import("ai").TextStreamPart<any>>) {
             if (part.type === "text-delta") {
                 const delta = part.text ?? "";
@@ -117,9 +73,11 @@ export async function streamAgent(
                 process.stdout.write("\n\x1b[2m[thinking]\x1b[0m ");
                 if (options.onThinkingStart) { try { await options.onThinkingStart(); } catch { /* never block stream */ } }
             } else if (part.type === "start-step") {
-                process.stdout.write(`\n\x1b[90m── step ${streamStep + 1} ──\x1b[0m\n`);
+                process.stdout.write(`\n\x1b[90m── step ${stepRef.n + 1} ──\x1b[0m\n`);
             } else if (part.type === "error") {
-                logger.warn(`[stream] non-fatal stream error: ${JSON.stringify(part.error ?? part)}`);
+                const errPayload = part.error ?? part;
+                logger.warn(`[stream] non-fatal stream error: ${JSON.stringify(errPayload)}`);
+                if (isContextOverflow(errPayload)) contextOverflow = true;
             }
         }
 
@@ -146,22 +104,35 @@ export async function streamAgent(
             let finalSteps = steps;
 
             if (!strippedText.trim()) {
-                logger.warn("[streamAgent] empty text after reasoning strip — retrying with nudge");
-                const retryMessages: ModelMessage[] = [
-                    ...messages, ...((response as any).messages as ModelMessage[]),
-                    { role: "user", content: "[SYSTEM] You finished reasoning but produced no visible response. Respond to the user now — do NOT think silently again." } as ModelMessage,
-                ];
-                try {
-                    const retryResult = await withRetry(() => generateText({
-                        model, system: systemPrompt, messages: retryMessages, tools: streamTools as any,
-                        stopWhen: stepCountIs(5), maxTokens: config.llm.maxTokens,
-                    } as any), `streamAgent-retry:${channel ?? "unknown"}`);
-                    const retryText = stripReasoning(retryResult.text, reasoningTag);
-                    if (retryText.trim()) {
-                        strippedText = retryText; finalResponse = retryResult.response; finalSteps = retryResult.steps;
-                        logger.info("[streamAgent] retry succeeded");
-                    } else logger.warn("[streamAgent] retry also produced empty text — giving up");
-                } catch (err) { logger.error(`[streamAgent] retry failed: ${err}`); }
+                if (contextOverflow) {
+                    logger.warn("[streamAgent] context overflow — delegating to context-retry");
+                    const { text: rt, response: rr, steps: rs } = await retryWithContextTrim({
+                        config, model, systemPrompt, messages, tools: streamTools as any,
+                        maxTokens: config.llm.maxTokens, reasoningTag, channel,
+                    });
+                    if (rt) { strippedText = rt; finalResponse = rr; finalSteps = rs; }
+                    else strippedText = "⚠️ This conversation is too long for the current model's context window. Please start a new chat or use /new to clear history.";
+                } else {
+                    // No output but no overflow — nudge the model to respond
+                    logger.warn("[streamAgent] empty text after reasoning strip — retrying with nudge");
+                    const retryMessages: ModelMessage[] = [
+                        ...messages, ...((response as any).messages as ModelMessage[]),
+                        { role: "user", content: NUDGE_PROMPT } as ModelMessage,
+                    ];
+                    try {
+                        const { onStepFinish: retryStep } = makeLoopGuard(config, options, channel, chatId, "stream-retry");
+                        const retryResult = await withRetry(() => generateText({
+                            model, system: systemPrompt, messages: retryMessages, tools: streamTools as any,
+                            stopWhen: stepCountIs(5), maxTokens: config.llm.maxTokens,
+                            onStepFinish: retryStep,
+                        } as any), `streamAgent-retry:${channel ?? "unknown"}`);
+                        const retryText = stripReasoning(retryResult.text, reasoningTag);
+                        if (retryText.trim()) {
+                            strippedText = retryText; finalResponse = retryResult.response; finalSteps = retryResult.steps;
+                            logger.info("[streamAgent] nudge retry succeeded");
+                        } else logger.warn("[streamAgent] nudge retry also produced empty text — giving up");
+                    } catch (err) { logger.error(`[streamAgent] retry failed: ${err}`); }
+                }
             }
 
             const text = strippedText.trim() || "(I finished thinking but produced no response. Please ask again or rephrase.)";

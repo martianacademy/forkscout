@@ -14,7 +14,7 @@ const logger = log("telegram/message-handler");
 
 export async function handleMessage(config: AppConfig, token: string, chatId: number, rawMsg: Message, role: "owner" | "admin" | "user" = "user", abortSignal?: AbortSignal): Promise<void> {
     const sessionKey = `telegram-${chatId}`;
-    const compiledMsg = await compileTelegramMessage(rawMsg, token);
+    const compiledMsg = compileTelegramMessage(rawMsg);
     await setMessageReaction(token, chatId, rawMsg.message_id, "👀").catch(() => { });
     const rawContent = typeof compiledMsg.content === "string" ? compiledMsg.content : JSON.stringify(compiledMsg.content);
     const roleTag = role === "owner" ? "OWNER" : role === "admin" ? "ADMIN" : "USER";

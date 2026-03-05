@@ -1,9 +1,8 @@
-// src/setup/step-media.ts — Media & AI capabilities menu (speech, embeddings, image/video gen).
+// src/setup/step-media.ts — Media & AI capabilities menu (embeddings, image/video gen).
 
 import { select } from "@inquirer/prompts";
 import { c } from "@/setup/shared.ts";
 import { loadConfigFile } from "@/setup/env-helpers.ts";
-import { stepSpeech } from "@/setup/step-speech.ts";
 import { stepEmbeddings } from "@/setup/step-embeddings.ts";
 import { stepImageGen } from "@/setup/step-image-gen.ts";
 import { stepVideoGen } from "@/setup/step-video-gen.ts";
@@ -25,11 +24,6 @@ export async function stepMedia(): Promise<void> {
             choices: [
                 { value: "__back__", name: `${c.green}← Back${c.reset}     ${c.dim}return to main menu${c.reset}` },
                 {
-                    value: "speech",
-                    name: `${"Speech (TTS/STT)".padEnd(24)} ${badge(cfg?.speech?.enabled)}`,
-                    description: "Text-to-speech & speech-to-text — ElevenLabs, OpenAI, Google",
-                },
-                {
                     value: "embeddings",
                     name: `${"Embeddings".padEnd(24)} ${badge(cfg?.embeddings?.enabled)}`,
                     description: "Vector embeddings for semantic search/memory",
@@ -50,8 +44,7 @@ export async function stepMedia(): Promise<void> {
         if (choice === "__back__") { console.log(""); return; }
         console.log("");
 
-        if (choice === "speech") await stepSpeech();
-        else if (choice === "embeddings") await stepEmbeddings();
+        if (choice === "embeddings") await stepEmbeddings();
         else if (choice === "image") await stepImageGen();
         else if (choice === "video") await stepVideoGen();
     }

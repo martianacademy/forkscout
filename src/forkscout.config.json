@@ -46,7 +46,7 @@
     },
     "llm": {
         "provider": "lmstudio",
-        "tier": "powerful",
+        "tier": "balanced",
         "maxTokens": 4096,
         "maxSteps": 200,
         "loopGuardMaxConsecutive": 3,
@@ -182,11 +182,11 @@
                 "summarizer": "llama3.2:3b"
             },
             "lmstudio": {
-                "fast": "qwen2.5-7b",
-                "balanced": "deepseek-r1:14b",
+                "fast": "qwen/qwen3-coder-next",
+                "balanced": "qwen/qwen3-coder-next",
                 "powerful": "qwen/qwen3-coder-next",
                 "vision": "",
-                "summarizer": "qwen2.5-7b"
+                "summarizer": "qwen/qwen3-coder-next"
             },
             "baseten": {
                 "fast": "llama-3.1-8b-instruct",

@@ -86,13 +86,6 @@ export interface AppConfig {
         userAgent?: string; locale?: string; timezone?: string;
         context?: Record<string, unknown>;
     };
-    speech?: {
-        enabled: boolean;
-        ttsProvider: "elevenlabs" | "openai" | "google" | "openrouter";
-        ttsModel: string; ttsVoice: string;
-        sttProvider: "elevenlabs" | "openai" | "google" | "openrouter";
-        sttModel: string; language: string;
-    };
     toolDefaults?: ToolDefaults;
     skills?: { dirs?: string[] };
     n8n?: N8nConfig;

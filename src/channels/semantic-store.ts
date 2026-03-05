@@ -67,7 +67,7 @@ export function buildChatHistory(sessionKey: string, limit = 20): ModelMessage[]
 }
 
 /**
- * Build keyword-searched context from semantic turns (used by semantic_search_history tool).
+ * Build keyword-searched context from semantic turns (used by search_all_history tool).
  * Keeps last `limit` turns + keyword-boosted older turns with date/tool annotations.
  */
 export function buildSemanticContext(

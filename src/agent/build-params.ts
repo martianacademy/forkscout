@@ -34,8 +34,8 @@ export async function buildAgentParams(config: AppConfig, options: AgentRunOptio
     const skills = getSkills(config);
 
     const excluded = new Set(options.excludeTools ?? []);
-    // Only bootstrap tools are injected into the agent by default.
-    // src/tools/ are all bootstrap. MCP tools are bootstrap only if "bootstrap": true in their config.
+    // Bootstrap tools only — injected at every step (src/tools/ + MCP bootstrap).
+    // Extended tools (.agents/tools/) are available but not pre-loaded — agent calls project_sourcemap_tools to find them.
     const rawTools = Object.fromEntries(
         Object.entries({ ...bootstrapTools, ...bootstrapMcpTools }).filter(([k]) => !excluded.has(k))
     );

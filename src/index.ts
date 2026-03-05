@@ -21,7 +21,6 @@ import twitterChannel from "@/channels/twitter/index.ts";
 import redditChannel from "@/channels/reddit/index.ts";
 import youtubeChannel from "@/channels/youtube/index.ts";
 import smsChannel from "@/channels/sms/index.ts";
-import voiceChannel from "@/channels/voice/index.ts";
 import { log } from "@/logs/logger.ts";
 import { populateEnvFromVault } from "@/secrets/vault.ts";
 
@@ -57,7 +56,7 @@ const channels: Channel[] = [
     telegramChannel, terminalChannel, selfChannel, whatsappChannel,
     discordChannel, slackChannel, emailChannel, matrixChannel, webchatChannel,
     teamsChannel, googleChatChannel, lineChannel, viberChannel, messengerChannel,
-    instagramChannel, twitterChannel, redditChannel, youtubeChannel, smsChannel, voiceChannel,
+    instagramChannel, twitterChannel, redditChannel, youtubeChannel, smsChannel,
 ];
 const channel = channels.find((c) => c.name === channelName);
 
@@ -86,10 +85,10 @@ if (channelName === "telegram" || channelName === "terminal") {
             discordChannel, slackChannel, emailChannel, matrixChannel,
             teamsChannel, googleChatChannel, lineChannel, viberChannel,
             messengerChannel, instagramChannel, twitterChannel, redditChannel,
-            youtubeChannel, smsChannel, voiceChannel,
+            youtubeChannel, smsChannel,
         ];
         for (const ch of autoChannels) {
-            ch.start(config).catch((err) => logger.warn(`${ch.name} channel skipped: ${err.message}`));
+            ch.start(config).catch((err: Error) => logger.warn(`${ch.name} channel skipped: ${err.message}`));
         }
     } else {
         logger.info("Smoke mode — HTTP server, cron jobs, and orphan monitor disabled");

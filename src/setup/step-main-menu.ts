@@ -16,7 +16,7 @@ export async function stepMainMenu(): Promise<MenuChoice> {
             { value: "vault", name: `${c.bold}Vault Secrets${c.reset}    ${c.dim}— manage API keys & tokens (encrypted)${c.reset}` },
             { value: "providers", name: `${c.bold}Providers${c.reset}        ${c.dim}— LLM provider, model tier, agent name${c.reset}` },
             { value: "channels", name: `${c.bold}Channels${c.reset}         ${c.dim}— Telegram, Terminal, and more${c.reset}` },
-            { value: "media", name: `${c.bold}Media & AI${c.reset}       ${c.dim}— speech, embeddings, image/video gen${c.reset}` },
+            { value: "media", name: `${c.bold}Media & AI${c.reset}       ${c.dim}— embeddings, image/video gen${c.reset}` },
             { value: "done", name: `${c.green}${c.bold}✓ Done${c.reset}            ${c.dim}— save & exit setup${c.reset}` },
         ],
     });

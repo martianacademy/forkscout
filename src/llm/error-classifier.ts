@@ -1,18 +1,9 @@
 // src/llm/error-classifier.ts — Classifies LLM errors into categories with user-facing messages.
-//
-// Used by:
-// - retry.ts: decides whether to retry
-// - channels: shows clean messages instead of raw SDK errors
+// Used by: retry.ts (retry decisions), channels (clean user messages).
 
 import {
-    APICallError,
-    InvalidResponseDataError,
-    JSONParseError,
-    LoadAPIKeyError,
-    NoContentGeneratedError,
-    NoSuchModelError,
-    InvalidPromptError,
-    UnsupportedFunctionalityError,
+    APICallError, InvalidResponseDataError, JSONParseError, LoadAPIKeyError,
+    NoContentGeneratedError, NoSuchModelError, InvalidPromptError, UnsupportedFunctionalityError,
 } from "@ai-sdk/provider";
 
 // ── Error categories ─────────────────────────────────────────────────────────
@@ -32,15 +23,10 @@ export type ErrorCategory =
     | "unknown";           // Unrecognized error
 
 export interface ClassifiedError {
-    /** Error category for programmatic use */
     category: ErrorCategory;
-    /** Whether retry may help */
     retryable: boolean;
-    /** Clean message safe to show to the user */
     userMessage: string;
-    /** HTTP status code, if available */
     statusCode?: number;
-    /** Original error for logging */
     original: unknown;
 }
 
@@ -65,32 +51,23 @@ const USER_MESSAGES: Record<ErrorCategory, string> = {
 // These match common error message substrings from various providers.
 
 const CREDIT_PATTERNS = [
-    "insufficient_quota",
-    "insufficient credits",
-    "billing",
-    "payment required",
-    "exceeded your current quota",
-    "account has been suspended",
-    "credit",
+    "insufficient_quota", "insufficient credits", "billing", "payment required",
+    "exceeded your current quota", "account has been suspended", "credit",
 ];
 
 const CONTENT_FILTER_PATTERNS = [
-    "content_filter",
-    "content management policy",
-    "content_policy",
-    "safety filter",
-    "moderation",
-    "flagged",
-    "blocked by",
-    "responsible ai",
+    "content_filter", "content management policy", "content_policy", "safety filter",
+    "moderation", "flagged", "blocked by", "responsible ai",
 ];
 
-// ── Main classifier ─────────────────────────────────────────────────────────
+// Matches Ollama/llama.cpp context overflow + standard provider "too long" messages
+const PROMPT_TOO_LONG_PATTERNS = [
+    "tokens to keep from the initial prompt", "context_length", "context length",
+    "too long", "maximum context", "token limit", "prompt is too long",
+    "exceeds model", "context window", "reduce the length",
+];
 
-/**
- * Classifies an LLM error into a structured result with category, retryability,
- * and a clean user-facing message.
- */
+/** Classifies an LLM error into a structured result with category, retryability, and user-facing message. */
 export function classifyError(error: unknown): ClassifiedError {
     const make = (category: ErrorCategory, statusCode?: number): ClassifiedError => ({
         category,
@@ -100,16 +77,12 @@ export function classifyError(error: unknown): ClassifiedError {
         original: error,
     });
 
-    // ── 1. AI SDK typed errors ───────────────────────────────────────────────
-
     // APICallError — most common, has statusCode + isRetryable
     if (APICallError.isInstance(error)) {
         const apiErr = error as APICallError;
         const status = apiErr.statusCode;
         const body = (apiErr.responseBody ?? "").toLowerCase();
         const msg = (apiErr.message ?? "").toLowerCase();
-
-        // Check for specific categories by status code
         if (status === 429) return make("rate-limit", 429);
         if (status === 408) return make("timeout", 408);
         if (status === 401 || status === 403) return make("auth-expired", status);
@@ -120,11 +93,9 @@ export function classifyError(error: unknown): ClassifiedError {
         if (matchesAny(body + msg, CREDIT_PATTERNS)) return make("insufficient-credits", status);
         if (matchesAny(body + msg, CONTENT_FILTER_PATTERNS)) return make("content-filtered", status);
 
-        // 400 — could be prompt too long or generic bad request
+        // 400 — could be prompt too long (incl. Ollama context overflow) or generic bad request
         if (status === 400) {
-            if (msg.includes("too long") || msg.includes("maximum context") || msg.includes("token limit")) {
-                return make("prompt-error", 400);
-            }
+            if (matchesAny(body + msg, PROMPT_TOO_LONG_PATTERNS)) return make("prompt-error", 400);
             return make("bad-request", 400);
         }
 
@@ -174,6 +145,7 @@ export function classifyError(error: unknown): ClassifiedError {
     }
 
     // Check for provider-specific patterns in generic errors
+    if (matchesAny(msg, PROMPT_TOO_LONG_PATTERNS)) return make("prompt-error");
     if (matchesAny(msg, CREDIT_PATTERNS)) return make("insufficient-credits");
     if (matchesAny(msg, CONTENT_FILTER_PATTERNS)) return make("content-filtered");
 

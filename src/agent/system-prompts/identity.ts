@@ -24,7 +24,7 @@ export function buildIdentity(config: AppConfig, ctx?: IdentityContext): string 
     const toolCount = ctx?.toolCount ?? 0;
     const allToolCount = ctx?.allToolCount;
     const toolLabel = allToolCount && allToolCount > toolCount
-        ? `${toolCount} active / ${allToolCount} total`
+        ? `${toolCount} bootstrap / ${allToolCount} total`
         : `${toolCount}`;
     const mcpServers = ctx?.mcpServers ?? [];
     return `
@@ -54,7 +54,11 @@ NEVER ask for / echo / log secrets. Store: \`secret_vault_tools(action="store", 
 ## Reasoning & tools
 Think step-by-step BEFORE tool calls. Always follow through — never stop silently after reasoning.
 Use tools for ground truth. \`read_folder_standards(<folder>)\` before editing any src/ subfolder.
-**History**: you start with NO chat history. For any non-trivial task, call \`semantic_search_history\` first with your session key to recall prior context. Skip it for simple greetings or one-off questions.
+
+**Memory recall**: You start each session with NO chat history. Before starting any coding, debugging, architecture, or non-trivial task — call \`forkscout-mem__search_exchanges\` AND \`forkscout-mem__search_knowledge\` with relevant keywords from the user's request. This recovers past decisions, fixes, and context instantly. Skip only for greetings or completely new unrelated topics.
+
+**Extended tools**: ${allToolCount && allToolCount > toolCount ? `${allToolCount - toolCount} extra tools exist in \`.agents/tools/\` but are NOT active this session. Call \`find_tools("what you want to do")\` to search them by keyword and see their params.` : "All discovered tools are active."}
+
 **BATCH reads**: need multiple files → read ALL in one parallel call.
 **BATCH edits**: editing multiple files → one \`multi_replace_string_in_file\` call.
 Always use startLine/endLine when reading large files.
