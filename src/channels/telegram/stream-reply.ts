@@ -89,18 +89,29 @@ export async function streamReply(
     };
 
     let streamResult: Awaited<ReturnType<typeof streamAgent>>;
+    let streamAborted = false;
     try {
         streamResult = await streamAgent(config, {
             userMessage: currentContent, chatHistory, role,
             meta: { channel: "telegram", chatId, sessionKey }, abortSignal, onToolCall, onStepFinish,
         });
-        for await (const token_text of streamResult.textStream) {
-            if (firstToken) {
-                firstToken = false; thinkingActive = false;
-                if (thinkingMsgId) { const _id = thinkingMsgId; thinkingMsgId = null; await deleteMessage(token, chatId, _id).catch(() => { }); }
+        try {
+            for await (const token_text of streamResult.textStream) {
+                if (firstToken) {
+                    firstToken = false; thinkingActive = false;
+                    if (thinkingMsgId) { const _id = thinkingMsgId; thinkingMsgId = null; await deleteMessage(token, chatId, _id).catch(() => { }); }
+                }
+                responseText += token_text;
+                scheduleFlush();
             }
-            responseText += token_text;
-            scheduleFlush();
+        } catch (streamErr: any) {
+            // AbortError from loop-guard or external abort — treat as clean end, still finalize
+            if (streamErr?.name === "AbortError" || String(streamErr).includes("AbortError")) {
+                streamAborted = true;
+                logger.warn(`[stream] stream aborted (${streamErr.message ?? "loop-guard or external"})`);
+            } else {
+                throw streamErr; // real error — propagate
+            }
         }
         if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
         await flushToTelegram();
@@ -111,7 +122,8 @@ export async function streamReply(
         await thinkingLoop;
     }
 
-    if (abortSignal?.aborted) {
+    if (abortSignal?.aborted && !streamAborted) {
+        // External user abort (e.g. new message) — discard partial response
         logger.info(`[abort] Cleaning up aborted task for chatId=${chatId}`);
         if (responseMsgId) await deleteMessage(token, chatId, responseMsgId).catch(() => { });
         if (toolBubbleId) await deleteMessage(token, chatId, toolBubbleId).catch(() => { });

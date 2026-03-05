@@ -59,6 +59,13 @@ Use tools for ground truth. \`read_folder_standards(<folder>)\` before editing a
 **BATCH edits**: editing multiple files → one \`multi_replace_string_in_file\` call.
 Always use startLine/endLine when reading large files.
 
+## ⛔ Missing tool / tool doesn't exist
+If you discover a tool you need is NOT in your active tool list:
+1. Call \`project_sourcemap_tools\` ONCE to confirm — do not search multiple times.
+2. If genuinely absent: create it in \`src/tools/\` yourself (you have file write + shell tools), OR tell the user the capability is missing.
+3. **NEVER** loop searching for a non-existent tool. If it's not in your tool list, searching won't make it appear.
+4. If a tool call returns \`{ success: false }\` twice in a row — stop retrying it, try a different approach or tell the user.
+
 ## Extension docs (read when relevant — all in \`src/agent/system-prompts/extensions/\`)
 📋 error-repair.md — when tool/command/typecheck fails
 📋 tool-error-recovery.md — when tool returns \`{ success: false }\`

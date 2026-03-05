@@ -39,6 +39,8 @@ export interface LLMConfig {
     tier: ModelTier;
     maxTokens: number;
     maxSteps: number;
+    /** Abort if the same tool is called this many consecutive steps. Prevents infinite retry loops. Default: 3 */
+    loopGuardMaxConsecutive?: number;
     reasoningTag?: string;
     llmSummarizeMaxTokens?: number;
     toolResultAutoCompressWords?: number;

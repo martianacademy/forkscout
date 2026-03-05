@@ -1,70 +1,41 @@
-// path - src/tools/stt/implementations/faster-whisper.ts
-// Cross-platform using faster-whisper (CTranslate2)
+// src/tools/stt/implementations/faster-whisper.ts — Faster Whisper for cross-platform
 
-import { existsSync } from 'fs'
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 
-interface TranscribeOptions {
-  audioPath: string
-  language?: string
-  model?: string
-  returnTimestamps?: boolean
-}
+/**
+ * Faster Whisper via Python CLI (fallback for non-Apple Silicon)
+ */
+export async function transcribeWithFasterWhisper(audioPath: string, language: string | null = null): Promise<string> {
+  const pythonPath = process.env.PYTHON_PATH || 'python3';
 
-interface TranscribeResult {
-  text: string
-  language: string
-  confidence: number
-  timestamps?: Array<{ word: string; start: number; end: number }>
-}
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-c',
+      `from faster_whisper import WhisperModel; model = WhisperModel("large-v3", device="auto"); segments, info = model.transcribe("${audioPath}", language="${language || 'auto'}"); text = "".join([segment.text for segment in segments]); print(text)`
+    ];
 
-export async function transcribe(options: TranscribeOptions): Promise<TranscribeResult> {
-  const { FasterWhisper } = await import('faster-whisper').catch(() => {
-    throw new Error('faster-whisper not installed. Run: pip install faster-whisper')
-  })
-  
-  // Validate file exists
-  if (!existsSync(options.audioPath)) {
-    throw new Error(`Audio file not found: ${options.audioPath}`)
-  }
-  
-  // Map model size
-  const modelSize = options.model || 'base'
-  const computeType = process.env.STREAM_MODE === 'true' ? 'int8' : 'float16'
-  const device = process.platform === 'darwin' ? 'cuda' : 'cpu'
-  
-  const whisper = new FasterWhisper(modelSize, {
-    compute_type: computeType,
-    device
-  })
-  
-  const segments = await whisper.transcribe(options.audioPath, {
-    language: options.language === 'auto' ? undefined : options.language,
-    vad_filter: true,
-    word_timestamps: options.returnTimestamps || false
-  })
-  
-  let fullText = ''
-  let language = options.language || 'en'
-  const timestamps: TranscribeResult['timestamps'] = []
-  
-  for await (const segment of segments) {
-    fullText += segment.text + ' '
-    
-    if (options.returnTimestamps && segment.words) {
-      for (const word of segment.words) {
-        timestamps.push({
-          word: word.word,
-          start: word.start,
-          end: word.end
-        })
+    const child = spawn(pythonPath, args);
+    let output = '';
+
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      console.error('Faster Whisper stderr:', data.toString());
+    });
+
+    child.on('error', (err) => {
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(output.trim());
+      } else {
+        reject(new Error(`Faster Whisper exited with code ${code}`));
       }
-    }
-  }
-  
-  return {
-    text: fullText.trim(),
-    language,
-    confidence: 0.85,
-    timestamps: options.returnTimestamps ? timestamps : undefined
-  }
+    });
+  });
 }

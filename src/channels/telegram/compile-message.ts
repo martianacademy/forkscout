@@ -70,7 +70,7 @@ async function transcribeAudio(filePath: string): Promise<string> {
 
     // Fallback to faster-whisper
     try {
-        const proc = Bun.spawnSync(["python3", "-c", `from faster_whisper import WhisperModel; m = WhisperModel("small", device="cpu", compute_type="int8"); print(list(m.transcribe("${filePath}"))[0].text)`]);
+        const proc = Bun.spawnSync(["python3", "-c", `from faster_whisper import WhisperModel; m = WhisperModel("small", device="cpu", compute_type="int8"); segs, _ = m.transcribe("${filePath}"); print(" ".join(s.text for s in segs))`]);
         const text = proc.stdout.toString().trim();
         if (text) return text;
     } catch { /* faster-whisper not available */ }

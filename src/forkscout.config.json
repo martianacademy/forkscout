@@ -45,10 +45,11 @@
         "maxTokens": 4096
     },
     "llm": {
-        "provider": "openrouter",
-        "tier": "balanced",
-        "maxTokens": 2000,
-        "maxSteps": 40,
+        "provider": "lmstudio",
+        "tier": "powerful",
+        "maxTokens": 4096,
+        "maxSteps": 200,
+        "loopGuardMaxConsecutive": 3,
         "reasoningTag": "think",
         "planFirst": false,
         "llmSummarizeMaxTokens": 1200,

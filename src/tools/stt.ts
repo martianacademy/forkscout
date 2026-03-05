@@ -1,57 +1,55 @@
-// path - src/tools/stt.ts
-// Universal STT tool with Apple Silicon optimization
+// src/tools/stt.ts — Universal speech-to-text tool
+// Uses Whisper.cpp (native), MLX Whisper (Apple Silicon), or Faster Whisper (fallback)
 
-import { tool } from 'ai'
-import { z } from 'zod'
+import { tool } from "ai";
+import { z } from "zod";
+import fs from "node:fs";
 
-// Platform detection
-const isMac = process.platform === 'darwin'
-const isAppleSilicon = isMac && process.arch === 'arm64'
+// Import implementations
+import { transcribeWithWhisperCpp } from "./stt/implementations/whisper-cpp.ts";
+import { transcribeWithMlxWhisper } from "./stt/implementations/mlx-whisper.ts";
+import { transcribeWithFasterWhisper } from "./stt/implementations/faster-whisper.ts";
 
+/**
+ * Transcribe audio to text using the best available STT engine
+ */
 export const speech_to_text = tool({
-  description: `Convert audio to text using Whisper.\n    - On Apple Silicon Mac: Uses MLX for 4x faster inference\n    - On other platforms: Uses faster-whisper (CTranslate2)\n    - Supports: ogg, mp3, m4a, wav formats`,
+  description:
+    "Transcribe audio to text using the best available STT engine (Whisper.cpp → MLX Whisper → Faster Whisper). Works on Apple Silicon Macs with native acceleration.",
   inputSchema: z.object({
-    audio_path: z.string().describe('Path to audio file'),
-    language: z.string().optional().describe('Language code (auto-detect if null)'),
-    model_size: z.enum(['tiny', 'base', 'small', 'medium', 'large', 'large-v3']).optional().describe('Model size - larger = more accurate but slower')
+    audioPath: z.string().describe("Absolute path to audio file (ogg, mp3, wav)"),
+    language: z.string().optional().describe("Language code (e.g., en, hi). Auto-detect if null"),
   }),
-  
-  execute: async (args) => {
-    const { audio_path, language = 'auto', model_size = 'base' } = args
-    
-    // Platform info
-    const platform = isAppleSilicon ? 'apple-silicon' : isMac ? 'mac-intel' : 'linux/windows'
-    
-    // Import platform-specific implementation
-    const transcribe = await import(
-      isAppleSilicon 
-        ? './stt/implementations/mlx-whisper.js'  
-        : './stt/implementations/faster-whisper.js'
-    ).then(m => m.transcribe)
-    
-    try {
-      const result = await transcribe({
-        audioPath: audio_path,
-        language,
-        model: model_size
-      })
-      
-      return {
-        success: true,
-        text: result.text,
-        language: result.language,
-        confidence: result.confidence,
-        platform,
-        model: model_size
-      }
-    } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Transcription failed',
-        platform
-      }
+  execute: async (input) => {
+    // Validate file exists
+    if (!fs.existsSync(input.audioPath)) {
+      return `Error: Audio file not found at ${input.audioPath}`;
     }
-  }
-})
 
-export default speech_to_text
+    // Auto-detect platform and use best engine
+    try {
+      // 1. Try Whisper.cpp (Apple Silicon native)
+      if (process.platform === 'darwin') {
+        try {
+          return await transcribeWithWhisperCpp(input.audioPath, input.language);
+        } catch (e) {
+          console.warn('Whisper.cpp failed, trying MLX Whisper:', e);
+        }
+      }
+
+      // 2. Try MLX Whisper (Apple Silicon)
+      if (process.platform === 'darwin') {
+        try {
+          return await transcribeWithMlxWhisper(input.audioPath, input.language);
+        } catch (e) {
+          console.warn('MLX Whisper failed, trying Faster Whisper:', e);
+        }
+      }
+
+      // 3. Fallback to Faster Whisper (cross-platform)
+      return await transcribeWithFasterWhisper(input.audioPath, input.language);
+    } catch (err: unknown) {
+      return `Error: ${(err as Error).message}. Install Whisper.cpp with: brew install whisper`;
+    }
+  },
+});

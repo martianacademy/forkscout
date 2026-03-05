@@ -1,46 +1,44 @@
-// path - src/tools/stt/implementations/mlx-whisper.ts
-// Apple Silicon optimized using mlx-whisper
+// src/tools/stt/implementations/mlx-whisper.ts — MLX Whisper for Apple Silicon (no Python)
 
-interface TranscribeOptions {
-  audioPath: string
-  language?: string
-  model?: string
-  returnTimestamps?: boolean
-}
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
-interface TranscribeResult {
-  text: string
-  language: string
-  confidence: number
-  timestamps?: Array<{ word: string; start: number; end: number }>
-}
+/**
+ * MLX Whisper native transcription
+ * Uses Apple Silicon Metal acceleration via mlx-whisper CLI
+ */
+export async function transcribeWithMlxWhisper(audioPath: string, language: string | null = null): Promise<string> {
+  const mlxWhisperPath = '/opt/homebrew/bin/mlx_whisper';
 
-// Check if mlx-whisper is available
-export async function transcribe(options: TranscribeOptions): Promise<TranscribeResult> {
-  // Dynamic import - mlx-whisper only works on Apple Silicon
-  const mlxWhisper = await import('mlx-whisper').catch(() => null)
-  
-  if (!mlxWhisper) {
-    throw new Error('mlx-whisper not installed. Run: pip install mlx-whisper')
+  if (!fs.existsSync(mlxWhisperPath)) {
+    throw new Error('MLX Whisper not found. Install with: pip install mlx-whisper');
   }
-  
-  const result = await mlxWhisper.transcribe(
-    options.audioPath,
-    {
-      path: options.model || 'large-v3',
-      language: options.language === 'auto' ? undefined : options.language,
-      timestamps: options.returnTimestamps
-    }
-  )
-  
-  return {
-    text: result.text || '',
-    language: result.language || options.language || 'en',
-    confidence: 0.9, // mlx-whisper doesn't provide confidence
-    timestamps: options.returnTimestamps ? result.segments?.map((s: any) => ({
-      word: s.text,
-      start: s.start,
-      end: s.end
-    })) : undefined
-  }
+
+  return new Promise((resolve, reject) => {
+    const args = ['--model', 'large', '--language', language || 'en', audioPath];
+
+    const child = spawn(mlxWhisperPath, args);
+    let output = '';
+
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      console.error('MLX Whisper stderr:', data.toString());
+    });
+
+    child.on('error', (err) => {
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(output.trim());
+      } else {
+        reject(new Error(`MLX Whisper exited with code ${code}`));
+      }
+    });
+  });
 }

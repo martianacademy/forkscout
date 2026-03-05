@@ -66,6 +66,11 @@ export async function runAgent(
         ? wrapToolsWithProgress(tools, options.onToolCall)
         : tools;
 
+    // Loop guard: abort if same tool called N+ consecutive steps, OR all tools failed N+ steps in a row
+    const loopAbort = new AbortController();
+    if (options.abortSignal) options.abortSignal.addEventListener("abort", () => loopAbort.abort());
+    const loopGuard = { lastTool: "", lastInputHash: "", count: 0, failStreak: 0 };
+
     const result = await withRetry(() => generateText({
         model,
         system: systemPrompt,
@@ -73,7 +78,7 @@ export async function runAgent(
         tools: toolsForRun as any,
         stopWhen: stepCountIs(config.llm.maxSteps),
         maxTokens: config.llm.maxTokens,
-        ...(options.abortSignal && { abortSignal: options.abortSignal }),
+        abortSignal: loopAbort.signal,
         ...(devtoolsEnabled && { experimental_telemetry: { isEnabled: true } }),
         onStepFinish(step: any) {
             stepNum++;
@@ -88,6 +93,34 @@ export async function runAgent(
             if (options.onStepFinish) {
                 Promise.resolve(options.onStepFinish((step.toolCalls?.length ?? 0) > 0)).catch(() => { });
             }
+            // Detect tight loops: same tool N+ consecutive WITH same input OR all-fail streak
+            const toolNames = (step.toolCalls ?? []).map((t: any) => t.toolName);
+            const maxConsec = config.llm.loopGuardMaxConsecutive ?? 3;
+            if (toolNames.length === 1) {
+                const inputHash = JSON.stringify((step.toolCalls ?? [])[0]?.input ?? {});
+                if (toolNames[0] === loopGuard.lastTool && inputHash === loopGuard.lastInputHash) {
+                    loopGuard.count++;
+                    if (loopGuard.count >= maxConsec) {
+                        logger.warn(`[loop-guard] "${loopGuard.lastTool}" called ${loopGuard.count} consecutive steps with identical input — aborting run`);
+                        loopAbort.abort();
+                    }
+                } else { loopGuard.lastTool = toolNames[0]; loopGuard.lastInputHash = inputHash; loopGuard.count = 1; }
+            } else { loopGuard.count = 0; loopGuard.lastTool = ""; loopGuard.lastInputHash = ""; }
+            // All-fail streak: every tool result this step was { success: false }
+            // Exclude partial-success: stopped_early=true with some succeeded commands
+            const results = step.toolResults ?? [];
+            const isPartialSuccess = results.some((r: any) => {
+                const out = r?.result ?? r?.output;
+                return out?.stopped_early === true && (out?.failed_count ?? 0) < (out?.results?.length ?? 1);
+            });
+            const allFailed = !isPartialSuccess && results.length > 0 && results.every((r: any) => r?.result?.success === false || r?.output?.success === false);
+            if (allFailed) {
+                loopGuard.failStreak++;
+                if (loopGuard.failStreak >= maxConsec) {
+                    logger.warn(`[loop-guard] all tools failed for ${loopGuard.failStreak} consecutive steps — aborting run`);
+                    loopAbort.abort();
+                }
+            } else { loopGuard.failStreak = 0; }
         },
     } as any), `generateText:${channel ?? "unknown"}`);
 
