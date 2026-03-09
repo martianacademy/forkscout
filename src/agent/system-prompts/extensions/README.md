@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/README.md - General overview of extensions – read before usage
 # System Prompt Extensions
 
 This folder holds prompt modules used in two ways:

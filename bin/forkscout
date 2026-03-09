@@ -46,7 +46,13 @@ async function killWebServer(port: string) {
 
 const COMMANDS: Record<string, () => Promise<void>> = {
     async start() {
-        await $`bun run start`.cwd(ROOT);
+        // Stop any existing instance first (mirrors 'bun run stop')
+        await $`pkill -9 -f 'src/index.ts' 2>/dev/null || true`.cwd(ROOT).nothrow();
+        await $`pkill -9 -f 'forkscout-agent' 2>/dev/null || true`.cwd(ROOT).nothrow();
+        await Bun.sleep(1000);
+        // Forward all flags after 'start' (--provider, --model, --tier, --url, etc.) to src/index.ts
+        const extraArgs = process.argv.slice(3);
+        await $`bun run src/index.ts ${extraArgs}`.cwd(ROOT).env({ ...process.env, DEVTOOLS: "1" });
     },
 
     async setup() {
@@ -56,7 +62,8 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     },
 
     async cli() {
-        await $`bun run src/index.ts --cli`.cwd(ROOT);
+        const extraArgs = process.argv.slice(3);
+        await $`bun run src/index.ts --cli ${extraArgs}`.cwd(ROOT);
     },
 
     async whatsapp() {
@@ -344,8 +351,32 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     logs        Tail live logs
     help        Show this help
 
+  LLM / runtime override flags (for 'start' and 'cli'):
+    --provider <name>          Provider to use, e.g. openrouter, anthropic, openai
+    --model <id>               Model ID for the selected tier, e.g. "qwen/qwen3-14b"
+    --tier <tier>              Model tier: fast | balanced | powerful  (default: balanced)
+    --url <url>                Custom API base URL (e.g. for local LMStudio / Ollama)
+    --api-key <key>            API key (overrides config; prefer vault for security)
+    --max-tokens <n>           Max output tokens per request
+    --max-steps <n>            Max agentic steps per request
+    --loop-guard <n>           Max consecutive identical tool calls before aborting (default: 3)
+    --plan-first               Enable structured planning step before each agent run
+    --reasoning-tag <tag>      Reasoning tag for models that output chain-of-thought (e.g. <think>)
+    --compress-words <n>       Auto-compress tool results larger than this word count
+    --vision-model <id>        Override vision model for the selected provider
+    --summarizer-model <id>    Override summarizer model for the selected provider
+
+  Channel flag:
+    --channel <name>           Channel to start: telegram | terminal | self | whatsapp | discord | slack | ...
+                               (shorthand aliases --cli / --self / --whatsapp still work)
+
   Examples:
-    forkscout start          Start the agent
+    forkscout start                                            Start with config defaults
+    forkscout start --provider openrouter --tier fast        Use fast openrouter model
+    forkscout start --provider openai --model gpt-4o         Use a specific model
+    forkscout start --url http://localhost:1234/v1 --model lmstudio-community/qwen  Local LMStudio
+    forkscout start --plan-first --loop-guard 5              Planning enabled, more tool retries
+    forkscout start --channel discord                        Start Discord channel
     forkscout setup          Configure provider, keys, Telegram
     forkscout web            Start web dashboard (production)
     forkscout web:dev        Start web dashboard (dev + hot reload)

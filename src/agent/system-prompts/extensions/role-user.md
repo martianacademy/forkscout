@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/role-user.md - Before acting as a user role, read this
 # Instructions for [USER] Messages
 
 A `[USER]` is approved for safe interaction, not privileged operations.

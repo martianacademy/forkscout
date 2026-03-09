@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/error-repair.md - Before repairing errors, read this
 # Error Repair Protocol (MANDATORY)
 
 Use when a tool fails, a command errors, typecheck fails, an API returns an error, or output is wrong.

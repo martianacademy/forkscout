@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/tool-error-recovery.md - Before handling tool errors, read this
 # Tool Error Recovery Protocol
 
 Use when a tool returns `{ success: false }` or another structured error object.

@@ -1,6 +1,7 @@
 // src/agent/build-params.ts — Assemble model, tools, and system prompt for a run
 import { wrapLanguageModel, extractReasoningMiddleware } from "ai";
 import type { SystemModelMessage } from "ai";
+import { guardrailsMiddleware, xmlToolCallMiddleware } from "@/agent/llm-middleware.ts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { AppConfig } from "@/config.ts";
@@ -95,14 +96,23 @@ export async function buildAgentParams(config: AppConfig, options: AgentRunOptio
 
     let model: typeof baseModel = baseModel;
 
-    // Apply extractReasoningMiddleware when reasoningTag is configured.
+    // Build middleware stack — outermost first, innermost last:
+    //   guardrails → reasoning (optional) → xmlToolCallParser (innermost, closest to model)
+    //
+    // xmlToolCallMiddleware: converts <invoke>…</invoke> XML text → proper tool-call stream parts.
+    //   Handles MiniMax, some Qwen/Hermes variants that emit tool calls as raw XML text.
+    // extractReasoningMiddleware: strips <think>…</think> from text so downstream never sees them.
+    // guardrailsMiddleware: censors known secret values from all final LLM text output.
     const reasoningTag = config.llm.reasoningTag?.trim();
-    if (reasoningTag) {
-        model = wrapLanguageModel({
-            model: baseModel as import("@ai-sdk/provider").LanguageModelV3,
-            middleware: extractReasoningMiddleware({ tagName: reasoningTag }),
-        }) as typeof model;
-    }
+    const middlewares: import("@ai-sdk/provider").LanguageModelV3Middleware[] = [
+        guardrailsMiddleware,
+        ...(reasoningTag ? [extractReasoningMiddleware({ tagName: reasoningTag })] : []),
+        xmlToolCallMiddleware,  // innermost — runs first, closest to raw model output
+    ];
+    model = wrapLanguageModel({
+        model: baseModel as import("@ai-sdk/provider").LanguageModelV3,
+        middleware: middlewares,
+    }) as typeof model;
 
     // Dev-only: wrap with AI SDK DevTools middleware when DEVTOOLS=1
     const devtoolsEnabled = process.env.DEVTOOLS === "1";

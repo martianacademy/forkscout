@@ -85,7 +85,7 @@ export function HeroSection() {
                     <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
                         <Button size="lg" className="gap-2 bg-linear-to-r from-purple-600 to-cyan-500 px-6 text-white shadow-lg shadow-purple-500/20 hover:from-purple-500 hover:to-cyan-400 dark:shadow-purple-500/10" asChild>
                             <a
-                                href="https://github.com/marsnext/forkscout"
+                                href="https://github.com/Forkscout/forkscout"
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >
@@ -97,7 +97,7 @@ export function HeroSection() {
                     <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
                         <Button size="lg" variant="outline" className="gap-2 border-purple-500/20 px-6 hover:border-purple-500/40 hover:bg-purple-500/5" asChild>
                             <a
-                                href="https://github.com/marsnext/forkscout"
+                                href="https://github.com/Forkscout/forkscout"
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >
@@ -116,11 +116,11 @@ export function HeroSection() {
 const installMethods = [
     {
         label: "Install Anywhere",
-        command: "curl -fsSL https://raw.githubusercontent.com/marsnext/forkscout/main/install.sh | bash",
+        command: "curl -fsSL https://raw.githubusercontent.com/Forkscout/forkscout/main/install.sh | bash",
     },
     {
         label: "Docker",
-        command: "docker run -d --name forkscout ghcr.io/marsnext/forkscout:latest",
+        command: "docker run -d --name forkscout ghcr.io/forkscout/forkscout:latest",
     },
 ];
 

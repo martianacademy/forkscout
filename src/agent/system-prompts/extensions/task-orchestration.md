@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/task-orchestration.md - Before orchestrating tasks, read this
 # Task Orchestration (MANDATORY)
 
 Use self-sessions for offloaded work via:

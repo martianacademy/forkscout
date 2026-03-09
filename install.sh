@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
 # ForkScout — One-line installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/marsnext/forkscout/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/Forkscout/forkscout/main/install.sh | bash
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -14,7 +14,7 @@ BOLD='\033[1m'
 DIM='\033[2m'
 RESET='\033[0m'
 
-REPO_URL="https://github.com/marsnext/forkscout.git"
+REPO_URL="https://github.com/Forkscout/forkscout.git"
 INSTALL_DIR="${FORKSCOUT_DIR:-$HOME/forkscout-agent}"
 BRANCH="${FORKSCOUT_BRANCH:-main}"
 

@@ -14,7 +14,7 @@ import { z } from "zod";
 import { readdirSync, existsSync } from "fs";
 import { resolve } from "path";
 
-const SKIP_FILES = new Set(["index.ts", "auto_discover_tools.ts", "find_tools.ts"]);
+const SKIP_FILES = new Set(["index.ts", "auto_discover_tools.ts", "find_tools.ts", "call_tool.ts"]);
 
 const AGENTS_TOOLS_DIR = resolve(process.cwd(), ".agents", "tools");
 
@@ -82,13 +82,14 @@ function score(entry: ToolEntry, query: string): number {
 
 export const find_tools = tool({
     description:
-        "Search for on-demand tools in .agents/tools/ by keyword. " +
-        "WHEN TO USE: any time you need a capability not in your bootstrap tools (browser, git, SQLite, regex, PDF, image analysis, workers, cron jobs, etc.). " +
-        "Always call this before assuming a tool doesn't exist — there are 30+ extended tools available. " +
-        "Returns tool name, full description, and parameter names — enough to call the tool immediately. " +
-        "WHEN NOT TO USE: for bootstrap tools already loaded (read_file_tools, edit_file_tools, run_shell_command_tools, etc.). " +
-        "Example queries: 'search web', 'browse website', 'sqlite database', 'git commit push', 'analyze image', 'workers parallel tasks', 'send telegram message'. " +
-        "Tip: if unsure what capability is available, query broadly: find_tools('pdf document extract') or find_tools('schedule cron job').",
+        "Search for on-demand tools in .agents/tools/ by keyword or exact tool name. " +
+        "WHEN TO USE: (1) any time you need a capability not in your bootstrap tools; " +
+        "(2) when a specific tool (e.g. validate_and_restart, web_browser_tools, telegram_message_tools, git_operations_tools, sqlite_tools, etc.) is not in your active tool list — search here before concluding it doesn't exist. " +
+        "30+ extended tools are available: browser, git, SQLite, regex, PDF, image analysis, workers, cron, network scan, run_code, validate_and_restart, and more. " +
+        "Returns tool name, full description, and parameter names — enough to call the tool immediately after. " +
+        "WHEN NOT TO USE: for bootstrap tools already loaded (read_file_tools, edit_file_tools, run_shell_command_tools, web_search_tools, find_tools itself, etc.). " +
+        "Do NOT use file_search_tools or project_sourcemap_tools to look for tools — use this. " +
+        "Example queries: 'validate_and_restart', 'web browser', 'git commit', 'telegram message', 'sqlite database', 'parallel workers', 'schedule cron job'.",
     inputSchema: z.object({
         query: z.string().describe(
             "Keywords describing what you want to do, e.g. 'read file', 'search web', 'write file'"

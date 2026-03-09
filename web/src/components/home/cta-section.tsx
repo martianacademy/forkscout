@@ -38,14 +38,14 @@ export function CtaSection() {
                     <div className="flex flex-col gap-3 sm:flex-row">
                         <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
                             <Button size="lg" className="gap-2 bg-linear-to-r from-purple-600 to-cyan-500 px-8 text-white shadow-lg shadow-purple-500/25 hover:from-purple-500 hover:to-cyan-400 hover:shadow-purple-500/40 dark:shadow-purple-500/15" asChild>
-                                <a href="https://github.com/marsnext/forkscout" target="_blank" rel="noopener noreferrer">
+                                <a href="https://github.com/Forkscout/forkscout" target="_blank" rel="noopener noreferrer">
                                     Get Started <ArrowRight className="h-4 w-4" />
                                 </a>
                             </Button>
                         </motion.div>
                         <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
                             <Button size="lg" variant="outline" className="gap-2 border-border/60 px-8 hover:border-purple-500/40 hover:bg-purple-500/5" asChild>
-                                <a href="https://github.com/marsnext/forkscout" target="_blank" rel="noopener noreferrer">
+                                <a href="https://github.com/Forkscout/forkscout" target="_blank" rel="noopener noreferrer">
                                     <Github className="h-4 w-4" /> View Source
                                 </a>
                             </Button>
@@ -59,11 +59,11 @@ export function CtaSection() {
 
             <footer className="flex flex-col items-center gap-4 py-10 text-center">
                 <div className="flex items-center gap-6 text-sm text-muted-foreground">
-                    <a href="https://github.com/marsnext/forkscout" target="_blank" rel="noopener noreferrer"
+                    <a href="https://github.com/Forkscout/forkscout" target="_blank" rel="noopener noreferrer"
                         className="transition-colors hover:text-foreground">GitHub</a>
-                    <a href="https://github.com/marsnext/forkscout/blob/main/README.md" target="_blank" rel="noopener noreferrer"
+                    <a href="https://github.com/Forkscout/forkscout/blob/main/README.md" target="_blank" rel="noopener noreferrer"
                         className="transition-colors hover:text-foreground">Docs</a>
-                    <a href="https://github.com/marsnext/forkscout/issues" target="_blank" rel="noopener noreferrer"
+                    <a href="https://github.com/Forkscout/forkscout/issues" target="_blank" rel="noopener noreferrer"
                         className="transition-colors hover:text-foreground">Issues</a>
                 </div>
                 <p className="flex flex-wrap items-center justify-center gap-1.5 text-sm text-muted-foreground">

@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/role-admin.md - Before using admin role tools, read this
 # Instructions for [ADMIN] Messages
 
 An ADMIN is manually approved by the owner: trusted, but not the owner.

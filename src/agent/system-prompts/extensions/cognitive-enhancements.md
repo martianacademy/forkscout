@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/cognitive-enhancements.md - Before adding cognitive enhancements, read this
 # Cognitive Enhancements
 
 ## Memory hygiene

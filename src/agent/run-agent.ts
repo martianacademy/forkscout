@@ -10,7 +10,7 @@ import { buildAgentParams } from "@/agent/build-params.ts";
 import { wrapToolsWithProgress } from "@/agent/tool-wrappers.ts";
 import { planTask, formatPlanAsContext } from "@/agent/planner.ts";
 import type { TaskPlan } from "@/agent/planner.ts";
-import { stripReasoning, makeLoopGuard, NUDGE_PROMPT } from "@/agent/agent-utils.ts";
+import { stripReasoning, makeLoopGuard, NUDGE_PROMPT, repairToolCall } from "@/agent/agent-utils.ts";
 import type { AgentRunOptions, AgentRunResult } from "@/agent/types.ts";
 
 const logger = log("agent");
@@ -67,6 +67,7 @@ export async function runAgent(
         stopWhen: stepCountIs(config.llm.maxSteps), maxTokens: config.llm.maxTokens,
         abortSignal: loopAbort.signal,
         ...(devtoolsEnabled && { experimental_telemetry: { isEnabled: true } }),
+        experimental_repairToolCall: repairToolCall,
         onStepFinish,
     } as any), `generateText:${channel ?? "unknown"}`);
 
@@ -86,6 +87,7 @@ export async function runAgent(
                 model, system: systemMessage, messages: retryMessages, tools: toolsForRun as any,
                 stopWhen: stepCountIs(5), maxTokens: config.llm.maxTokens,
                 ...(devtoolsEnabled && { experimental_telemetry: { isEnabled: true } }),
+                experimental_repairToolCall: repairToolCall,
                 onStepFinish: retryStep,
             } as any), `generateText-retry:${channel ?? "unknown"}`);
             const retryText = stripReasoning(retryResult.text, reasoningTag);

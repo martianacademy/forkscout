@@ -56,6 +56,9 @@ export function buildRelevantExtensionsBlock(userMessage: string, role: Role): s
     const selected = new Set<string>();
     const text = userMessage.trim();
 
+    // Always inject anti-patterns — hallucination/narration rules apply to every message type.
+    selected.add("anti-patterns.md");
+
     for (const rule of RULES) {
         if (rule.pattern.test(text)) {
             for (const file of rule.files) selected.add(file);

@@ -90,7 +90,7 @@ export function Navbar() {
                 <div className="hidden items-center gap-2 md:flex">
                     <ThemeToggle />
                     <a
-                        href="https://github.com/marsnext/forkscout"
+                        href="https://github.com/Forkscout/forkscout"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="rounded-full border border-purple-500/20 bg-purple-500/5 px-4 py-1.5 text-sm font-medium text-purple-600 transition-colors hover:bg-purple-500/10 dark:text-purple-400"

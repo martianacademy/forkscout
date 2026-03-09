@@ -82,8 +82,15 @@ export function wrapToolsWithSecretHandling(tools: Record<string, any>): Record<
                                 )
                             );
                         }
-                    } catch (err) {
-                        logger.warn(`[secret-wrap] ${name}: failed to resolve secrets in input: ${err}`);
+                    } catch (err: any) {
+                        // Secret not found — surface the error to the LLM instead of silently
+                        // passing the placeholder string as a literal value to the tool.
+                        logger.warn(`[secret-wrap] ${name}: secret resolution failed: ${err?.message ?? err}`);
+                        return {
+                            success: false,
+                            error: err?.message ?? String(err),
+                            hint: "Check the alias exists with: call_tool('secret_vault_tools', { action: 'list' }). Store missing secrets with: call_tool('secret_vault_tools', { action: 'store', alias: '<alias>', value: '<value>' })",
+                        };
                     }
 
                     const result = await original(resolvedInput);

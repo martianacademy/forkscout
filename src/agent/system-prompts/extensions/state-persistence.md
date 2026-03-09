@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/state-persistence.md - Before persisting state, read this
 # State Persistence
 
 ## Must survive restart

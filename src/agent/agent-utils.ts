@@ -1,6 +1,7 @@
 // src/agent/agent-utils.ts — Shared utilities for runAgent and streamAgent.
 // Extracted to eliminate ~60 lines of duplication between the two runners.
 
+import { NoSuchToolError } from "ai";
 import type { AppConfig } from "@/config.ts";
 import { activity } from "@/logs/activity-log.ts";
 import { log } from "@/logs/logger.ts";
@@ -10,6 +11,49 @@ const logger = log("agent");
 
 export const NUDGE_PROMPT =
     "[SYSTEM] You finished reasoning but produced no visible response. Respond to the user now — do NOT think silently again.";
+
+/**
+ * AI SDK `experimental_repairToolCall` handler.
+ * When the model calls an extended tool that isn't loaded yet, redirect to
+ * `find_tools` with the tool name as the query so the model gets load
+ * instructions instead of a hard NoSuchToolError abort.
+ */
+export async function repairToolCall({
+    toolCall,
+    tools,
+    error,
+}: {
+    toolCall: { toolCallId: string; toolName: string; input: string };
+    tools: Record<string, any>;
+    error: unknown;
+    [key: string]: any;
+}): Promise<{ toolCallId: string; toolName: string; input: string } | null> {
+    if (!NoSuchToolError.isInstance(error)) return null;
+
+    // Preferred: redirect to call_tool so it executes immediately
+    if (tools.call_tool) {
+        logger.warn(`[repairToolCall] '${toolCall.toolName}' not in active tools — redirecting to call_tool`);
+        let parsedInput: Record<string, unknown> = {};
+        try { parsedInput = JSON.parse(toolCall.input as any); } catch { /* use empty input */ }
+        return {
+            toolCallId: toolCall.toolCallId,
+            toolName: "call_tool",
+            input: JSON.stringify({ tool_name: toolCall.toolName, input: parsedInput }),
+        };
+    }
+
+    // Fallback: redirect to find_tools so model gets load instructions
+    if (tools.find_tools) {
+        logger.warn(`[repairToolCall] '${toolCall.toolName}' not in active tools — redirecting to find_tools`);
+        return {
+            toolCallId: toolCall.toolCallId,
+            toolName: "find_tools",
+            input: JSON.stringify({ query: toolCall.toolName }),
+        };
+    }
+
+    return null;
+}
 
 export function stripReasoning(text: string, tag?: string): string {
     if (!tag) return text;

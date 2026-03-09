@@ -108,10 +108,17 @@ export function setSecret(alias: string, value: string): void {
     invalidateCache();
 }
 
-/** Retrieve a secret value by alias. Returns null if not found. */
+/** Retrieve a secret value by alias. Case-insensitive. Returns null if not found. */
 export function getSecret(alias: string): string | null {
     const cache = getCache();
-    return cache.get(alias) ?? null;
+    // Exact match first
+    if (cache.has(alias)) return cache.get(alias)!;
+    // Case-insensitive fallback — setup wizard stores UPPER_CASE, agent stores lower_case
+    const lower = alias.toLowerCase();
+    for (const [k, v] of cache.entries()) {
+        if (k.toLowerCase() === lower) return v;
+    }
+    return null;
 }
 
 /** List alias names only — values are never returned here. */
@@ -132,11 +139,15 @@ export function deleteSecret(alias: string): boolean {
 /**
  * Replace every {{secret:alias}} placeholder in a string with its actual value.
  * Used INSIDE tools at execution time — never before sending to LLM.
+ * Throws with the list of available aliases if an alias is not found.
  */
 export function resolveSecrets(str: string): string {
     return str.replace(ALIAS_PATTERN, (_, alias) => {
         const val = getSecret(alias);
-        if (val === null) throw new Error(`Secret alias not found: ${alias}`);
+        if (val === null) {
+            const available = listAliases().join(", ") || "(vault is empty)";
+            throw new Error(`Secret alias not found: '${alias}'. Available aliases: ${available}`);
+        }
         return val;
     });
 }

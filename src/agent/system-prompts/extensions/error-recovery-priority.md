@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/error-recovery-priority.md - Before prioritising error recovery, read this
 # Error Recovery Priority
 
 Classify errors first:

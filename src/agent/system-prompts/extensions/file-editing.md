@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/file-editing.md - Before editing any file, read this
 # File Editing Workflow (MANDATORY)
 
 Use for implementations, refactors, and bug fixes.

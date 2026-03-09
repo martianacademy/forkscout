@@ -1,4 +1,6 @@
 // src/memory/__tests__/triples.test.ts — Test triple store with Suru example
+
+declare const test: any;
 import { addTriple, getTriplesBySubject, getObjects, initializeSampleTriples, clearTriples } from '../triples';
 
 // Run with: bun test src/memory/__tests__/triples.test.ts

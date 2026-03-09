@@ -9,7 +9,7 @@ import { sanitizeForDisplay } from "@/utils/secrets.ts";
 import { buildAgentParams } from "@/agent/build-params.ts";
 import { wrapToolsWithProgress } from "@/agent/tool-wrappers.ts";
 import { retryWithContextTrim } from "@/agent/context-retry.ts";
-import { stripReasoning, makeLoopGuard, NUDGE_PROMPT } from "@/agent/agent-utils.ts";
+import { stripReasoning, makeLoopGuard, NUDGE_PROMPT, repairToolCall } from "@/agent/agent-utils.ts";
 import type { AgentRunOptions, AgentRunResult, StreamAgentResult } from "@/agent/types.ts";
 
 const logger = log("agent");
@@ -41,6 +41,7 @@ export async function streamAgent(
         stopWhen: stepCountIs(config.llm.maxSteps), maxTokens: config.llm.maxTokens,
         abortSignal: loopAbort.signal,
         ...(devtoolsEnabled && { experimental_telemetry: { isEnabled: true } }),
+        experimental_repairToolCall: repairToolCall,
         onStepFinish,
     } as any);
 
@@ -118,6 +119,7 @@ export async function streamAgent(
                         const retryResult = await withRetry(() => generateText({
                             model, system: systemMessage, messages: retryMessages, tools: streamTools as any,
                             stopWhen: stepCountIs(5), maxTokens: config.llm.maxTokens,
+                            experimental_repairToolCall: repairToolCall,
                             onStepFinish: retryStep,
                         } as any), `streamAgent-retry:${channel ?? "unknown"}`);
                         const retryText = stripReasoning(retryResult.text, reasoningTag);

@@ -21,7 +21,7 @@ const organizationSchema = {
     url: siteUrl,
     logo: `${siteUrl}/logo.svg`,
     sameAs: [
-        "https://github.com/marsnext/forkscout",
+        "https://github.com/Forkscout/forkscout",
     ],
 };
 
@@ -32,7 +32,7 @@ const softwareSchema = {
     applicationCategory: "DeveloperApplication",
     operatingSystem: "Linux, macOS, Windows (Docker)",
     url: siteUrl,
-    downloadUrl: "https://github.com/marsnext/forkscout",
+    downloadUrl: "https://github.com/Forkscout/forkscout",
     description:
         "Open-source autonomous AI agent with shell access, web browsing, file I/O, persistent memory, and multi-channel presence.",
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },

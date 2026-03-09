@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/performance-optimization.md - Before optimizing performance, read this
 # Performance & Optimization
 
 ## Thinking budget

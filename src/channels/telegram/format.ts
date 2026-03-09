@@ -16,11 +16,33 @@ function escapeHtml(text: string): string {
 }
 
 /**
+ * Strip tool-call XML that the LLM sometimes leaks into its text output:
+ *   <invoke name="...">...</invoke>
+ *   <parameter name="...">...</parameter>
+ *   </minimax:tool_call>  and similar namespace-prefixed tags
+ * These are NEVER valid in a user-facing reply.
+ */
+function stripToolCallXml(text: string): string {
+    // Full <invoke …> … </invoke> blocks (possibly multiline)
+    let out = text.replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke>/gi, "");
+    // Incomplete/orphan <invoke …> with no closing tag
+    out = out.replace(/<invoke\b[^>]*>/gi, "");
+    out = out.replace(/<\/invoke>/gi, "");
+    // Orphan <parameter …>…</parameter> or partial
+    out = out.replace(/<parameter\b[^>]*>[\s\S]*?<\/parameter>/gi, "");
+    out = out.replace(/<\/?parameter\b[^>]*>/gi, "");
+    // Namespace-prefixed tags like </minimax:tool_call> or <ns:tag …>
+    out = out.replace(/<\/?\w+:\w+[^>]*>/gi, "");
+    return out;
+}
+
+/**
  * Convert LLM Markdown to Telegram-safe HTML.
  * Handles the most common patterns — not a full spec-compliant parser.
  */
 export function mdToHtml(md: string): string {
-    let out = md;
+    // Remove any tool-call XML that leaked from the model's raw output
+    let out = stripToolCallXml(md);
 
     // ── Fenced code blocks (``` lang\n...\n```) ─────────────────────────────
     out = out.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
@@ -32,16 +54,29 @@ export function mdToHtml(md: string): string {
         `<code>${escapeHtml(code)}</code>`
     );
 
+    // ── Protect already-converted <code>/<pre> regions from bold/italic regexes
+    // Without this, `_` characters inside <code>get_secret</code> get matched by
+    // the italic regex, producing improperly nested tags like <code>get<i>secret</code></i>.
+    const placeholders: string[] = [];
+    out = out.replace(/<(pre|code)>[\s\S]*?<\/\1>/g, (match) => {
+        const idx = placeholders.length;
+        placeholders.push(match);
+        return `\x00CODE${idx}\x00`;
+    });
+
     // ── Bold: **text** or __text__ ────────────────────────────────────────────
     out = out.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
     out = out.replace(/__(.+?)__/g, "<b>$1</b>");
 
-    // ── Italic: *text* or _text_ (not inside already-replaced patterns) ──────
+    // ── Italic: *text* or _text_ ─────────────────────────────────────────────
     out = out.replace(/\*(?!\*)(.+?)(?<!\*)\*/g, "<i>$1</i>");
     out = out.replace(/_(?!_)(.+?)(?<!_)_/g, "<i>$1</i>");
 
     // ── Strikethrough: ~~text~~ ───────────────────────────────────────────────
     out = out.replace(/~~(.+?)~~/g, "<s>$1</s>");
+
+    // ── Restore protected code regions ────────────────────────────────────────
+    out = out.replace(/\x00CODE(\d+)\x00/g, (_, idx) => placeholders[Number(idx)]);
 
     // ── Links: [text](url) ────────────────────────────────────────────────────
     out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2">$1</a>');
@@ -52,13 +87,17 @@ export function mdToHtml(md: string): string {
     // ── Blockquotes: > text ───────────────────────────────────────────────────
     out = out.replace(/^> (.+)$/gm, "<blockquote>$1</blockquote>");
 
-    // ── Escape remaining & < > that are NOT part of our tags ─────────────────
-    // Only allow the Telegram HTML subset — anything else gets escaped.
-    // This prevents unknown tags like <minimax:tool_call> from breaking the parser.
+    // ── Final pass: allow only Telegram HTML tags; drop everything else ──────
+    // Tag segments not in the allowlist are silently removed (not escaped).
+    // Plain-text segments are always HTML-escaped.
     const TELEGRAM_TAG_RE = /^<\/?(b|strong|i|em|u|ins|s|strike|del|code|pre|a|blockquote|tg-spoiler|span)(\s[^>]*)?>$/i;
     out = out
         .split(/(<[^>]+>)/g)
-        .map((seg) => (seg.startsWith("<") && TELEGRAM_TAG_RE.test(seg) ? seg : escapeHtml(seg)))
+        .map((seg) => {
+            if (!seg.startsWith("<")) return escapeHtml(seg); // plain text → escape
+            if (TELEGRAM_TAG_RE.test(seg)) return seg;        // valid Telegram tag → keep
+            return "";                                          // unknown tag → drop
+        })
         .join("");
 
     return out.trim();

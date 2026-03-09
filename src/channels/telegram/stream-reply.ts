@@ -7,7 +7,7 @@ import { streamAgent } from "@/agent/index.ts";
 import { sendMessage, editMessage, deleteMessage, setMessageReaction, sendTyping } from "@/channels/telegram/api.ts";
 import { mdToHtml, splitMarkdown, stripHtml } from "@/channels/telegram/format.ts";
 import { saveSemanticTurn, summarizeAssistantResponse, extractToolsUsed } from "@/channels/semantic-store.ts";
-import { TOOL_LABELS, toolInputPreview } from "@/channels/telegram/tool-progress.ts";
+import { TOOL_LABELS, toolInputPreview } from "@/utils/tool-progress.ts";
 import { log } from "@/logs/logger.ts";
 import { sleep } from "@/channels/telegram/api-utils.ts";
 
@@ -54,13 +54,18 @@ export async function streamReply(
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let firstToken = true;
 
-    const reasoningTagCfg = config.llm.reasoningTag?.trim();
-    const thinkStripRe = reasoningTagCfg
-        ? new RegExp(`<${reasoningTagCfg}>[\\s\\S]*?<\\/${reasoningTagCfg}>\\n?`, "gi")
-        : null;
+    // Note: reasoning tag stripping (<think>…</think>) is handled upstream by
+    // extractReasoningMiddleware in build-params.ts — textStream never contains
+    // raw reasoning tokens, so no manual regex strip is needed here.
 
     const flushToTelegram = async (): Promise<void> => {
-        const cleanText = thinkStripRe ? responseText.replace(thinkStripRe, "").trim() : responseText;
+        let cleanText = responseText.trim();
+        // Strip any tool-call XML blocks the model may be streaming as raw text
+        cleanText = cleanText.replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke>/gi, "")
+            .replace(/<parameter\b[^>]*>[\s\S]*?<\/parameter>/gi, "")
+            .replace(/<\/[\w]+:[\w]+>/gi, "")
+            .replace(/<[\w]+:[\w]+[^>]*>/gi, "")
+            .trim();
         if (!cleanText) return;
         const safe = cleanText.length > 3900 ? cleanText.slice(0, 3897) + "…" : cleanText;
         if (responseMsgId) {
@@ -78,8 +83,12 @@ export async function streamReply(
     const onToolCall = async (toolName: string, input: unknown): Promise<void> => {
         const label = TOOL_LABELS[toolName] ?? toolName.replace(/_/g, " ");
         const preview = toolInputPreview(input);
-        const text = preview
-            ? `⚙️ <b>${label}</b>\n<code>${preview.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`
+        // Escape HTML entities in the preview — it may contain paths, URLs, code
+        const safePreview = preview
+            ? preview.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            : "";
+        const text = safePreview
+            ? `⚙️ <b>${label}</b>\n<code>${safePreview}</code>`
             : `⚙️ <b>${label}</b>`;
         toolBubbleId = await sendMessage(token, chatId, text, "HTML").catch(() => null);
     };
@@ -148,7 +157,15 @@ export async function streamReply(
         return;
     }
 
-    const chunks = splitMarkdown(replyText).map(mdToHtml);
+    // Filter out chunks that became empty after stripping tool-call XML
+    const chunks = splitMarkdown(replyText).map(mdToHtml).filter(c => c.trim().length > 0);
+    if (chunks.length === 0) {
+        // The entire reply was tool-call XML leaked into the text stream — nothing to show
+        logger.info(`[agent] reply was only tool-call XML, suppressing empty send for chatId=${chatId}`);
+        if (responseMsgId) await deleteMessage(token, chatId, responseMsgId).catch(() => { });
+        await setMessageReaction(token, chatId, rawMsg.message_id, "✅").catch(() => { });
+        return;
+    }
     const [first, ...rest] = chunks;
     if (responseMsgId) {
         await editMessage(token, chatId, responseMsgId, first, "HTML").catch(() => editMessage(token, chatId, responseMsgId!, stripHtml(first)));

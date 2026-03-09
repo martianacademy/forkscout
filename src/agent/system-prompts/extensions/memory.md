@@ -1,3 +1,4 @@
+{{metadata}} : src/agent/system-prompts/extensions/memory.md - Before accessing or modifying memory, read this
 # Memory Usage Guide (MANDATORY)
 
 Use for session startup, non-trivial work, and post-task storage.
