@@ -1,4 +1,4 @@
-/* src/index.css — Forkscout Window global styles */
+/* index.css — Forkscout Window standalone */
 
 *,
 *::before,
@@ -10,15 +10,13 @@
 
 :root {
     --bg: #0f0f11;
-    --bg2: #1a1a1f;
-    --bg3: #25252c;
-    --border: #2e2e38;
+    --surface: #1a1a1f;
+    --surface2: #25252c;
+    --border: #2a2a3a;
     --accent: #7c6af7;
     --accent-dim: #4e43a8;
-    --text: #e8e8ed;
-    --text-dim: #888899;
-    --user-bg: #1e1b40;
-    --assistant-bg: #1a1a1f;
+    --text: #e4e4ed;
+    --muted: #7a7a8e;
     --error: #f87171;
     --radius: 12px;
     --radius-sm: 8px;
@@ -36,8 +34,13 @@ body,
 body {
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     line-height: 1.5;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
 }
 
 ::-webkit-scrollbar {

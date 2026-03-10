@@ -1,0 +1,136 @@
+/* HistorySidebar.module.css */
+.root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--bg);
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.closeBtn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+}
+
+.newBtn {
+    margin: 12px 12px 8px;
+    padding: 9px;
+    border-radius: 10px;
+    border: 1px dashed var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.newBtn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.empty {
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 24px;
+}
+
+.list {
+    list-style: none;
+    margin: 0;
+    padding: 0 8px 12px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 8px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.12s;
+    margin-bottom: 2px;
+}
+
+.item:hover {
+    background: var(--surface);
+}
+
+.active {
+    background: color-mix(in srgb, var(--accent) 15%, transparent) !important;
+}
+
+.itemContent {
+    flex: 1;
+    min-width: 0;
+}
+
+.itemTitle {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.itemMeta {
+    display: flex;
+    gap: 8px;
+    margin-top: 3px;
+}
+
+.itemProvider {
+    font-size: 0.72rem;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.itemTime {
+    font-size: 0.72rem;
+    color: var(--muted);
+    flex-shrink: 0;
+}
+
+.deleteBtn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 4px;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.item:hover .deleteBtn {
+    opacity: 1;
+}
+
+.deleteBtn:hover {
+    color: #f87171;
+}
