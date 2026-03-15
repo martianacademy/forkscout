@@ -27,6 +27,12 @@ export async function planTask(
 ): Promise<TaskPlan | null> {
     if (userMessage.trim().length < 20) return null; // skip trivial messages
 
+    // Explicitly check for models/providers known to fail rigorous structured output
+    if ((model as any).provider?.includes("lmstudio") || (model as any).provider?.includes("ollama")) {
+        logger.info(`[planner] skipping structured planning (unsupported on ${(model as any).provider})`);
+        return null;
+    }
+
     try {
         const result = await generateText({
             model,

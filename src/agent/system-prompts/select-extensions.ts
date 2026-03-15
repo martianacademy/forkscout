@@ -1,6 +1,7 @@
 // src/agent/system-prompts/select-extensions.ts — Select task-relevant prompt modules to inject automatically.
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { getConfig } from "@/config.ts";
 
 const EXTENSIONS_DIR = resolve(import.meta.dir, "extensions");
 
@@ -43,6 +44,7 @@ const ORDER = [
     "error-repair.md",
     "tool-error-recovery.md",
     "memory.md",
+    "memory-instructions.md",
     "task-orchestration.md",
     "security-and-trust.md",
     "state-persistence.md",
@@ -58,6 +60,10 @@ export function buildRelevantExtensionsBlock(userMessage: string, role: Role): s
 
     // Always inject anti-patterns — hallucination/narration rules apply to every message type.
     selected.add("anti-patterns.md");
+
+    // Inject memory instructions when memory is enabled in config
+    const config = getConfig();
+    if (config.memory?.enabled) selected.add("memory-instructions.md");
 
     for (const rule of RULES) {
         if (rule.pattern.test(text)) {

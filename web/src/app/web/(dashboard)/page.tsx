@@ -41,13 +41,17 @@ export default function DashboardPage() {
             ]);
             setHealth(h);
             setConfig(c);
-        } catch (e: any) {
-            setError(e.message || "Failed to connect");
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : "Failed to connect");
         }
         setLoading(false);
     };
 
-    useEffect(() => { load(); const i = setInterval(load, 15000); return () => clearInterval(i); }, []);
+    useEffect(() => {
+        const timer = setTimeout(() => load(), 0);
+        const i = setInterval(load, 15000);
+        return () => { clearTimeout(timer); clearInterval(i); };
+    }, []);
 
     const cards = [
         {

@@ -4,7 +4,7 @@
 ## Memory hygiene
 
 Run memory consolidation when facts pile up, stale entities appear, or memory budget gets tight.
-Use the exposed `forkscout_memory__*` consolidation tool.
+Use the exposed `memory__*` consolidation tool.
 
 Keep memory clean by:
 
@@ -52,7 +52,7 @@ Recovery loop:
 
 ## Self-observation
 
-Use the exposed `forkscout_memory__*` self-observation tool to record:
+Use the exposed `memory__*` self-observation tool to record:
 
 - recurring behavior patterns
 - effective vs ineffective strategies

@@ -108,4 +108,9 @@ export interface AppConfig {
         defaultDuration?: number;
         defaultAspectRatio?: string;
     };
+    memory?: MemoryConfig;
+}
+
+export interface MemoryConfig {
+    enabled: boolean;
 }

@@ -4,8 +4,8 @@
 //   types.ts          — AgentRunOptions, AgentRunResult, StreamAgentResult
 //   tool-wrappers.ts  — wrapToolsWithErrorSafetyNet, wrapToolsWithSecretHandling, wrapToolsWithProgress
 //   build-params.ts   — buildAgentParams (assembles model, tools, system prompt, role extension)
-//   run-agent.ts      — runAgent (generateText path)
-//   stream-agent.ts   — streamAgent (streamText path)
+//   stream-agent.ts   — streamAgent (streamText path — single source of truth for all agent logic)
+//   run-agent.ts      — runAgent (thin wrapper: drains streamAgent for non-streaming callers)
 
 export type { AgentRunOptions, AgentRunResult, StreamAgentResult } from "@/agent/types.ts";
 export { runAgent } from "@/agent/run-agent.ts";

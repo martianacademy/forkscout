@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { motion, type Variants } from "framer-motion";
+import { motion } from "framer-motion";
 import { Layers } from "lucide-react";
 import { providers, badgeStyle } from "./providers-data";
 
@@ -15,13 +15,7 @@ const codeLines = [
     { text: "}", cls: "text-muted-foreground" },
 ];
 
-const fadeBlur: Variants = {
-    hidden: { opacity: 0, y: 24 },
-    show: {
-        opacity: 1, y: 0,
-        transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] },
-    },
-};
+
 
 export function ProvidersSection() {
     return (
@@ -58,7 +52,7 @@ export function ProvidersSection() {
             <div
                 className="mb-14 flex flex-wrap justify-center gap-3"
             >
-                {providers.map((p, i) => (
+                {providers.map((p) => (
                     <motion.span
                         key={p.slug}
                         whileHover={{ y: -2, scale: 1.06 }}

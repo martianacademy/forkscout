@@ -30,11 +30,14 @@ export default function EnvPage() {
         try {
             const data = await apiFetch<{ aliases: string[] }>("/api/secrets");
             setAliases(data.aliases ?? []);
-        } catch (e: any) { setError(e.message); }
+        } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
         setLoading(false);
     }, []);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const timer = setTimeout(() => load(), 0);
+        return () => clearTimeout(timer);
+    }, [load]);
 
     const addSecret = async () => {
         if (!newAlias.trim() || !newValue.trim()) return;
@@ -48,7 +51,7 @@ export default function EnvPage() {
             setTimeout(() => setSuccess(""), 3000);
             setNewAlias(""); setNewValue(""); setDialogOpen(false);
             await load();
-        } catch (e: any) { setError(e.message); }
+        } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
         setAdding(false);
     };
 
@@ -59,7 +62,7 @@ export default function EnvPage() {
             setSuccess(`Secret "${alias}" deleted`);
             setTimeout(() => setSuccess(""), 3000);
             await load();
-        } catch (e: any) { setError(e.message); }
+        } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
     };
 
     return (

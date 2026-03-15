@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, type Variants } from "framer-motion";
+import { motion } from "framer-motion";
 import {
     Terminal, Brain, Plug, Shield, RefreshCw,
     MessageSquare, Search, FileCode, Globe,
@@ -32,10 +32,7 @@ const colors: Record<string, ColorDef> = {
     teal: { icon: "text-teal-500 dark:text-teal-400", bg: "bg-teal-500/10", ring: "group-hover:ring-teal-500/30", glow: "group-hover:shadow-teal-500/10", border: "group-hover:border-teal-500/30" },
 };
 
-const fadeBlur: Variants = {
-    hidden: { opacity: 0, y: 30 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] } },
-};
+
 
 export function FeaturesSection() {
     return (
@@ -57,13 +54,13 @@ export function FeaturesSection() {
 
             {/* Bento grid */}
             <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {features.map((f, i) => <BentoCard key={f.title} feature={f} index={i} />)}
+                {features.map((f) => <BentoCard key={f.title} feature={f} />)}
             </div>
         </section>
     );
 }
 
-function BentoCard({ feature: f, index: i }: { feature: typeof features[0]; index: number }) {
+function BentoCard({ feature: f }: { feature: typeof features[0] }) {
     const c = colors[f.color];
     return (
         <motion.div whileHover={{ y: -4, scale: 1.01 }}

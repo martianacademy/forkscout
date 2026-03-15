@@ -183,7 +183,7 @@
             },
             "lmstudio": {
                 "fast": "qwen/qwen3-coder-next",
-                "balanced": "zai-org/glm-4.7-flash",
+                "balanced": "qwen/qwen3-coder-next",
                 "powerful": "qwen/qwen3-coder-next",
                 "vision": "qwen/qwen3-coder-next",
                 "summarizer": "qwen/qwen3-coder-next"
@@ -243,5 +243,8 @@
         "defaultSize": "1024x1024",
         "defaultQuality": "hd",
         "defaultStyle": "vivid"
+    },
+    "memory": {
+        "enabled": true
     }
 }

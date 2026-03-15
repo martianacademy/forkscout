@@ -50,8 +50,9 @@ export default function ChatPage() {
             });
 
             if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: res.statusText }));
-                setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${(err as Record<string, any>).error?.message || (err as Record<string, any>).error || res.statusText}` }]);
+                const err = await res.json().catch(() => ({ error: res.statusText })) as { error?: { message?: string } | string };
+                const msg = typeof err.error === "object" ? err.error?.message : err.error;
+                setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${msg || res.statusText}` }]);
                 setStreaming(false);
                 return;
             }
@@ -59,7 +60,7 @@ export default function ChatPage() {
             // Handle streaming SSE response
             const reader = res.body?.getReader();
             if (!reader) {
-                const data = await res.json() as Record<string, any>;
+                const data = await res.json() as { choices?: { message?: { content?: string } }[] };
                 const reply = data.choices?.[0]?.message?.content ?? JSON.stringify(data);
                 setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
                 setStreaming(false);
@@ -84,7 +85,7 @@ export default function ChatPage() {
                     const payload = trimmed.slice(6);
                     if (payload === "[DONE]") continue;
                     try {
-                        const chunk = JSON.parse(payload) as Record<string, any>;
+                        const chunk = JSON.parse(payload) as { choices?: { delta?: { content?: string } }[] };
                         const delta = chunk.choices?.[0]?.delta?.content;
                         if (typeof delta === "string") {
                             assistantContent += delta;
@@ -110,9 +111,9 @@ export default function ChatPage() {
                 if (last?.timestamp === -1) copy[copy.length - 1] = { ...last, timestamp: Date.now() };
                 return copy;
             });
-        } catch (e: any) {
+        } catch (e: unknown) {
             setMessages((prev) => [...prev, {
-                role: "assistant", content: `Connection error: ${e.message || "Failed to reach agent"}`,
+                role: "assistant", content: `Connection error: ${e instanceof Error ? e.message : "Failed to reach agent"}`,
             }]);
         }
         setStreaming(false);

@@ -9,6 +9,7 @@
 
 import { generateText } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
+import type { AppConfig } from "@/config.ts";
 import { log } from "@/logs/logger.ts";
 
 const logger = log("memory-hooks");
@@ -27,16 +28,18 @@ export function buildMemoryStartupMessage(
     userMessage: string,
     sessionKey: string,
     isFreshSession: boolean,
+    config?: AppConfig,
 ): ModelMessage | null {
     if (!isFreshSession) return null;
+    if (!config?.memory?.enabled) return null;
 
     // Extract a short topic hint from the user message (first 10 words)
     const topic = userMessage.trim().split(/\s+/).slice(0, 10).join(" ");
 
     const content = [
         "⚡ MANDATORY FIRST STEP — execute these tool calls NOW before reading the user message:",
-        `1. forkscout_memory__context  { action: "get", session_id: "${sessionKey}" }`,
-        `2. forkscout_memory__recall   { query: "${topic}" }`,
+        `1. memory__context  { action: "get", session_id: "${sessionKey}" }`,
+        `2. memory__recall   { query: "${topic}" }`,
         "After both results are in your context, proceed with the user's request.",
         "Skipping this = hallucinating prior context. Do not skip.",
     ].join("\n");
@@ -55,22 +58,33 @@ export interface AutoSaveOptions {
     sessionKey: string;
     channel?: string;
     maxTokens?: number;
+    config?: AppConfig;
 }
 
 /**
  * After a task completes, runs a single lightweight generateText call that:
  *   - gets a summary of what was done
- *   - calls forkscout_memory__observe + forkscout_memory__context to save it
+ *   - calls memory__observe + memory__context to save it
  *
  * Only fires when toolCallCount >= 2 (non-trivial task) to avoid spamming
  * memory with simple chat turns.
  *
  * Runs fire-and-forget — does NOT block the response to the user.
+ * Uses a sequential queue so rapid calls don't spawn concurrent LLM requests.
  */
-export async function autoSaveMemory(opts: AutoSaveOptions): Promise<void> {
-    const { model, systemMessage, conversationMessages, responseMessages, toolCallCount, sessionKey, channel, maxTokens } = opts;
+let saveQueue: Promise<void> = Promise.resolve();
 
-    if (toolCallCount < 2) return; // trivial turn — skip
+export async function autoSaveMemory(opts: AutoSaveOptions): Promise<void> {
+    if (opts.toolCallCount < 2) return; // trivial turn — skip
+    if (!opts.config?.memory?.enabled) return; // memory disabled — skip
+
+    // Enqueue — each save waits for the previous one to finish
+    saveQueue = saveQueue.then(() => doSaveMemory(opts)).catch(() => {});
+    return saveQueue;
+}
+
+async function doSaveMemory(opts: AutoSaveOptions): Promise<void> {
+    const { model, systemMessage, conversationMessages, responseMessages, toolCallCount, sessionKey, channel, maxTokens } = opts;
 
     logger.info(`[memory-hooks] auto-save triggered (${toolCallCount} tool calls, session=${sessionKey})`);
 
@@ -78,13 +92,13 @@ export async function autoSaveMemory(opts: AutoSaveOptions): Promise<void> {
         "MEMORY SAVE STEP — the previous task just completed.",
         "Your ONLY job now is to save what was learned:",
         "",
-        "1. Call `forkscout_memory__context` with:",
+        "1. Call `memory__context` with:",
         `   { action: "push", session_id: "${sessionKey}", content: "<1-sentence summary of what was just done>", event_type: "action" }`,
         "",
-        "2. If a bug was fixed or root cause found → call `forkscout_memory__observe` with:",
+        "2. If a bug was fixed or root cause found → call `memory__observe` with:",
         "   user: what the user asked, assistant: what you did + root cause + solution",
         "",
-        "3. If a new entity/fact was discovered → call `forkscout_memory__remember`",
+        "3. If a new entity/fact was discovered → call `memory__remember`",
         "",
         "4. Reply with only: `✅ memory saved` — nothing else.",
         "",

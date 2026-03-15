@@ -2,7 +2,7 @@
 # Memory Usage Guide (MANDATORY)
 
 Use for session startup, non-trivial work, and post-task storage.
-Memory MCP tools use the `forkscout_memory__` prefix.
+Memory tools use the `memory__` prefix (e.g. `memory__recall`, `memory__observe`, `memory__remember`, `memory__context`).
 
 ━━━━━━━━━━━━━━━━━━
 SESSION STARTUP

@@ -15,10 +15,13 @@ import { getSkills } from "@/skills/auto_discover_skills.ts";
 import { sanitizeForPrompt } from "@/utils/sanitize-messages.ts";
 import { sanitizeUserMessage } from "@/utils/secrets.ts";
 import { stripMedia } from "@/utils/sanitize-messages.ts";
+import { listAliases } from "@/secrets/vault.ts";
 import {
     wrapToolsWithSecretHandling,
     wrapToolsWithErrorSafetyNet,
 } from "@/agent/tool-wrappers.ts";
+import { memoryTools } from "@/tools/memory_tools.ts";
+import { load_skill_tools } from "@/tools/load_skill_tools.ts";
 import type { AgentRunOptions } from "@/agent/types.ts";
 import type { ModelMessage } from "ai";
 
@@ -66,10 +69,12 @@ export async function buildAgentParams(config: AppConfig, options: AgentRunOptio
     const skills = getSkills(config);
 
     const excluded = new Set(options.excludeTools ?? []);
-    // Bootstrap tools only — injected at every step (src/tools/ + MCP bootstrap).
+    // Bootstrap tools only — injected at every step (src/tools/ + MCP bootstrap + memory if enabled).
     // Extended tools (.agents/tools/) are available but not pre-loaded — agent calls project_sourcemap_tools to find them.
+    const memTools = config.memory?.enabled ? memoryTools : {};
+    const skillTools = skills.length > 0 ? { load_skill_tools } : {};
     const rawTools = Object.fromEntries(
-        Object.entries({ ...bootstrapTools, ...bootstrapMcpTools }).filter(([k]) => !excluded.has(k))
+        Object.entries({ ...bootstrapTools, ...bootstrapMcpTools, ...memTools, ...skillTools }).filter(([k]) => !excluded.has(k))
     );
 
     const secretSafeTools = wrapToolsWithSecretHandling(rawTools);
@@ -140,10 +145,23 @@ export async function buildAgentParams(config: AppConfig, options: AgentRunOptio
         year: "numeric", month: "long", day: "numeric",
         hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
     });
-    // dynamicPrompt = everything that changes per-request (time, extensions, role, extra).
+    // vaultAliases: live list of stored secret aliases — always fresh, never cached.
+    // Injected here (not in baseIdentity) so vault add/remove is reflected instantly.
+    const vaultAliases = (() => {
+        const aliases = listAliases();
+        if (aliases.length === 0) return "Vault: empty — no secrets stored yet.";
+        return `Vault aliases (${aliases.length}): ${aliases.map(a => `\`{{secret:${a}}}\``).join(", ")}`;
+    })();
+    // skillsBlock: minimal hint — full details loaded on demand via load_skill_tools.
+    const skillsBlock = skills.length > 0
+        ? `${skills.length} skill(s) installed. Use \`load_skill_tools({ action: "search", query: "..." })\` to find relevant ones.`
+        : "";
+    // dynamicPrompt = everything that changes per-request (time, extensions, role, vault, skills, extra).
     // Kept separate from baseIdentity so cache_control is only placed on the stable block.
     const dynamicPrompt = [
         `Time: ${currentTime}`,
+        vaultAliases,
+        skillsBlock,
         projectContext,
         config.agent.systemPromptExtra?.trim(),
         relevantExtensions,

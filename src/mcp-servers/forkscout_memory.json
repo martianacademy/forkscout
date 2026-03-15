@@ -1,6 +1,6 @@
 {
     "name": "forkscout_memory",
-    "enabled": true,
+    "enabled": false,
     "bootstrap": true,
     "url": "http://localhost:3211/mcp"
 }

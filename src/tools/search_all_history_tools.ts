@@ -26,7 +26,7 @@ export const search_all_history = tool({
         "Search ALL past conversations across every channel and session by keyword. " +
         "WHEN TO USE: recalling something from a past conversation when you don't know which channel or session it was in; " +
         "finding when a user last mentioned a topic, a past decision, or a config value that was discussed. " +
-        "WHEN NOT TO USE: searching memory entities or facts — use forkscout_memory__search_entities instead; " +
+        "WHEN NOT TO USE: searching memory entities or facts — use memory__recall instead; " +
         "you already know the session — pass session_filter to restrict search. " +
         "Use specific multi-word queries: 'api key telegram setup' beats 'api'. " +
         "Returns ranked results (score = keyword hits) with session name, timestamp, and full turn text. " +

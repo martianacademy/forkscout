@@ -1,16 +1,10 @@
 "use client";
 
-import { motion, type Variants } from "framer-motion";
+import { motion } from "framer-motion";
 import { Wrench } from "lucide-react";
 import { techStack } from "./tech-data";
 
-const fadeBlur: Variants = {
-    hidden: { opacity: 0, y: 24 },
-    show: {
-        opacity: 1, y: 0,
-        transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] },
-    },
-};
+
 
 export function TechStackSection() {
     return (
@@ -42,7 +36,7 @@ export function TechStackSection() {
             <div
                 className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
             >
-                {techStack.map((tech, i) => (
+                {techStack.map((tech) => (
                     <motion.div
                         key={tech.name}
                         whileHover={{ y: -4, scale: 1.02 }}

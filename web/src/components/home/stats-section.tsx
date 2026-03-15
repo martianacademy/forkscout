@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+
 import { Cpu, Radio, Wrench, Database, Zap, Globe } from "lucide-react";
 
 const stats = [
@@ -31,7 +31,7 @@ function useCountUp(end: number, started: boolean, duration = 1500) {
     return count;
 }
 
-function StatCard({ stat, index }: { stat: typeof stats[0]; index: number }) {
+function StatCard({ stat }: { stat: typeof stats[0] }) {
     const [started, setStarted] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     const count = useCountUp(stat.value, started);
@@ -65,7 +65,7 @@ export function StatsSection() {
             <div className="mb-16 h-px bg-linear-to-r from-transparent via-purple-500/20 to-transparent" />
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-                {stats.map((s, i) => <StatCard key={s.label} stat={s} index={i} />)}
+                {stats.map((s) => <StatCard key={s.label} stat={s} />)}
             </div>
 
             <div className="mt-16 h-px bg-linear-to-r from-transparent via-cyan-500/20 to-transparent" />

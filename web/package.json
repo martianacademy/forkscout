@@ -7,7 +7,8 @@
     "dev": "bun run stop && rm -rf .next && next dev --turbopack",
     "build": "next build",
     "start": "bun run stop && next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

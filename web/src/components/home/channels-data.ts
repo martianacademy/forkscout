@@ -4,7 +4,7 @@ import {
     SiGmail, SiGooglechat, SiLine, SiViber, SiMessenger,
     SiInstagram, SiX, SiReddit, SiYoutube, SiTwilio,
 } from "react-icons/si";
-import { Terminal, Globe, MessageSquare, Phone, PhoneCall } from "lucide-react";
+import { Terminal, Globe, MessageSquare, PhoneCall } from "lucide-react";
 
 export interface ChannelItem {
     icon: IconType | React.ComponentType<{ className?: string }>;

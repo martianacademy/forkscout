@@ -38,7 +38,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
     }, []);
 
-    useEffect(() => { refresh(); }, [refresh]);
+    useEffect(() => {
+        const timer = setTimeout(() => refresh(), 0);
+        return () => clearTimeout(timer);
+    }, [refresh]);
 
     const login = useCallback((t: string) => {
         storeToken(t);

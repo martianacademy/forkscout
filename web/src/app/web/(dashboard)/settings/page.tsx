@@ -26,19 +26,25 @@ export default function SettingsPage() {
             const pretty = JSON.stringify(data, null, 2);
             setRaw(pretty);
             setSaved(pretty);
-        } catch (e: any) {
-            setError(e.message || "Failed to load config");
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : "Failed to load config");
         }
         setLoading(false);
     }, []);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const timer = setTimeout(() => load(), 0);
+        return () => clearTimeout(timer);
+    }, [load]);
 
     // Validate JSON on change
     useEffect(() => {
-        if (!raw.trim()) { setJsonError(""); return; }
-        try { JSON.parse(raw); setJsonError(""); }
-        catch (e: any) { setJsonError(e.message); }
+        const timer = setTimeout(() => {
+            if (!raw.trim()) { setJsonError(""); return; }
+            try { JSON.parse(raw); setJsonError(""); }
+            catch (e: unknown) { setJsonError(e instanceof Error ? e.message : String(e)); }
+        }, 300);
+        return () => clearTimeout(timer);
     }, [raw]);
 
     const save = async () => {
@@ -54,8 +60,8 @@ export default function SettingsPage() {
             setSaved(raw);
             setSuccess("Config saved successfully");
             setTimeout(() => setSuccess(""), 3000);
-        } catch (e: any) {
-            setError(e.message || "Failed to save");
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : "Failed to save");
         }
         setSaving(false);
     };
